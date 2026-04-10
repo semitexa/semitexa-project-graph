@@ -1,0 +1,32 @@
+{
+    "name": "semitexa/project-graph",
+    "description": "Semitexa Project Graph — persistent codebase knowledge graph for impact analysis and LLM context",
+    "type": "semitexa-module",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Semitexa",
+            "email": "support@semitexa.com"
+        }
+    ],
+    "require": {
+        "php": "^8.4",
+        "semitexa/core": "*",
+        "semitexa/orm": "*",
+        "nikic/php-parser": "^5.0"
+    },
+    "require-dev": {
+        "swoole/ide-helper": "^5.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "Semitexa\\ProjectGraph\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Semitexa\\ProjectGraph\\Tests\\": "tests/"
+        }
+    },
+    "keywords": ["semitexa", "project-graph", "code-analysis", "knowledge-graph"]
+}
