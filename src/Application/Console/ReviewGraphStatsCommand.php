@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Console;
 
 use Semitexa\Core\Attribute\AsCommand;
-use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Console\Command\BaseCommand;
-use Semitexa\Orm\OrmManager;
+use Semitexa\Orm\Connection\ConnectionRegistry;
 use Semitexa\ProjectGraph\Application\Db\GraphStorage;
+use Semitexa\ProjectGraph\Application\Support\UsesProjectGraphConnection;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
@@ -19,7 +19,18 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 final class ReviewGraphStatsCommand extends BaseCommand
 {
-    #[InjectAsReadonly] private OrmManager $orm;
+    use UsesProjectGraphConnection;
+
+    public function __construct(
+        private readonly ConnectionRegistry $connections,
+    ) {
+        parent::__construct();
+    }
+
+    protected function configure(): void
+    {
+        $this->addOption('json', null, \Symfony\Component\Console\Input\InputOption::VALUE_NONE, 'Output as JSON');
+    }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
@@ -34,6 +45,21 @@ final class ReviewGraphStatsCommand extends BaseCommand
         $nodeCounts = $storage->nodes->countByType();
         $edgeCount = $storage->edges->countAll();
         $fileCount = count($storage->fileIndex->getAll());
+
+        $payload = [
+            'last_generated' => $lastUpdate !== null ? date('c', (int) $lastUpdate) : null,
+            'indexed_files' => $fileCount,
+            'total_nodes' => (int) ($totalNodes ?: 0),
+            'live_nodes' => $storage->nodes->countAll(),
+            'total_edges' => (int) ($totalEdges ?: $edgeCount),
+            'live_edges' => $edgeCount,
+            'node_counts' => $nodeCounts,
+        ];
+
+        if ($input->getOption('json')) {
+            $output->writeln(json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            return self::SUCCESS;
+        }
 
         $io->title('Review Graph Statistics');
 
@@ -67,22 +93,6 @@ final class ReviewGraphStatsCommand extends BaseCommand
 
     private function createStorage(): GraphStorage
     {
-        $adapter = $this->orm->getAdapter();
-        $txManager = $this->orm->getTransactionManager();
-        $mapperRegistry = $this->orm->getMapperRegistry();
-        $hydrator = $this->orm->getTableModelHydrator();
-        $metadataRegistry = $this->orm->getTableModelMetadataRegistry();
-        $relationLoader = $this->orm->getTableModelRelationLoader();
-        $writeEngine = $this->orm->getAggregateWriteEngine();
-
-        return new GraphStorage(
-            $adapter,
-            $txManager,
-            $mapperRegistry,
-            $hydrator,
-            $metadataRegistry,
-            $relationLoader,
-            $writeEngine,
-        );
+        return $this->createProjectGraphStorage($this->connections);
     }
 }

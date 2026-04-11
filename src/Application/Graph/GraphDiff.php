@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Graph;
 
+use Semitexa\ProjectGraph\Domain\Model\Edge;
+use Semitexa\ProjectGraph\Domain\Model\Node;
+
 final class GraphDiff
 {
     /** @var list<Node> */

@@ -5,17 +5,16 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Console;
 
 use Semitexa\Core\Attribute\AsCommand;
-use Semitexa\Core\Attribute\Config;
-use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Console\Command\BaseCommand;
-use Semitexa\Orm\OrmManager;
-use Semitexa\ProjectGraph\Application\Db\GraphStorage;
 use Semitexa\ProjectGraph\Application\Extractor\ExtractorPipeline;
 use Semitexa\ProjectGraph\Application\Graph\GraphBuilder;
 use Semitexa\ProjectGraph\Application\Index\IncrementalEngine;
 use Semitexa\ProjectGraph\Application\Parser\PhpParserAdapter;
 use Semitexa\ProjectGraph\Application\Scanner\FileScanner;
 use Semitexa\ProjectGraph\Application\Scanner\IgnorePatternLoader;
+use Semitexa\Orm\Connection\ConnectionRegistry;
+use Semitexa\ProjectGraph\Application\Db\GraphStorage;
+use Semitexa\ProjectGraph\Application\Support\UsesProjectGraphConnection;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
@@ -27,11 +26,13 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 final class ReviewGraphGenerateCommand extends BaseCommand
 {
-    #[InjectAsReadonly]
-    private OrmManager $orm;
+    use UsesProjectGraphConnection;
 
-    #[Config(env: 'PROJECT_ROOT')]
-    private string $projectRoot;
+    public function __construct(
+        private readonly ConnectionRegistry $connections,
+    ) {
+        parent::__construct();
+    }
 
     protected function configure(): void
     {
@@ -48,8 +49,8 @@ final class ReviewGraphGenerateCommand extends BaseCommand
         $engine = $this->createEngine($storage);
 
         $result = $full
-            ? $engine->fullBuild($this->projectRoot)
-            : $engine->update($this->projectRoot);
+            ? $engine->fullBuild($this->getProjectRoot())
+            : $engine->update($this->getProjectRoot());
 
         if ($input->getOption('json')) {
             $output->writeln(json_encode($result->toArray(), JSON_PRETTY_PRINT));
@@ -85,23 +86,7 @@ final class ReviewGraphGenerateCommand extends BaseCommand
 
     private function createStorage(): GraphStorage
     {
-        $adapter = $this->orm->getAdapter();
-        $txManager = $this->orm->getTransactionManager();
-        $mapperRegistry = $this->orm->getMapperRegistry();
-        $hydrator = $this->orm->getTableModelHydrator();
-        $metadataRegistry = $this->orm->getTableModelMetadataRegistry();
-        $relationLoader = $this->orm->getTableModelRelationLoader();
-        $writeEngine = $this->orm->getAggregateWriteEngine();
-
-        return new GraphStorage(
-            $adapter,
-            $txManager,
-            $mapperRegistry,
-            $hydrator,
-            $metadataRegistry,
-            $relationLoader,
-            $writeEngine,
-        );
+        return $this->createProjectGraphStorage($this->connections);
     }
 
     private function createEngine(GraphStorage $storage): IncrementalEngine

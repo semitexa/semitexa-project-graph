@@ -52,5 +52,7 @@ interface QueryInterface
 
     public function countEdges(string $type, ?string $module = null): int;
 
+    public function countSatisfiedContracts(?string $module = null): int;
+
     public function countCrossModuleEdges(): int;
 }

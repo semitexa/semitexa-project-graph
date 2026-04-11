@@ -4,14 +4,16 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Db\Model;
 
+use Semitexa\Orm\Adapter\SqliteType;
 use Semitexa\Orm\Attribute\Column;
+use Semitexa\Orm\Attribute\Connection;
 use Semitexa\Orm\Attribute\Filterable;
 use Semitexa\Orm\Attribute\FromTable;
 use Semitexa\Orm\Attribute\Index;
 use Semitexa\Orm\Attribute\PrimaryKey;
-use Semitexa\Orm\Adapter\SqliteType;
 
 #[FromTable(name: 'graph_file_index')]
+#[Connection('project_graph')]
 #[Index(columns: 'module')]
 final readonly class GraphFileIndexTableModel
 {

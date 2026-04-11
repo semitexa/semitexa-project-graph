@@ -34,7 +34,7 @@ final class GraphEdgeMapper implements TableModelMapper
         assert($domainModel instanceof Edge);
 
         return new GraphEdgeTableModel(
-            id:        $domainModel->id ?? 0,
+            id:        $domainModel->id,
             source_id: $domainModel->sourceId,
             target_id: $domainModel->targetId,
             type:      $domainModel->type->value,

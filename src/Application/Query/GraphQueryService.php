@@ -342,6 +342,10 @@ final class GraphQueryService implements QueryInterface
 
         $modules = [];
         foreach ($allNodes as $node) {
+            if ($node->module === '') {
+                continue;
+            }
+
             $modules[$node->module] = ($modules[$node->module] ?? 0) + 1;
         }
 
@@ -367,7 +371,43 @@ final class GraphQueryService implements QueryInterface
 
     public function countEdges(string $type, ?string $module = null): int
     {
-        return count($this->storage->edges->findByType(EdgeType::tryFrom($type) ?? EdgeType::Calls, 100_000));
+        $edgeType = EdgeType::tryFrom($type) ?? EdgeType::Calls;
+        $edges = $this->storage->edges->findByType($edgeType, 100_000);
+
+        if ($module === null) {
+            return count($edges);
+        }
+
+        $count = 0;
+        foreach ($edges as $edge) {
+            $source = $this->storage->nodes->findById($edge->sourceId);
+            $target = $this->storage->nodes->findById($edge->targetId);
+
+            if (($source?->module === $module) || ($target?->module === $module)) {
+                $count++;
+            }
+        }
+
+        return $count;
+    }
+
+    public function countSatisfiedContracts(?string $module = null): int
+    {
+        $edges = $this->storage->edges->findByType(EdgeType::SatisfiesContract, 100_000);
+        $contracts = [];
+
+        foreach ($edges as $edge) {
+            $source = $this->storage->nodes->findById($edge->sourceId);
+            $target = $this->storage->nodes->findById($edge->targetId);
+
+            if ($module !== null && ($source?->module !== $module) && ($target?->module !== $module)) {
+                continue;
+            }
+
+            $contracts[$edge->targetId] = true;
+        }
+
+        return count($contracts);
     }
 
     public function countCrossModuleEdges(): int

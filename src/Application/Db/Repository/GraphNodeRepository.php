@@ -9,10 +9,10 @@ use Semitexa\Orm\Hydration\TableModelHydrator;
 use Semitexa\Orm\Hydration\TableModelRelationLoader;
 use Semitexa\Orm\Mapping\MapperRegistry;
 use Semitexa\Orm\Metadata\ColumnRef;
-use Semitexa\Orm\Metadata\Operator;
 use Semitexa\Orm\Metadata\TableModelMetadataRegistry;
 use Semitexa\Orm\Persistence\AggregateWriteEngine;
 use Semitexa\Orm\Query\Direction;
+use Semitexa\Orm\Query\Operator;
 use Semitexa\Orm\Query\TableModelQuery;
 use Semitexa\ProjectGraph\Application\Db\Model\GraphNodeTableModel;
 use Semitexa\ProjectGraph\Domain\Model\Node;
@@ -42,14 +42,14 @@ final class GraphNodeRepository
 
     public function findById(string $id): ?Node
     {
-        return $this->query->clone()
+        return $this->newQuery()
             ->where(ColumnRef::for(GraphNodeTableModel::class, 'id'), Operator::Equals, $id)
             ->fetchOneAs(Node::class, $this->mapperRegistry) ?: null;
     }
 
     public function findByFqcn(string $fqcn): ?Node
     {
-        return $this->query->clone()
+        return $this->newQuery()
             ->where(ColumnRef::for(GraphNodeTableModel::class, 'fqcn'), Operator::Equals, $fqcn)
             ->fetchOneAs(Node::class, $this->mapperRegistry) ?: null;
     }
@@ -57,7 +57,7 @@ final class GraphNodeRepository
     /** @return list<Node> */
     public function findByFile(string $filePath): array
     {
-        return $this->query->clone()
+        return $this->newQuery()
             ->where(ColumnRef::for(GraphNodeTableModel::class, 'file'), Operator::Equals, $filePath)
             ->fetchAllAs(Node::class, $this->mapperRegistry);
     }
@@ -65,7 +65,7 @@ final class GraphNodeRepository
     /** @return list<Node> */
     public function findByType(string $type, ?string $module = null): array
     {
-        $q = $this->query->clone()
+        $q = $this->newQuery()
             ->where(ColumnRef::for(GraphNodeTableModel::class, 'type'), Operator::Equals, $type);
         if ($module !== null && $module !== '') {
             $q->where(ColumnRef::for(GraphNodeTableModel::class, 'module'), Operator::Equals, $module);
@@ -76,7 +76,7 @@ final class GraphNodeRepository
     /** @return list<Node> */
     public function findByModule(string $module): array
     {
-        return $this->query->clone()
+        return $this->newQuery()
             ->where(ColumnRef::for(GraphNodeTableModel::class, 'module'), Operator::Equals, $module)
             ->fetchAllAs(Node::class, $this->mapperRegistry);
     }
@@ -84,7 +84,7 @@ final class GraphNodeRepository
     /** @return list<Node> */
     public function search(string $pattern, int $limit = 20): array
     {
-        return $this->query->clone()
+        return $this->newQuery()
             ->where(ColumnRef::for(GraphNodeTableModel::class, 'name'), Operator::Like, '%' . $pattern . '%')
             ->limit($limit)
             ->fetchAllAs(Node::class, $this->mapperRegistry);
@@ -93,12 +93,12 @@ final class GraphNodeRepository
     /** @return list<Node> */
     public function searchFull(string $query, int $limit = 20): array
     {
-        $byName = $this->query->clone()
+        $byName = $this->newQuery()
             ->where(ColumnRef::for(GraphNodeTableModel::class, 'name'), Operator::Like, '%' . $query . '%')
             ->limit($limit)
             ->fetchAllAs(Node::class, $this->mapperRegistry);
 
-        $byFqcn = $this->query->clone()
+        $byFqcn = $this->newQuery()
             ->where(ColumnRef::for(GraphNodeTableModel::class, 'fqcn'), Operator::Like, '%' . $query . '%')
             ->limit($limit)
             ->fetchAllAs(Node::class, $this->mapperRegistry);
@@ -143,10 +143,11 @@ final class GraphNodeRepository
     /** @return int count of deleted nodes */
     public function deleteByFile(string $filePath): int
     {
-        $count = (int) $this->adapter->execute(
+        $countResult = $this->adapter->execute(
             'SELECT COUNT(*) as cnt FROM graph_nodes WHERE file = :file',
             ['file' => $filePath],
-        )[0]['cnt'] ?? 0;
+        );
+        $count = (int) ($countResult->fetchOne()['cnt'] ?? 0);
 
         $this->adapter->execute(
             'DELETE FROM graph_nodes WHERE file = :file',
@@ -159,13 +160,13 @@ final class GraphNodeRepository
     public function countAll(): int
     {
         $result = $this->adapter->execute('SELECT COUNT(*) as cnt FROM graph_nodes');
-        return (int) ($result[0]['cnt'] ?? 0);
+        return (int) ($result->fetchOne()['cnt'] ?? 0);
     }
 
     /** @return array<string, int> type => count */
     public function countByType(): array
     {
-        $rows = $this->adapter->execute('SELECT type, COUNT(*) as cnt FROM graph_nodes GROUP BY type');
+        $rows = $this->adapter->execute('SELECT type, COUNT(*) as cnt FROM graph_nodes GROUP BY type')->fetchAll();
         $counts = [];
         foreach ($rows as $row) {
             $counts[$row['type']] = (int) $row['cnt'];
@@ -184,7 +185,12 @@ final class GraphNodeRepository
         $rows = $this->adapter->execute(
             'SELECT id FROM graph_nodes WHERE file = :file',
             ['file' => $filePath],
-        );
+        )->fetchAll();
         return array_map(fn($r) => $r['id'], $rows);
+    }
+
+    private function newQuery(): TableModelQuery
+    {
+        return clone $this->query;
     }
 }

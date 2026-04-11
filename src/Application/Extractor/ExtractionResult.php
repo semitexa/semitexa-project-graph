@@ -20,6 +20,14 @@ final class ExtractionResult
 
     public function addNode(Node $node): self
     {
+        if (isset($this->nodeIndex[$node->id])) {
+            $idx = $this->nodeIndex[$node->id];
+            $existing = $this->nodes[$idx];
+            $this->nodes[$idx] = $this->mergeNode($existing, $node);
+
+            return $this;
+        }
+
         $this->nodeIndex[$node->id] = count($this->nodes);
         $this->nodes[] = $node;
         return $this;
@@ -55,18 +63,61 @@ final class ExtractionResult
     public function merge(self $other): self
     {
         $result = new self();
-        $result->nodes = [...$this->nodes, ...$other->nodes];
-        $result->edges = [...$this->edges, ...$other->edges];
-        $result->nodeIndex = $this->nodeIndex;
-        $offset = count($this->nodes);
-        foreach ($other->nodeIndex as $id => $idx) {
-            $result->nodeIndex[$id] = $offset + $idx;
+
+        foreach ($this->nodes as $node) {
+            $result->addNode($node);
         }
+
+        foreach ($other->nodes as $node) {
+            $result->addNode($node);
+        }
+
+        foreach ($this->edges as $edge) {
+            $result->addEdge($edge);
+        }
+
+        foreach ($other->edges as $edge) {
+            $result->addEdge($edge);
+        }
+
         return $result;
     }
 
     public static function empty(): self
     {
         return new self();
+    }
+
+    private function mergeNode(Node $existing, Node $incoming): Node
+    {
+        $winner = $this->typePriority($incoming->type->value) >= $this->typePriority($existing->type->value)
+            ? $incoming
+            : $existing;
+        $loser = $winner === $incoming ? $existing : $incoming;
+
+        return new Node(
+            id:            $winner->id,
+            type:          $winner->type,
+            fqcn:          $winner->fqcn !== '' ? $winner->fqcn : $loser->fqcn,
+            file:          $winner->file !== '' ? $winner->file : $loser->file,
+            line:          $winner->line !== 0 ? $winner->line : $loser->line,
+            endLine:       $winner->endLine !== 0 ? $winner->endLine : $loser->endLine,
+            module:        $winner->module !== '' ? $winner->module : $loser->module,
+            metadata:      array_merge($loser->metadata, $winner->metadata),
+            isPlaceholder: $existing->isPlaceholder && $incoming->isPlaceholder,
+        );
+    }
+
+    private function typePriority(string $type): int
+    {
+        return match ($type) {
+            'command' => 220,
+            'payload', 'handler', 'service', 'event_listener', 'event', 'entity', 'repository', 'job',
+            'workflow', 'ai_skill', 'contract', 'pipeline_phase', 'slot_handler', 'auth_handler',
+            'data_provider', 'resource', 'component', 'module', 'namespace', 'file' => 180,
+            'route', 'method', 'property', 'constant', 'enum_case' => 140,
+            'class', 'interface', 'trait', 'enum' => 20,
+            default => 100,
+        };
     }
 }

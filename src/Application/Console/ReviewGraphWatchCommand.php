@@ -5,9 +5,8 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Console;
 
 use Semitexa\Core\Attribute\AsCommand;
-use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Console\Command\BaseCommand;
-use Semitexa\Orm\OrmManager;
+use Semitexa\Orm\Connection\ConnectionRegistry;
 use Semitexa\ProjectGraph\Application\Db\GraphStorage;
 use Semitexa\ProjectGraph\Application\Extractor\ExtractorPipeline;
 use Semitexa\ProjectGraph\Application\Graph\GraphBuilder;
@@ -15,6 +14,7 @@ use Semitexa\ProjectGraph\Application\Index\IncrementalEngine;
 use Semitexa\ProjectGraph\Application\Parser\PhpParserAdapter;
 use Semitexa\ProjectGraph\Application\Scanner\FileScanner;
 use Semitexa\ProjectGraph\Application\Scanner\IgnorePatternLoader;
+use Semitexa\ProjectGraph\Application\Support\UsesProjectGraphConnection;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
@@ -26,8 +26,13 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 final class ReviewGraphWatchCommand extends BaseCommand
 {
-    #[InjectAsReadonly] private OrmManager $orm;
-    #[\Semitexa\Core\Attribute\Config(env: 'PROJECT_ROOT')] private string $projectRoot;
+    use UsesProjectGraphConnection;
+
+    public function __construct(
+        private readonly ConnectionRegistry $connections,
+    ) {
+        parent::__construct();
+    }
 
     protected function configure(): void
     {
@@ -46,7 +51,7 @@ final class ReviewGraphWatchCommand extends BaseCommand
 
         if ($fullOnStart) {
             $io->text('Running full build...');
-            $result = $engine->fullBuild($this->projectRoot);
+            $result = $engine->fullBuild($this->getProjectRoot());
             $io->text(sprintf('Full build: %d files, +%d/-%d nodes, +%d/-%d edges (%dms)',
                 $result->filesScanned, $result->nodesAdded, $result->nodesRemoved,
                 $result->edgesAdded, $result->edgesRemoved, $result->duration));
@@ -63,7 +68,7 @@ final class ReviewGraphWatchCommand extends BaseCommand
         while ($running) {
             pcntl_signal_dispatch();
             try {
-                $result = $engine->update($this->projectRoot);
+                $result = $engine->update($this->getProjectRoot());
                 if (!$result->isNoChanges()) {
                     $io->text('[' . date('H:i:s') . '] Updated: ' . $result->filesScanned . ' files, +' . $result->nodesAdded . '/-' . $result->nodesRemoved . ' nodes');
                 }
@@ -85,23 +90,7 @@ final class ReviewGraphWatchCommand extends BaseCommand
 
     private function createStorage(): GraphStorage
     {
-        $adapter = $this->orm->getAdapter();
-        $txManager = $this->orm->getTransactionManager();
-        $mapperRegistry = $this->orm->getMapperRegistry();
-        $hydrator = $this->orm->getTableModelHydrator();
-        $metadataRegistry = $this->orm->getTableModelMetadataRegistry();
-        $relationLoader = $this->orm->getTableModelRelationLoader();
-        $writeEngine = $this->orm->getAggregateWriteEngine();
-
-        return new GraphStorage(
-            $adapter,
-            $txManager,
-            $mapperRegistry,
-            $hydrator,
-            $metadataRegistry,
-            $relationLoader,
-            $writeEngine,
-        );
+        return $this->createProjectGraphStorage($this->connections);
     }
 
     private function createEngine(GraphStorage $storage): IncrementalEngine

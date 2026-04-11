@@ -59,54 +59,34 @@ final class OrmExtractor implements ExtractorInterface
                     metadata: ['tableName' => $tableName],
                 ));
 
-                foreach ($classInfo->getAttributes(HasMany::class) as $relAttr) {
-                    $rel = $relAttr->newInstance();
-                    $target = $rel->target ?? null;
-                    if ($target !== null) {
-                        $result->addEdge(new Edge(
-                            sourceId: NodeId::forClass($classInfo->fqcn),
-                            targetId: NodeId::forClass($target),
-                            type:     EdgeType::HasRelation,
-                            metadata: ['relationType' => 'hasMany'],
-                        ));
-                    }
-                }
+                foreach ($classInfo->properties as $property) {
+                    foreach ($property->attributes as $relAttr) {
+                        $relationType = match ($relAttr->getName()) {
+                            HasMany::class => 'hasMany',
+                            BelongsTo::class => 'belongsTo',
+                            OneToOne::class => 'oneToOne',
+                            ManyToMany::class => 'manyToMany',
+                            default => null,
+                        };
 
-                foreach ($classInfo->getAttributes(BelongsTo::class) as $relAttr) {
-                    $rel = $relAttr->newInstance();
-                    $target = $rel->target ?? null;
-                    if ($target !== null) {
-                        $result->addEdge(new Edge(
-                            sourceId: NodeId::forClass($classInfo->fqcn),
-                            targetId: NodeId::forClass($target),
-                            type:     EdgeType::HasRelation,
-                            metadata: ['relationType' => 'belongsTo'],
-                        ));
-                    }
-                }
+                        if ($relationType === null) {
+                            continue;
+                        }
 
-                foreach ($classInfo->getAttributes(OneToOne::class) as $relAttr) {
-                    $rel = $relAttr->newInstance();
-                    $target = $rel->target ?? null;
-                    if ($target !== null) {
-                        $result->addEdge(new Edge(
-                            sourceId: NodeId::forClass($classInfo->fqcn),
-                            targetId: NodeId::forClass($target),
-                            type:     EdgeType::HasRelation,
-                            metadata: ['relationType' => 'oneToOne'],
-                        ));
-                    }
-                }
+                        $rel = $relAttr->newInstance();
+                        $target = $rel->target ?? null;
+                        if ($target === null) {
+                            continue;
+                        }
 
-                foreach ($classInfo->getAttributes(ManyToMany::class) as $relAttr) {
-                    $rel = $relAttr->newInstance();
-                    $target = $rel->target ?? null;
-                    if ($target !== null) {
                         $result->addEdge(new Edge(
                             sourceId: NodeId::forClass($classInfo->fqcn),
                             targetId: NodeId::forClass($target),
                             type:     EdgeType::HasRelation,
-                            metadata: ['relationType' => 'manyToMany'],
+                            metadata: [
+                                'relationType' => $relationType,
+                                'property' => $property->name,
+                            ],
                         ));
                     }
                 }
