@@ -45,7 +45,7 @@ final class ServiceExtractor implements ExtractorInterface
 
             foreach ($classInfo->getAttributes(SatisfiesServiceContract::class) as $attr) {
                 $instance = $attr->newInstance();
-                $contractFqcn = $instance->contract ?? null;
+                $contractFqcn = $instance->of ?? null;
                 if ($contractFqcn !== null) {
                     $result->addEdge(new Edge(
                         sourceId: NodeId::forClass($classInfo->fqcn),
@@ -58,7 +58,7 @@ final class ServiceExtractor implements ExtractorInterface
 
             foreach ($classInfo->getAttributes(SatisfiesRepositoryContract::class) as $attr) {
                 $instance = $attr->newInstance();
-                $contractFqcn = $instance->contract ?? null;
+                $contractFqcn = $instance->of ?? null;
                 if ($contractFqcn !== null) {
                     $result->addEdge(new Edge(
                         sourceId: NodeId::forClass($classInfo->fqcn),

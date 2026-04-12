@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Parser;
 
+use PhpParser\NodeFinder;
+use PhpParser\Node\Stmt\ClassLike;
+
 final class ParsedFile
 {
     /** @var array<int, mixed> */
@@ -44,16 +47,28 @@ final class ParsedFile
         }
 
         $this->classInfoCache = [];
+        $finder = new NodeFinder();
+        /** @var list<ClassLike> $classLikes */
+        $classLikes = $finder->findInstanceOf($this->ast, ClassLike::class);
 
-        foreach ($this->ast as $stmt) {
-            if ($stmt instanceof ClassLike && $stmt->namespacedName !== null) {
-                $fqcn = $stmt->namespacedName->toString();
-                try {
+        foreach ($classLikes as $stmt) {
+            if ($stmt->namespacedName === null) {
+                continue;
+            }
+
+            $fqcn = $stmt->namespacedName->toString();
+
+            try {
+                $exists = @class_exists($fqcn) || @interface_exists($fqcn) || @trait_exists($fqcn) || @enum_exists($fqcn);
+                if ($exists) {
                     $ref = new \ReflectionClass($fqcn);
                     $this->classInfoCache[$fqcn] = ClassInfo::fromReflection($ref, $this->path);
-                } catch (\ReflectionException) {
+                    continue;
                 }
+            } catch (\Throwable) {
             }
+
+            $this->classInfoCache[$fqcn] = ClassInfo::fromAst($stmt, $this->path);
         }
 
         return array_values($this->classInfoCache);

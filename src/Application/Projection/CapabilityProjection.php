@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Projection;
 
 use Semitexa\ProjectGraph\Application\Db\GraphStorage;
-use Semitexa\ProjectGraph\Application\Graph\NodeType;
 use Semitexa\ProjectGraph\Application\Query\QueryInterface;
+use Semitexa\ProjectGraph\Application\Graph\NodeType;
 
 final class CapabilityProjection
 {
@@ -47,7 +47,7 @@ final class CapabilityProjection
             modules:           $this->query->getModuleSummaries($module),
             routeSummary:      $this->query->getRouteSummary($module),
             serviceCount:      $this->query->countNodes(NodeType::Service->value, $module),
-            contractCount:     $this->query->countNodes(NodeType::Contract->value, $module),
+            contractCount:     $this->query->countSatisfiedContracts($module),
             eventCount:        $this->query->countNodes(NodeType::Event->value, $module),
             listenerCount:     $this->query->countNodes(NodeType::EventListener->value, $module),
             entityCount:       $this->query->countNodes(NodeType::Entity->value, $module),

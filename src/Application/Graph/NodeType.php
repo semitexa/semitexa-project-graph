@@ -36,4 +36,22 @@ enum NodeType: string
     case SlotHandler   = 'slot_handler';
     case AuthHandler   = 'auth_handler';
     case DataProvider  = 'data_provider';
+
+    case DomainContext    = 'domain_context';
+    case ExecutionFlow    = 'execution_flow';
+    case EventFlow        = 'event_flow';
+    case DataLifecycle    = 'data_lifecycle';
+    case SystemBoundary   = 'system_boundary';
+    case Hotspot          = 'hotspot';
+
+    case JetStream        = 'jetstream';
+    case NatsSubject      = 'nats_subject';
+    case Consumer         = 'consumer';
+    case EventSchema      = 'event_schema';
+    case AggregateRoot    = 'aggregate_root';
+    case ReplayPath       = 'replay_path';
+
+    case DocNode          = 'doc_node';
+    case UsageExample     = 'usage_example';
+    case ArchitecturalDecision = 'architectural_decision';
 }

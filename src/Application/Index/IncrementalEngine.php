@@ -14,6 +14,8 @@ use Semitexa\ProjectGraph\Application\Scanner\FileStatus;
 
 final class IncrementalEngine
 {
+    use IncrementalEngineModuleResolver;
+
     public function __construct(
         private readonly FileScanner $scanner,
         private readonly PhpParserAdapter $parser,
@@ -51,7 +53,7 @@ final class IncrementalEngine
             }
 
             try {
-                $parsed = $this->parser->parse($change->path, $change->path);
+                $parsed = $this->parser->parse($change->path, $this->resolveModule($projectRoot, $change->path));
                 $fileResults[$change->path] = $this->extractors->process($parsed);
                 $this->storage->fileIndex->upsert($change->path, $change->hash);
             } catch (\Throwable $e) {
@@ -114,5 +116,43 @@ final readonly class UpdateResult
             'duration_ms'    => $this->duration,
             'errors'         => $this->errors,
         ];
+    }
+}
+
+trait IncrementalEngineModuleResolver
+{
+    private function resolveModule(string $projectRoot, string $filePath): string
+    {
+        $normalizedRoot = rtrim(str_replace('\\', '/', $projectRoot), '/');
+        $normalizedPath = str_replace('\\', '/', $filePath);
+
+        if (str_starts_with($normalizedPath, $normalizedRoot . '/packages/')) {
+            $relative = substr($normalizedPath, strlen($normalizedRoot . '/packages/'));
+            $package = explode('/', $relative, 2)[0] ?? '';
+
+            if ($package !== '') {
+                $package = preg_replace('/^semitexa-/', '', $package) ?? $package;
+                return $this->studly($package);
+            }
+        }
+
+        if (str_starts_with($normalizedPath, $normalizedRoot . '/src/')
+            || str_starts_with($normalizedPath, $normalizedRoot . '/tests/')
+        ) {
+            return 'App';
+        }
+
+        return '';
+    }
+
+    private function studly(string $value): string
+    {
+        $parts = preg_split('/[^a-zA-Z0-9]+/', $value) ?: [];
+        $parts = array_filter($parts, static fn (string $part): bool => $part !== '');
+
+        return implode('', array_map(
+            static fn (string $part): string => ucfirst(strtolower($part)),
+            $parts,
+        ));
     }
 }

@@ -9,9 +9,9 @@ use Semitexa\Orm\Hydration\TableModelHydrator;
 use Semitexa\Orm\Hydration\TableModelRelationLoader;
 use Semitexa\Orm\Mapping\MapperRegistry;
 use Semitexa\Orm\Metadata\ColumnRef;
-use Semitexa\Orm\Metadata\Operator;
 use Semitexa\Orm\Metadata\TableModelMetadataRegistry;
 use Semitexa\Orm\Persistence\AggregateWriteEngine;
+use Semitexa\Orm\Query\Operator;
 use Semitexa\Orm\Query\TableModelQuery;
 use Semitexa\ProjectGraph\Application\Db\Model\GraphEdgeTableModel;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
@@ -41,7 +41,7 @@ final class GraphEdgeRepository
     /** @return list<Edge> */
     public function findBySource(string $sourceId, ?EdgeType $type = null): array
     {
-        $q = $this->query->clone()
+        $q = $this->newQuery()
             ->where(ColumnRef::for(GraphEdgeTableModel::class, 'source_id'), Operator::Equals, $sourceId);
         if ($type !== null) {
             $q->where(ColumnRef::for(GraphEdgeTableModel::class, 'type'), Operator::Equals, $type->value);
@@ -52,7 +52,7 @@ final class GraphEdgeRepository
     /** @return list<Edge> */
     public function findByTarget(string $targetId, ?EdgeType $type = null): array
     {
-        $q = $this->query->clone()
+        $q = $this->newQuery()
             ->where(ColumnRef::for(GraphEdgeTableModel::class, 'target_id'), Operator::Equals, $targetId);
         if ($type !== null) {
             $q->where(ColumnRef::for(GraphEdgeTableModel::class, 'type'), Operator::Equals, $type->value);
@@ -71,7 +71,7 @@ final class GraphEdgeRepository
     /** @return list<Edge> */
     public function findByType(EdgeType $type, int $limit = 1000): array
     {
-        return $this->query->clone()
+        return $this->newQuery()
             ->where(ColumnRef::for(GraphEdgeTableModel::class, 'type'), Operator::Equals, $type->value)
             ->limit($limit)
             ->fetchAllAs(Edge::class, $this->mapperRegistry);
@@ -79,7 +79,7 @@ final class GraphEdgeRepository
 
     public function upsert(Edge $edge): void
     {
-        $existing = $this->query->clone()
+        $existing = $this->newQuery()
             ->where(ColumnRef::for(GraphEdgeTableModel::class, 'source_id'), Operator::Equals, $edge->sourceId)
             ->where(ColumnRef::for(GraphEdgeTableModel::class, 'target_id'), Operator::Equals, $edge->targetId)
             ->where(ColumnRef::for(GraphEdgeTableModel::class, 'type'), Operator::Equals, $edge->type->value)
@@ -107,10 +107,11 @@ final class GraphEdgeRepository
         }
 
         $placeholders = implode(',', array_fill(0, count($nodeIds), '?'));
-        $count = (int) $this->adapter->execute(
+        $countResult = $this->adapter->execute(
             'SELECT COUNT(*) FROM graph_edges WHERE source_id IN (' . $placeholders . ') OR target_id IN (' . $placeholders . ')',
             [...$nodeIds, ...$nodeIds],
-        )[0][0] ?? 0;
+        );
+        $count = (int) ($countResult->fetchColumn() ?? 0);
 
         $this->adapter->execute(
             'DELETE FROM graph_edges WHERE source_id IN (' . $placeholders . ') OR target_id IN (' . $placeholders . ')',
@@ -123,11 +124,16 @@ final class GraphEdgeRepository
     public function countAll(): int
     {
         $result = $this->adapter->execute('SELECT COUNT(*) as cnt FROM graph_edges');
-        return (int) ($result[0]['cnt'] ?? 0);
+        return (int) ($result->fetchOne()['cnt'] ?? 0);
     }
 
     public function truncate(): void
     {
         $this->adapter->execute('DELETE FROM graph_edges');
+    }
+
+    private function newQuery(): TableModelQuery
+    {
+        return clone $this->query;
     }
 }

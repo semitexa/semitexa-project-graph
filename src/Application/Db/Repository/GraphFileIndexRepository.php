@@ -9,9 +9,9 @@ use Semitexa\Orm\Hydration\TableModelHydrator;
 use Semitexa\Orm\Hydration\TableModelRelationLoader;
 use Semitexa\Orm\Mapping\MapperRegistry;
 use Semitexa\Orm\Metadata\ColumnRef;
-use Semitexa\Orm\Metadata\Operator;
 use Semitexa\Orm\Metadata\TableModelMetadataRegistry;
 use Semitexa\Orm\Persistence\AggregateWriteEngine;
+use Semitexa\Orm\Query\Operator;
 use Semitexa\Orm\Query\TableModelQuery;
 use Semitexa\ProjectGraph\Application\Db\Model\GraphFileIndexTableModel;
 use Semitexa\ProjectGraph\Domain\Model\FileIndexEntry;
@@ -39,7 +39,7 @@ final class GraphFileIndexRepository
 
     public function findByPath(string $path): ?FileIndexEntry
     {
-        return $this->query->clone()
+        return $this->newQuery()
             ->where(ColumnRef::for(GraphFileIndexTableModel::class, 'path'), Operator::Equals, $path)
             ->fetchOneAs(FileIndexEntry::class, $this->mapperRegistry) ?: null;
     }
@@ -53,7 +53,7 @@ final class GraphFileIndexRepository
     /** @return array<string, string> path => hash */
     public function getAll(): array
     {
-        $rows = $this->adapter->execute('SELECT path, content_hash FROM graph_file_index');
+        $rows = $this->adapter->execute('SELECT path, content_hash FROM graph_file_index')->fetchAll();
         $result = [];
         foreach ($rows as $row) {
             $result[$row['path']] = $row['content_hash'];
@@ -99,7 +99,7 @@ final class GraphFileIndexRepository
     /** @return list<FileIndexEntry> */
     public function getDirtyFiles(): array
     {
-        return $this->query->clone()
+        return $this->newQuery()
             ->where(ColumnRef::for(GraphFileIndexTableModel::class, 'is_dirty'), Operator::Equals, true)
             ->fetchAllAs(FileIndexEntry::class, $this->mapperRegistry);
     }
@@ -107,5 +107,10 @@ final class GraphFileIndexRepository
     public function truncateAll(): void
     {
         $this->adapter->execute('DELETE FROM graph_file_index');
+    }
+
+    private function newQuery(): TableModelQuery
+    {
+        return clone $this->query;
     }
 }

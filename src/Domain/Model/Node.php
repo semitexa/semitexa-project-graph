@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Domain\Model;
 
+use Semitexa\ProjectGraph\Application\Graph\NodeType;
+
 final readonly class Node
 {
     public function __construct(

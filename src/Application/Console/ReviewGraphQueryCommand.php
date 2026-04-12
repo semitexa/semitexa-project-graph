@@ -5,12 +5,12 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Console;
 
 use Semitexa\Core\Attribute\AsCommand;
-use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Console\Command\BaseCommand;
-use Semitexa\Orm\OrmManager;
+use Semitexa\Orm\Connection\ConnectionRegistry;
 use Semitexa\ProjectGraph\Application\Db\GraphStorage;
 use Semitexa\ProjectGraph\Application\Query\Direction;
 use Semitexa\ProjectGraph\Application\Query\GraphQueryService;
+use Semitexa\ProjectGraph\Application\Support\UsesProjectGraphConnection;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
@@ -22,7 +22,13 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 final class ReviewGraphQueryCommand extends BaseCommand
 {
-    #[InjectAsReadonly] private OrmManager $orm;
+    use UsesProjectGraphConnection;
+
+    public function __construct(
+        private readonly ConnectionRegistry $connections,
+    ) {
+        parent::__construct();
+    }
 
     protected function configure(): void
     {
@@ -131,22 +137,6 @@ final class ReviewGraphQueryCommand extends BaseCommand
 
     private function createStorage(): GraphStorage
     {
-        $adapter = $this->orm->getAdapter();
-        $txManager = $this->orm->getTransactionManager();
-        $mapperRegistry = $this->orm->getMapperRegistry();
-        $hydrator = $this->orm->getTableModelHydrator();
-        $metadataRegistry = $this->orm->getTableModelMetadataRegistry();
-        $relationLoader = $this->orm->getTableModelRelationLoader();
-        $writeEngine = $this->orm->getAggregateWriteEngine();
-
-        return new GraphStorage(
-            $adapter,
-            $txManager,
-            $mapperRegistry,
-            $hydrator,
-            $metadataRegistry,
-            $relationLoader,
-            $writeEngine,
-        );
+        return $this->createProjectGraphStorage($this->connections);
     }
 }

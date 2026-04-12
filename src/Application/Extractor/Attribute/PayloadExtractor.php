@@ -10,6 +10,7 @@ use Semitexa\Core\Attribute\RequiresPermission;
 use Semitexa\Core\Attribute\RequiresCapability;
 use Semitexa\ProjectGraph\Application\Extractor\ExtractionResult;
 use Semitexa\ProjectGraph\Application\Extractor\ExtractorInterface;
+use Semitexa\ProjectGraph\Application\Extractor\SafeAttributeResolver;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Application\Graph\EdgeType;
 use Semitexa\ProjectGraph\Domain\Model\Node;
@@ -20,6 +21,8 @@ use Semitexa\ProjectGraph\Application\Parser\ParsedFile;
 
 final class PayloadExtractor implements ExtractorInterface
 {
+    use SafeAttributeResolver;
+
     public function supports(ParsedFile $file): bool
     {
         return $file->hasAttribute(AsPayload::class);
@@ -34,7 +37,10 @@ final class PayloadExtractor implements ExtractorInterface
             if ($attr === null) {
                 continue;
             }
-            $asPayload = $attr->newInstance();
+            $asPayload = $this->safeNewInstance($attr);
+            if ($asPayload === null) {
+                continue;
+            }
 
             $payloadNode = new Node(
                 id:       NodeId::forClass($classInfo->fqcn),
@@ -85,23 +91,27 @@ final class PayloadExtractor implements ExtractorInterface
             }
 
             foreach ($classInfo->getAttributes(RequiresPermission::class) as $perm) {
-                $permInstance = $perm->newInstance();
-                $result->addEdge(new Edge(
-                    sourceId: $payloadNode->id,
-                    targetId: 'permission:' . ($permInstance->slug ?? ''),
-                    type:     EdgeType::RequiresPermission,
-                    metadata: ['slug' => $permInstance->slug ?? ''],
-                ));
+                $permInstance = $this->safeNewInstance($perm);
+                if ($permInstance !== null) {
+                    $result->addEdge(new Edge(
+                        sourceId: $payloadNode->id,
+                        targetId: 'permission:' . ($permInstance->slug ?? ''),
+                        type:     EdgeType::RequiresPermission,
+                        metadata: ['slug' => $permInstance->slug ?? ''],
+                    ));
+                }
             }
 
             foreach ($classInfo->getAttributes(RequiresCapability::class) as $cap) {
-                $capInstance = $cap->newInstance();
-                $result->addEdge(new Edge(
-                    sourceId: $payloadNode->id,
-                    targetId: 'capability:' . ($capInstance->slug ?? ''),
-                    type:     EdgeType::RequiresCapability,
-                    metadata: ['slug' => $capInstance->slug ?? ''],
-                ));
+                $capInstance = $this->safeNewInstance($cap);
+                if ($capInstance !== null) {
+                    $result->addEdge(new Edge(
+                        sourceId: $payloadNode->id,
+                        targetId: 'capability:' . ($capInstance->slug ?? ''),
+                        type:     EdgeType::RequiresCapability,
+                        metadata: ['slug' => $capInstance->slug ?? ''],
+                    ));
+                }
             }
         }
 

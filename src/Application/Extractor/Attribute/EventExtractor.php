@@ -8,6 +8,7 @@ use Semitexa\Core\Attribute\AsEvent;
 use Semitexa\Core\Attribute\AsEventListener;
 use Semitexa\ProjectGraph\Application\Extractor\ExtractionResult;
 use Semitexa\ProjectGraph\Application\Extractor\ExtractorInterface;
+use Semitexa\ProjectGraph\Application\Extractor\SafeAttributeResolver;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Application\Graph\EdgeType;
 use Semitexa\ProjectGraph\Domain\Model\Node;
@@ -17,6 +18,8 @@ use Semitexa\ProjectGraph\Application\Parser\ParsedFile;
 
 final class EventExtractor implements ExtractorInterface
 {
+    use SafeAttributeResolver;
+
     public function supports(ParsedFile $file): bool
     {
         return $file->hasAttribute(AsEventListener::class)
@@ -46,10 +49,17 @@ final class EventExtractor implements ExtractorInterface
                 if ($attr === null) {
                     continue;
                 }
-                $instance = $attr->newInstance();
 
-                $eventClass = $instance->event ?? null;
-                $executionMode = $instance->execution ?? 'sync';
+                $instance = $this->safeNewInstance($attr);
+
+                if ($instance !== null) {
+                    $eventClass = $instance->event ?? null;
+                    $executionMode = $instance->execution ?? 'sync';
+                } else {
+                    $args = $this->getAttributeArguments($attr);
+                    $eventClass = $args['event'] ?? $args[0] ?? null;
+                    $executionMode = 'sync';
+                }
 
                 $listenerNode = new Node(
                     id:       NodeId::forClass($classInfo->fqcn),

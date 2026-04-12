@@ -8,6 +8,7 @@ use Semitexa\Core\Attribute\AsPayloadHandler;
 use Semitexa\Core\Attribute\AsResourcePart;
 use Semitexa\ProjectGraph\Application\Extractor\ExtractionResult;
 use Semitexa\ProjectGraph\Application\Extractor\ExtractorInterface;
+use Semitexa\ProjectGraph\Application\Extractor\SafeAttributeResolver;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Application\Graph\EdgeType;
 use Semitexa\ProjectGraph\Domain\Model\Node;
@@ -17,6 +18,8 @@ use Semitexa\ProjectGraph\Application\Parser\ParsedFile;
 
 final class HandlerExtractor implements ExtractorInterface
 {
+    use SafeAttributeResolver;
+
     public function supports(ParsedFile $file): bool
     {
         return $file->hasAttribute(AsPayloadHandler::class);
@@ -31,7 +34,10 @@ final class HandlerExtractor implements ExtractorInterface
             if ($attr === null) {
                 continue;
             }
-            $asHandler = $attr->newInstance();
+            $asHandler = $this->safeNewInstance($attr);
+            if ($asHandler === null) {
+                continue;
+            }
 
             $handlerNode = new Node(
                 id:       NodeId::forClass($classInfo->fqcn),

@@ -29,7 +29,6 @@ final class GenericAttributeExtractor implements ExtractorInterface
         AsResource::class,
         AsService::class,
         AsEventListener::class,
-        AsCommand::class,
         InjectAsReadonly::class,
         InjectAsMutable::class,
         InjectAsFactory::class,
@@ -47,10 +46,6 @@ final class GenericAttributeExtractor implements ExtractorInterface
 
         foreach ($file->getClasses() as $classInfo) {
             foreach ($classInfo->attributes as $attr) {
-                if (in_array($attr->getName(), self::HANDLED, true)) {
-                    continue;
-                }
-
                 if ($attr->getName() === AsCommand::class) {
                     $instance = $attr->newInstance();
                     $result->addNode(new Node(
@@ -62,17 +57,23 @@ final class GenericAttributeExtractor implements ExtractorInterface
                         endLine:  $classInfo->endLine,
                         module:   $file->module,
                         metadata: [
-                            'commandName'   => $instance->name ?? '',
-                            'description'   => $instance->description ?? '',
+                            'commandName' => $instance->name ?? '',
+                            'description' => $instance->description ?? '',
                         ],
                     ));
-                } else {
-                    $result->addNodeMetadata(NodeId::forClass($classInfo->fqcn), 'attributes', [
-                        'name'   => $attr->getName(),
-                        'args'   => $attr->getArguments(),
-                        'target' => $attr->getTarget(),
-                    ]);
+
+                    continue;
                 }
+
+                if (in_array($attr->getName(), self::HANDLED, true)) {
+                    continue;
+                }
+
+                $result->addNodeMetadata(NodeId::forClass($classInfo->fqcn), 'attributes', [
+                    'name'   => $attr->getName(),
+                    'args'   => $attr->getArguments(),
+                    'target' => $attr->getTarget(),
+                ]);
             }
         }
 

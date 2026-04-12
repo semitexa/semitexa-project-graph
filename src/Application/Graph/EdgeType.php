@@ -42,4 +42,28 @@ enum EdgeType: string
     case ExtendsModule      = 'extends_module';
     case Authenticates      = 'authenticates';
     case Tests              = 'tests';
+
+    case BelongsToDomain    = 'belongs_to_domain';
+    case ParticipatesInFlow = 'participates_in_flow';
+    case TriggersFlow       = 'triggers_flow';
+    case PrecedesInFlow     = 'precedes_in_flow';
+    case CrossesBoundary    = 'crosses_boundary';
+    case IsHotspot          = 'is_hotspot';
+    case CoupledTo          = 'coupled_to';
+    case IntentFor          = 'intent_for';
+
+    case PublishesTo        = 'publishes_to';
+    case ConsumesFrom       = 'consumes_from';
+    case StreamsTo          = 'streams_to';
+    case HasSchema          = 'has_schema';
+    case IsAggregateOf      = 'is_aggregate_of';
+    case ReplaysVia         = 'replays_via';
+    case RoutesCommandTo    = 'routes_command_to';
+    case DeadLettersTo      = 'dead_letters_to';
+    case RetriesVia         = 'retries_via';
+
+    case DocumentedBy       = 'documented_by';
+    case HasExample         = 'has_example';
+    case ReferencesADR      = 'references_adr';
+    case Supersedes         = 'supersedes';
 }
