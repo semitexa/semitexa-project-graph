@@ -117,6 +117,10 @@ final class ExtractionResult
             'data_provider', 'resource', 'component', 'module', 'namespace', 'file' => 180,
             'route', 'method', 'property', 'constant', 'enum_case' => 140,
             'class', 'interface', 'trait', 'enum' => 20,
+            'domain_context', 'execution_flow', 'event_flow', 'data_lifecycle',
+            'system_boundary', 'hotspot', 'jetstream', 'nats_subject', 'consumer',
+            'event_schema', 'aggregate_root', 'replay_path', 'doc_node',
+            'usage_example', 'architectural_decision' => 160,
             default => 100,
         };
     }

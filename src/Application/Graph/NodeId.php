@@ -41,6 +41,81 @@ final class NodeId
         return 'ns:' . $namespace;
     }
 
+    public static function forDomain(string $name): string
+    {
+        return 'domain:' . $name;
+    }
+
+    public static function forFlow(string $name): string
+    {
+        return 'flow:' . $name;
+    }
+
+    public static function forEventFlow(string $name): string
+    {
+        return 'event_flow:' . $name;
+    }
+
+    public static function forLifecycle(string $name): string
+    {
+        return 'lifecycle:' . $name;
+    }
+
+    public static function forBoundary(string $name): string
+    {
+        return 'boundary:' . $name;
+    }
+
+    public static function forHotspot(string $name): string
+    {
+        return 'hotspot:' . $name;
+    }
+
+    public static function forStream(string $name): string
+    {
+        return 'stream:' . $name;
+    }
+
+    public static function forSubject(string $pattern): string
+    {
+        return 'subject:' . $pattern;
+    }
+
+    public static function forConsumer(string $name): string
+    {
+        return 'consumer:' . $name;
+    }
+
+    public static function forSchema(string $eventClass): string
+    {
+        return 'schema:' . $eventClass;
+    }
+
+    public static function forAggregate(string $type): string
+    {
+        return 'aggregate:' . $type;
+    }
+
+    public static function forReplayPath(string $name): string
+    {
+        return 'replay:' . $name;
+    }
+
+    public static function forDoc(string $targetNodeId): string
+    {
+        return 'doc:' . $targetNodeId;
+    }
+
+    public static function forExample(string $targetNodeId, string $label): string
+    {
+        return 'example:' . $targetNodeId . ':' . $label;
+    }
+
+    public static function forAdr(string $id): string
+    {
+        return 'adr:' . $id;
+    }
+
     public static function extractFqcn(string $id): string
     {
         $pos = strpos($id, ':');

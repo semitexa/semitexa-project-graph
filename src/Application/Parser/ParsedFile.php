@@ -59,15 +59,16 @@ final class ParsedFile
             $fqcn = $stmt->namespacedName->toString();
 
             try {
-                $exists = class_exists($fqcn) || interface_exists($fqcn) || trait_exists($fqcn) || enum_exists($fqcn);
-                if (!$exists) {
+                $exists = @class_exists($fqcn) || @interface_exists($fqcn) || @trait_exists($fqcn) || @enum_exists($fqcn);
+                if ($exists) {
+                    $ref = new \ReflectionClass($fqcn);
+                    $this->classInfoCache[$fqcn] = ClassInfo::fromReflection($ref, $this->path);
                     continue;
                 }
-
-                $ref = new \ReflectionClass($fqcn);
-                $this->classInfoCache[$fqcn] = ClassInfo::fromReflection($ref, $this->path);
-            } catch (\ReflectionException) {
+            } catch (\Throwable) {
             }
+
+            $this->classInfoCache[$fqcn] = ClassInfo::fromAst($stmt, $this->path);
         }
 
         return array_values($this->classInfoCache);
