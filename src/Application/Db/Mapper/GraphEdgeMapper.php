@@ -11,7 +11,7 @@ use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Application\Graph\EdgeType;
 
 #[AsMapper(
-    tableModel: GraphEdgeTableModel::class,
+    resourceModel: GraphEdgeTableModel::class,
     domainModel: Edge::class,
 )]
 final class GraphEdgeMapper implements TableModelMapper
