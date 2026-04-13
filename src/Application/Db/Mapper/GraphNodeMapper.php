@@ -11,7 +11,7 @@ use Semitexa\ProjectGraph\Domain\Model\Node;
 use Semitexa\ProjectGraph\Application\Graph\NodeType;
 
 #[AsMapper(
-    tableModel: GraphNodeTableModel::class,
+    resourceModel: GraphNodeTableModel::class,
     domainModel: Node::class,
 )]
 final class GraphNodeMapper implements TableModelMapper

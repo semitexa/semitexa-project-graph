@@ -10,7 +10,7 @@ use Semitexa\ProjectGraph\Application\Db\Model\GraphFileIndexTableModel;
 use Semitexa\ProjectGraph\Domain\Model\FileIndexEntry;
 
 #[AsMapper(
-    tableModel: GraphFileIndexTableModel::class,
+    resourceModel: GraphFileIndexTableModel::class,
     domainModel: FileIndexEntry::class,
 )]
 final class GraphFileIndexMapper implements TableModelMapper
