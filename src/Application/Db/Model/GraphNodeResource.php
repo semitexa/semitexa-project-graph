@@ -19,7 +19,7 @@ use Semitexa\Orm\Attribute\PrimaryKey;
 #[Index(columns: 'module')]
 #[Index(columns: ['type', 'module'])]
 #[Index(columns: 'name')]
-final readonly class GraphNodeTableModel
+final readonly class GraphNodeResource
 {
     public function __construct(
         #[PrimaryKey(strategy: 'manual')]

@@ -12,7 +12,7 @@ use Semitexa\Orm\Attribute\PrimaryKey;
 
 #[FromTable(name: 'graph_meta')]
 #[Connection('project_graph')]
-final readonly class GraphMetaTableModel
+final readonly class GraphMetaResource
 {
     public function __construct(
         #[PrimaryKey(strategy: 'manual')]

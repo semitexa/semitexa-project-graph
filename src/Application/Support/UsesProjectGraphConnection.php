@@ -19,9 +19,9 @@ trait UsesProjectGraphConnection
             $orm->getAdapter(),
             $orm->getTransactionManager(),
             $orm->getMapperRegistry(),
-            $orm->getTableModelHydrator(),
-            $orm->getTableModelMetadataRegistry(),
-            $orm->getTableModelRelationLoader(),
+            $orm->getResourceModelHydrator(),
+            $orm->getResourceModelMetadataRegistry(),
+            $orm->getResourceModelRelationLoader(),
             $orm->getAggregateWriteEngine(),
         );
     }

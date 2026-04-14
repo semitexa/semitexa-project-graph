@@ -5,39 +5,39 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Db\Mapper;
 
 use Semitexa\Orm\Attribute\AsMapper;
-use Semitexa\Orm\Contract\TableModelMapper;
-use Semitexa\ProjectGraph\Application\Db\Model\GraphNodeTableModel;
+use Semitexa\Orm\Contract\ResourceModelMapperInterface;
+use Semitexa\ProjectGraph\Application\Db\Model\GraphNodeResource;
 use Semitexa\ProjectGraph\Domain\Model\Node;
 use Semitexa\ProjectGraph\Application\Graph\NodeType;
 
 #[AsMapper(
-    resourceModel: GraphNodeTableModel::class,
+    resourceModel: GraphNodeResource::class,
     domainModel: Node::class,
 )]
-final class GraphNodeMapper implements TableModelMapper
+final class GraphNodeMapper implements ResourceModelMapperInterface
 {
-    public function toDomain(object $tableModel): Node
+    public function toDomain(object $resourceModel): Node
     {
-        assert($tableModel instanceof GraphNodeTableModel);
+        assert($resourceModel instanceof GraphNodeResource);
 
         return new Node(
-            id:            $tableModel->id,
-            type:          NodeType::from($tableModel->type),
-            fqcn:          $tableModel->fqcn,
-            file:          $tableModel->file,
-            line:          $tableModel->line,
-            endLine:       $tableModel->end_line,
-            module:        $tableModel->module,
-            metadata:      json_decode($tableModel->metadata, true) ?: [],
-            isPlaceholder: $tableModel->is_placeholder,
+            id:            $resourceModel->id,
+            type:          NodeType::from($resourceModel->type),
+            fqcn:          $resourceModel->fqcn,
+            file:          $resourceModel->file,
+            line:          $resourceModel->line,
+            endLine:       $resourceModel->end_line,
+            module:        $resourceModel->module,
+            metadata:      json_decode($resourceModel->metadata, true) ?: [],
+            isPlaceholder: $resourceModel->is_placeholder,
         );
     }
 
-    public function toTableModel(object $domainModel): GraphNodeTableModel
+    public function toSourceModel(object $domainModel): GraphNodeResource
     {
         assert($domainModel instanceof Node);
 
-        return new GraphNodeTableModel(
+        return new GraphNodeResource(
             id:             $domainModel->id,
             type:           $domainModel->type->value,
             fqcn:           $domainModel->fqcn,

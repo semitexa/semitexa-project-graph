@@ -15,7 +15,7 @@ use Semitexa\Orm\Attribute\PrimaryKey;
 #[FromTable(name: 'graph_file_index')]
 #[Connection('project_graph')]
 #[Index(columns: 'module')]
-final readonly class GraphFileIndexTableModel
+final readonly class GraphFileIndexResource
 {
     public function __construct(
         #[PrimaryKey(strategy: 'manual')]

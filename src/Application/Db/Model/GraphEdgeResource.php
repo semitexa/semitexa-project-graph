@@ -18,7 +18,7 @@ use Semitexa\Orm\Attribute\PrimaryKey;
 #[Index(columns: 'target_id')]
 #[Index(columns: 'type')]
 #[Index(columns: ['source_id', 'target_id', 'type'], unique: true)]
-final readonly class GraphEdgeTableModel
+final readonly class GraphEdgeResource
 {
     public function __construct(
         #[PrimaryKey(strategy: 'auto')]
