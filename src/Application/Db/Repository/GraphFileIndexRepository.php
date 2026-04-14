@@ -5,31 +5,31 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Db\Repository;
 
 use Semitexa\Orm\Adapter\DatabaseAdapterInterface;
-use Semitexa\Orm\Hydration\TableModelHydrator;
-use Semitexa\Orm\Hydration\TableModelRelationLoader;
+use Semitexa\Orm\Hydration\ResourceModelHydrator;
+use Semitexa\Orm\Hydration\ResourceModelRelationLoader;
 use Semitexa\Orm\Mapping\MapperRegistry;
 use Semitexa\Orm\Metadata\ColumnRef;
-use Semitexa\Orm\Metadata\TableModelMetadataRegistry;
+use Semitexa\Orm\Metadata\ResourceModelMetadataRegistry;
 use Semitexa\Orm\Persistence\AggregateWriteEngine;
 use Semitexa\Orm\Query\Operator;
-use Semitexa\Orm\Query\TableModelQuery;
-use Semitexa\ProjectGraph\Application\Db\Model\GraphFileIndexTableModel;
+use Semitexa\Orm\Query\ResourceModelQuery;
+use Semitexa\ProjectGraph\Application\Db\Model\GraphFileIndexResource;
 use Semitexa\ProjectGraph\Domain\Model\FileIndexEntry;
 
 final class GraphFileIndexRepository
 {
-    private TableModelQuery $query;
+    private ResourceModelQuery $query;
 
     public function __construct(
-        private readonly DatabaseAdapterInterface $adapter,
-        private readonly MapperRegistry $mapperRegistry,
-        private readonly TableModelHydrator $hydrator,
-        private readonly TableModelMetadataRegistry $metadataRegistry,
-        private readonly TableModelRelationLoader $relationLoader,
-        private readonly AggregateWriteEngine $writeEngine,
+        private readonly DatabaseAdapterInterface      $adapter,
+        private readonly MapperRegistry                $mapperRegistry,
+        private readonly ResourceModelHydrator         $hydrator,
+        private readonly ResourceModelMetadataRegistry $metadataRegistry,
+        private readonly ResourceModelRelationLoader   $relationLoader,
+        private readonly AggregateWriteEngine          $writeEngine,
     ) {
-        $this->query = new TableModelQuery(
-            GraphFileIndexTableModel::class,
+        $this->query = new ResourceModelQuery(
+            GraphFileIndexResource::class,
             $adapter,
             $hydrator,
             $relationLoader,
@@ -40,7 +40,7 @@ final class GraphFileIndexRepository
     public function findByPath(string $path): ?FileIndexEntry
     {
         return $this->newQuery()
-            ->where(ColumnRef::for(GraphFileIndexTableModel::class, 'path'), Operator::Equals, $path)
+            ->where(ColumnRef::for(GraphFileIndexResource::class, 'path'), Operator::Equals, $path)
             ->fetchOneAs(FileIndexEntry::class, $this->mapperRegistry) ?: null;
     }
 
@@ -74,9 +74,9 @@ final class GraphFileIndexRepository
 
         $existing = $this->findByPath($path);
         if ($existing !== null) {
-            $this->writeEngine->update($entry, GraphFileIndexTableModel::class, $this->mapperRegistry);
+            $this->writeEngine->update($entry, GraphFileIndexResource::class, $this->mapperRegistry);
         } else {
-            $this->writeEngine->insert($entry, GraphFileIndexTableModel::class, $this->mapperRegistry);
+            $this->writeEngine->insert($entry, GraphFileIndexResource::class, $this->mapperRegistry);
         }
     }
 
@@ -100,7 +100,7 @@ final class GraphFileIndexRepository
     public function getDirtyFiles(): array
     {
         return $this->newQuery()
-            ->where(ColumnRef::for(GraphFileIndexTableModel::class, 'is_dirty'), Operator::Equals, true)
+            ->where(ColumnRef::for(GraphFileIndexResource::class, 'is_dirty'), Operator::Equals, true)
             ->fetchAllAs(FileIndexEntry::class, $this->mapperRegistry);
     }
 
@@ -109,7 +109,7 @@ final class GraphFileIndexRepository
         $this->adapter->execute('DELETE FROM graph_file_index');
     }
 
-    private function newQuery(): TableModelQuery
+    private function newQuery(): ResourceModelQuery
     {
         return clone $this->query;
     }

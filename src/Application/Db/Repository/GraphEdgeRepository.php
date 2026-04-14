@@ -5,32 +5,32 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Db\Repository;
 
 use Semitexa\Orm\Adapter\DatabaseAdapterInterface;
-use Semitexa\Orm\Hydration\TableModelHydrator;
-use Semitexa\Orm\Hydration\TableModelRelationLoader;
+use Semitexa\Orm\Hydration\ResourceModelHydrator;
+use Semitexa\Orm\Hydration\ResourceModelRelationLoader;
 use Semitexa\Orm\Mapping\MapperRegistry;
 use Semitexa\Orm\Metadata\ColumnRef;
-use Semitexa\Orm\Metadata\TableModelMetadataRegistry;
+use Semitexa\Orm\Metadata\ResourceModelMetadataRegistry;
 use Semitexa\Orm\Persistence\AggregateWriteEngine;
 use Semitexa\Orm\Query\Operator;
-use Semitexa\Orm\Query\TableModelQuery;
-use Semitexa\ProjectGraph\Application\Db\Model\GraphEdgeTableModel;
+use Semitexa\Orm\Query\ResourceModelQuery;
+use Semitexa\ProjectGraph\Application\Db\Model\GraphEdgeResource;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Application\Graph\EdgeType;
 
 final class GraphEdgeRepository
 {
-    private TableModelQuery $query;
+    private ResourceModelQuery $query;
 
     public function __construct(
-        private readonly DatabaseAdapterInterface $adapter,
-        private readonly MapperRegistry $mapperRegistry,
-        private readonly TableModelHydrator $hydrator,
-        private readonly TableModelMetadataRegistry $metadataRegistry,
-        private readonly TableModelRelationLoader $relationLoader,
-        private readonly AggregateWriteEngine $writeEngine,
+        private readonly DatabaseAdapterInterface      $adapter,
+        private readonly MapperRegistry                $mapperRegistry,
+        private readonly ResourceModelHydrator         $hydrator,
+        private readonly ResourceModelMetadataRegistry $metadataRegistry,
+        private readonly ResourceModelRelationLoader   $relationLoader,
+        private readonly AggregateWriteEngine          $writeEngine,
     ) {
-        $this->query = new TableModelQuery(
-            GraphEdgeTableModel::class,
+        $this->query = new ResourceModelQuery(
+            GraphEdgeResource::class,
             $adapter,
             $hydrator,
             $relationLoader,
@@ -42,9 +42,9 @@ final class GraphEdgeRepository
     public function findBySource(string $sourceId, ?EdgeType $type = null): array
     {
         $q = $this->newQuery()
-            ->where(ColumnRef::for(GraphEdgeTableModel::class, 'source_id'), Operator::Equals, $sourceId);
+            ->where(ColumnRef::for(GraphEdgeResource::class, 'source_id'), Operator::Equals, $sourceId);
         if ($type !== null) {
-            $q->where(ColumnRef::for(GraphEdgeTableModel::class, 'type'), Operator::Equals, $type->value);
+            $q->where(ColumnRef::for(GraphEdgeResource::class, 'type'), Operator::Equals, $type->value);
         }
         return $q->fetchAllAs(Edge::class, $this->mapperRegistry);
     }
@@ -53,9 +53,9 @@ final class GraphEdgeRepository
     public function findByTarget(string $targetId, ?EdgeType $type = null): array
     {
         $q = $this->newQuery()
-            ->where(ColumnRef::for(GraphEdgeTableModel::class, 'target_id'), Operator::Equals, $targetId);
+            ->where(ColumnRef::for(GraphEdgeResource::class, 'target_id'), Operator::Equals, $targetId);
         if ($type !== null) {
-            $q->where(ColumnRef::for(GraphEdgeTableModel::class, 'type'), Operator::Equals, $type->value);
+            $q->where(ColumnRef::for(GraphEdgeResource::class, 'type'), Operator::Equals, $type->value);
         }
         return $q->fetchAllAs(Edge::class, $this->mapperRegistry);
     }
@@ -72,7 +72,7 @@ final class GraphEdgeRepository
     public function findByType(EdgeType $type, int $limit = 1000): array
     {
         return $this->newQuery()
-            ->where(ColumnRef::for(GraphEdgeTableModel::class, 'type'), Operator::Equals, $type->value)
+            ->where(ColumnRef::for(GraphEdgeResource::class, 'type'), Operator::Equals, $type->value)
             ->limit($limit)
             ->fetchAllAs(Edge::class, $this->mapperRegistry);
     }
@@ -80,9 +80,9 @@ final class GraphEdgeRepository
     public function upsert(Edge $edge): void
     {
         $existing = $this->newQuery()
-            ->where(ColumnRef::for(GraphEdgeTableModel::class, 'source_id'), Operator::Equals, $edge->sourceId)
-            ->where(ColumnRef::for(GraphEdgeTableModel::class, 'target_id'), Operator::Equals, $edge->targetId)
-            ->where(ColumnRef::for(GraphEdgeTableModel::class, 'type'), Operator::Equals, $edge->type->value)
+            ->where(ColumnRef::for(GraphEdgeResource::class, 'source_id'), Operator::Equals, $edge->sourceId)
+            ->where(ColumnRef::for(GraphEdgeResource::class, 'target_id'), Operator::Equals, $edge->targetId)
+            ->where(ColumnRef::for(GraphEdgeResource::class, 'type'), Operator::Equals, $edge->type->value)
             ->fetchOneAs(Edge::class, $this->mapperRegistry) ?: null;
 
         if ($existing !== null) {
@@ -93,9 +93,9 @@ final class GraphEdgeRepository
                 type:     $edge->type,
                 metadata: $edge->metadata,
             );
-            $this->writeEngine->update($updated, GraphEdgeTableModel::class, $this->mapperRegistry);
+            $this->writeEngine->update($updated, GraphEdgeResource::class, $this->mapperRegistry);
         } else {
-            $this->writeEngine->insert($edge, GraphEdgeTableModel::class, $this->mapperRegistry);
+            $this->writeEngine->insert($edge, GraphEdgeResource::class, $this->mapperRegistry);
         }
     }
 
@@ -132,7 +132,7 @@ final class GraphEdgeRepository
         $this->adapter->execute('DELETE FROM graph_edges');
     }
 
-    private function newQuery(): TableModelQuery
+    private function newQuery(): ResourceModelQuery
     {
         return clone $this->query;
     }

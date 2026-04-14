@@ -5,22 +5,22 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Db\Repository;
 
 use Semitexa\Orm\Adapter\DatabaseAdapterInterface;
-use Semitexa\Orm\Hydration\TableModelHydrator;
-use Semitexa\Orm\Hydration\TableModelRelationLoader;
+use Semitexa\Orm\Hydration\ResourceModelHydrator;
+use Semitexa\Orm\Hydration\ResourceModelRelationLoader;
 use Semitexa\Orm\Mapping\MapperRegistry;
-use Semitexa\Orm\Metadata\TableModelMetadataRegistry;
+use Semitexa\Orm\Metadata\ResourceModelMetadataRegistry;
 use Semitexa\Orm\Persistence\AggregateWriteEngine;
-use Semitexa\ProjectGraph\Application\Db\Model\GraphMetaTableModel;
+use Semitexa\ProjectGraph\Application\Db\Model\GraphMetaResource;
 
 final class GraphMetaRepository
 {
     public function __construct(
-        private readonly DatabaseAdapterInterface $adapter,
-        private readonly MapperRegistry $mapperRegistry,
-        private readonly TableModelHydrator $hydrator,
-        private readonly TableModelMetadataRegistry $metadataRegistry,
-        private readonly TableModelRelationLoader $relationLoader,
-        private readonly AggregateWriteEngine $writeEngine,
+        private readonly DatabaseAdapterInterface      $adapter,
+        private readonly MapperRegistry                $mapperRegistry,
+        private readonly ResourceModelHydrator         $hydrator,
+        private readonly ResourceModelMetadataRegistry $metadataRegistry,
+        private readonly ResourceModelRelationLoader   $relationLoader,
+        private readonly AggregateWriteEngine          $writeEngine,
     ) {}
 
     public function get(string $key): ?string

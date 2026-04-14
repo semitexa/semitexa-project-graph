@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Db;
 
 use Semitexa\Orm\Adapter\DatabaseAdapterInterface;
-use Semitexa\Orm\Hydration\TableModelHydrator;
-use Semitexa\Orm\Hydration\TableModelRelationLoader;
+use Semitexa\Orm\Hydration\ResourceModelHydrator;
+use Semitexa\Orm\Hydration\ResourceModelRelationLoader;
 use Semitexa\Orm\Mapping\MapperRegistry;
-use Semitexa\Orm\Metadata\TableModelMetadataRegistry;
+use Semitexa\Orm\Metadata\ResourceModelMetadataRegistry;
 use Semitexa\Orm\Persistence\AggregateWriteEngine;
 use Semitexa\Orm\Transaction\TransactionManager;
 use Semitexa\ProjectGraph\Application\Db\Repository\GraphEdgeRepository;
@@ -26,13 +26,13 @@ final class GraphStorage
     public readonly GraphMetaRepository $meta;
 
     public function __construct(
-        private readonly DatabaseAdapterInterface $adapter,
-        private readonly TransactionManager $txManager,
-        private readonly MapperRegistry $mapperRegistry,
-        private readonly TableModelHydrator $hydrator,
-        private readonly TableModelMetadataRegistry $metadataRegistry,
-        private readonly TableModelRelationLoader $relationLoader,
-        private readonly AggregateWriteEngine $writeEngine,
+        private readonly DatabaseAdapterInterface      $adapter,
+        private readonly TransactionManager            $txManager,
+        private readonly MapperRegistry                $mapperRegistry,
+        private readonly ResourceModelHydrator         $hydrator,
+        private readonly ResourceModelMetadataRegistry $metadataRegistry,
+        private readonly ResourceModelRelationLoader   $relationLoader,
+        private readonly AggregateWriteEngine          $writeEngine,
     ) {
         $this->nodes     = $this->createNodeRepository();
         $this->edges     = $this->createEdgeRepository();

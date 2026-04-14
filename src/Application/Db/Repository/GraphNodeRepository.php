@@ -5,34 +5,34 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Db\Repository;
 
 use Semitexa\Orm\Adapter\DatabaseAdapterInterface;
-use Semitexa\Orm\Hydration\TableModelHydrator;
-use Semitexa\Orm\Hydration\TableModelRelationLoader;
+use Semitexa\Orm\Hydration\ResourceModelHydrator;
+use Semitexa\Orm\Hydration\ResourceModelRelationLoader;
 use Semitexa\Orm\Mapping\MapperRegistry;
 use Semitexa\Orm\Metadata\ColumnRef;
-use Semitexa\Orm\Metadata\TableModelMetadataRegistry;
+use Semitexa\Orm\Metadata\ResourceModelMetadataRegistry;
 use Semitexa\Orm\Persistence\AggregateWriteEngine;
 use Semitexa\Orm\Query\Direction;
 use Semitexa\Orm\Query\Operator;
-use Semitexa\Orm\Query\TableModelQuery;
-use Semitexa\ProjectGraph\Application\Db\Model\GraphNodeTableModel;
+use Semitexa\Orm\Query\ResourceModelQuery;
+use Semitexa\ProjectGraph\Application\Db\Model\GraphNodeResource;
 use Semitexa\ProjectGraph\Domain\Model\Node;
 use Semitexa\ProjectGraph\Application\Graph\NodeId;
 use Semitexa\ProjectGraph\Application\Graph\NodeType;
 
 final class GraphNodeRepository
 {
-    private TableModelQuery $query;
+    private ResourceModelQuery $query;
 
     public function __construct(
-        private readonly DatabaseAdapterInterface $adapter,
-        private readonly MapperRegistry $mapperRegistry,
-        private readonly TableModelHydrator $hydrator,
-        private readonly TableModelMetadataRegistry $metadataRegistry,
-        private readonly TableModelRelationLoader $relationLoader,
-        private readonly AggregateWriteEngine $writeEngine,
+        private readonly DatabaseAdapterInterface      $adapter,
+        private readonly MapperRegistry                $mapperRegistry,
+        private readonly ResourceModelHydrator         $hydrator,
+        private readonly ResourceModelMetadataRegistry $metadataRegistry,
+        private readonly ResourceModelRelationLoader   $relationLoader,
+        private readonly AggregateWriteEngine          $writeEngine,
     ) {
-        $this->query = new TableModelQuery(
-            GraphNodeTableModel::class,
+        $this->query = new ResourceModelQuery(
+            GraphNodeResource::class,
             $adapter,
             $hydrator,
             $relationLoader,
@@ -43,14 +43,14 @@ final class GraphNodeRepository
     public function findById(string $id): ?Node
     {
         return $this->newQuery()
-            ->where(ColumnRef::for(GraphNodeTableModel::class, 'id'), Operator::Equals, $id)
+            ->where(ColumnRef::for(GraphNodeResource::class, 'id'), Operator::Equals, $id)
             ->fetchOneAs(Node::class, $this->mapperRegistry) ?: null;
     }
 
     public function findByFqcn(string $fqcn): ?Node
     {
         return $this->newQuery()
-            ->where(ColumnRef::for(GraphNodeTableModel::class, 'fqcn'), Operator::Equals, $fqcn)
+            ->where(ColumnRef::for(GraphNodeResource::class, 'fqcn'), Operator::Equals, $fqcn)
             ->fetchOneAs(Node::class, $this->mapperRegistry) ?: null;
     }
 
@@ -58,7 +58,7 @@ final class GraphNodeRepository
     public function findByFile(string $filePath): array
     {
         return $this->newQuery()
-            ->where(ColumnRef::for(GraphNodeTableModel::class, 'file'), Operator::Equals, $filePath)
+            ->where(ColumnRef::for(GraphNodeResource::class, 'file'), Operator::Equals, $filePath)
             ->fetchAllAs(Node::class, $this->mapperRegistry);
     }
 
@@ -66,9 +66,9 @@ final class GraphNodeRepository
     public function findByType(string $type, ?string $module = null): array
     {
         $q = $this->newQuery()
-            ->where(ColumnRef::for(GraphNodeTableModel::class, 'type'), Operator::Equals, $type);
+            ->where(ColumnRef::for(GraphNodeResource::class, 'type'), Operator::Equals, $type);
         if ($module !== null && $module !== '') {
-            $q->where(ColumnRef::for(GraphNodeTableModel::class, 'module'), Operator::Equals, $module);
+            $q->where(ColumnRef::for(GraphNodeResource::class, 'module'), Operator::Equals, $module);
         }
         return $q->fetchAllAs(Node::class, $this->mapperRegistry);
     }
@@ -77,7 +77,7 @@ final class GraphNodeRepository
     public function findByModule(string $module): array
     {
         return $this->newQuery()
-            ->where(ColumnRef::for(GraphNodeTableModel::class, 'module'), Operator::Equals, $module)
+            ->where(ColumnRef::for(GraphNodeResource::class, 'module'), Operator::Equals, $module)
             ->fetchAllAs(Node::class, $this->mapperRegistry);
     }
 
@@ -85,7 +85,7 @@ final class GraphNodeRepository
     public function search(string $pattern, int $limit = 20): array
     {
         return $this->newQuery()
-            ->where(ColumnRef::for(GraphNodeTableModel::class, 'name'), Operator::Like, '%' . $pattern . '%')
+            ->where(ColumnRef::for(GraphNodeResource::class, 'name'), Operator::Like, '%' . $pattern . '%')
             ->limit($limit)
             ->fetchAllAs(Node::class, $this->mapperRegistry);
     }
@@ -94,12 +94,12 @@ final class GraphNodeRepository
     public function searchFull(string $query, int $limit = 20): array
     {
         $byName = $this->newQuery()
-            ->where(ColumnRef::for(GraphNodeTableModel::class, 'name'), Operator::Like, '%' . $query . '%')
+            ->where(ColumnRef::for(GraphNodeResource::class, 'name'), Operator::Like, '%' . $query . '%')
             ->limit($limit)
             ->fetchAllAs(Node::class, $this->mapperRegistry);
 
         $byFqcn = $this->newQuery()
-            ->where(ColumnRef::for(GraphNodeTableModel::class, 'fqcn'), Operator::Like, '%' . $query . '%')
+            ->where(ColumnRef::for(GraphNodeResource::class, 'fqcn'), Operator::Like, '%' . $query . '%')
             ->limit($limit)
             ->fetchAllAs(Node::class, $this->mapperRegistry);
 
@@ -114,9 +114,9 @@ final class GraphNodeRepository
     {
         $existing = $this->findById($node->id);
         if ($existing !== null) {
-            $this->writeEngine->update($node, GraphNodeTableModel::class, $this->mapperRegistry);
+            $this->writeEngine->update($node, GraphNodeResource::class, $this->mapperRegistry);
         } else {
-            $this->writeEngine->insert($node, GraphNodeTableModel::class, $this->mapperRegistry);
+            $this->writeEngine->insert($node, GraphNodeResource::class, $this->mapperRegistry);
         }
     }
 
@@ -137,7 +137,7 @@ final class GraphNodeRepository
             metadata:      [],
             isPlaceholder: true,
         );
-        $this->writeEngine->insert($placeholder, GraphNodeTableModel::class, $this->mapperRegistry);
+        $this->writeEngine->insert($placeholder, GraphNodeResource::class, $this->mapperRegistry);
     }
 
     /** @return int count of deleted nodes */
@@ -189,7 +189,7 @@ final class GraphNodeRepository
         return array_map(fn($r) => $r['id'], $rows);
     }
 
-    private function newQuery(): TableModelQuery
+    private function newQuery(): ResourceModelQuery
     {
         return clone $this->query;
     }
