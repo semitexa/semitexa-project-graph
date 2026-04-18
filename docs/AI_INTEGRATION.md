@@ -2,9 +2,9 @@
 
 This document describes how AI agents should use the project graph to understand and modify a Semitexa codebase.
 
-## Why Use the Graph First
+## Why Use the Graph On Demand
 
-Before reading any source files, an AI agent should query the graph. This reduces exploration time from hours to minutes.
+The graph is the right tool when a task needs structural understanding. It should not be a mandatory startup ritual for every edit.
 
 | Without Graph | With Graph |
 |--------------|------------|
@@ -17,29 +17,35 @@ Before reading any source files, an AI agent should query the graph. This reduce
 ## Standard Workflow
 
 ```
-1. Generate/update graph
-   bin/semitexa ai:review-graph:generate --json
+1. Start from the task
+   bin/semitexa ai:task "<task description>"
 
-2. Get stats to confirm readiness
-   bin/semitexa ai:review-graph:stats --json
-
-3. Get context for the task
+2. Fetch task-scoped graph context if needed
    bin/semitexa ai:review-graph:context "<task>" --format=json
+
+3. Refresh the graph only when graph-backed answers are stale or missing
+   bin/semitexa ai:review-graph:generate --json
+   bin/semitexa ai:review-graph:stats --json
 
 4. Trace relevant flows/events
    bin/semitexa ai:review-graph:event-trace <Event> --format=json
    bin/semitexa ai:review-graph:flow-trace <Flow> --format=json
 
 5. Check impact before changes
-   bin/semitexa ai:review-graph:impact <Component> --format=json
+   bin/semitexa ai:review-graph:impact <Component> --json
 
 6. Read specific files (now you know which ones)
    Read the files identified in steps 3-5
 ```
 
+If `ai:task` is not available in the current install, apply the same workflow manually: begin from a one-line task statement and choose only the narrowest graph command that answers that task.
+
 ## JSON Output
 
-All commands support `--format=json`. This is the primary interface for AI agents.
+Graph trace/context commands use `--format=json`. Review-graph maintenance and query commands use `--json`.
+
+- `--format=json`: `ai:review-graph:context`, `ai:review-graph:event-trace`, `ai:review-graph:flow-trace`
+- `--json`: `ai:review-graph:generate`, `ai:review-graph:stats`, `ai:review-graph:impact`, `ai:review-graph:query`, `ai:review-graph:capabilities`
 
 ### Example: event-trace JSON
 
@@ -115,7 +121,7 @@ Shows the complete event lifecycle.
 ### "What breaks if I change X?"
 
 ```bash
-bin/semitexa ai:review-graph:impact PaymentService --format=json
+bin/semitexa ai:review-graph:impact PaymentService --json
 ```
 
 Shows all dependents with risk scoring.
@@ -212,7 +218,7 @@ This polls for file changes every 2 seconds and incrementally updates the graph.
 
 If a command returns no results:
 
-1. Run `generate` to ensure the graph is current
+1. Refresh the graph with `generate` if the answer depends on fresh structure
 2. Run `stats` to verify the graph has data
 3. Try a broader search term or use `query` to list available nodes
 

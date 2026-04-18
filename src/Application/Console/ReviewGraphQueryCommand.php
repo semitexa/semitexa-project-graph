@@ -92,7 +92,7 @@ final class ReviewGraphQueryCommand extends BaseCommand
                 'type'     => $e->type->value,
                 'metadata' => $e->metadata,
             ], $edges);
-            $io->writeln(json_encode($data, JSON_PRETTY_PRINT));
+            $io->writeln(json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
             return;
         }
 
@@ -121,7 +121,7 @@ final class ReviewGraphQueryCommand extends BaseCommand
                 'file'     => $n->file,
                 'module'   => $n->module,
             ], $nodes);
-            $io->writeln(json_encode($data, JSON_PRETTY_PRINT));
+            $io->writeln(json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
             return;
         }
 
