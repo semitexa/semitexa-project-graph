@@ -59,7 +59,7 @@ final class ReviewGraphCapabilitiesCommand extends BaseCommand
         $manifest = $projection->build(category: $category, module: $module);
 
         if ($input->getOption('json')) {
-            $output->writeln(json_encode($manifest->toArray(), JSON_UNESCAPED_SLASHES));
+            $output->writeln(json_encode($manifest->toArray(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
             return self::SUCCESS;
         }
 

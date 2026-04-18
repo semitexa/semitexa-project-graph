@@ -32,7 +32,7 @@ The graph is the right tool when a task needs structural understanding. It shoul
    bin/semitexa ai:review-graph:flow-trace <Flow> --format=json
 
 5. Check impact before changes
-   bin/semitexa ai:review-graph:impact <Component> --format=json
+   bin/semitexa ai:review-graph:impact <Component> --json
 
 6. Read specific files (now you know which ones)
    Read the files identified in steps 3-5
@@ -42,7 +42,10 @@ If `ai:task` is not available in the current install, apply the same workflow ma
 
 ## JSON Output
 
-All commands support `--format=json`. This is the primary interface for AI agents.
+Graph trace/context commands use `--format=json`. Review-graph maintenance and query commands use `--json`.
+
+- `--format=json`: `ai:review-graph:context`, `ai:review-graph:event-trace`, `ai:review-graph:flow-trace`
+- `--json`: `ai:review-graph:generate`, `ai:review-graph:stats`, `ai:review-graph:impact`, `ai:review-graph:query`, `ai:review-graph:capabilities`
 
 ### Example: event-trace JSON
 
@@ -118,7 +121,7 @@ Shows the complete event lifecycle.
 ### "What breaks if I change X?"
 
 ```bash
-bin/semitexa ai:review-graph:impact PaymentService --format=json
+bin/semitexa ai:review-graph:impact PaymentService --json
 ```
 
 Shows all dependents with risk scoring.
