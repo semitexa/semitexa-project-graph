@@ -86,13 +86,15 @@ final class ReviewGraphQueryCommand extends BaseCommand
     private function renderEdges(SymfonyStyle $io, array $edges, GraphQueryService $query, bool $json): void
     {
         if ($json) {
-            $data = array_map(fn($e) => [
-                'source'   => $e->sourceId,
-                'target'   => $e->targetId,
-                'type'     => $e->type->value,
-                'metadata' => $e->metadata,
-            ], $edges);
-            $io->writeln(json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            foreach ($edges as $edge) {
+                $io->writeln(json_encode([
+                    'kind'     => 'edge',
+                    'source'   => $edge->sourceId,
+                    'target'   => $edge->targetId,
+                    'type'     => $edge->type->value,
+                    'metadata' => $edge->metadata,
+                ], JSON_UNESCAPED_SLASHES));
+            }
             return;
         }
 
@@ -114,14 +116,16 @@ final class ReviewGraphQueryCommand extends BaseCommand
     private function renderNodes(SymfonyStyle $io, array $nodes, bool $json): void
     {
         if ($json) {
-            $data = array_map(fn($n) => [
-                'id'       => $n->id,
-                'type'     => $n->type->value,
-                'fqcn'     => $n->fqcn,
-                'file'     => $n->file,
-                'module'   => $n->module,
-            ], $nodes);
-            $io->writeln(json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            foreach ($nodes as $node) {
+                $io->writeln(json_encode([
+                    'kind'   => 'node',
+                    'id'     => $node->id,
+                    'type'   => $node->type->value,
+                    'fqcn'   => $node->fqcn,
+                    'file'   => $node->file,
+                    'module' => $node->module,
+                ], JSON_UNESCAPED_SLASHES));
+            }
             return;
         }
 

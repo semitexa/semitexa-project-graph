@@ -50,7 +50,7 @@ final class AiCapabilitiesLegacyCommand extends BaseCommand
 
         if ($input->getOption('json')) {
             $data = $manifest->toLegacyFormat();
-            $output->writeln(json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            $output->writeln(json_encode($data, JSON_UNESCAPED_SLASHES));
             return self::SUCCESS;
         }
 

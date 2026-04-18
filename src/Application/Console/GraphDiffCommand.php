@@ -82,7 +82,7 @@ final class GraphDiffCommand extends Command
         $this->saveCurrentStats($currentStats);
 
         if ($format === 'json') {
-            $output->writeln(json_encode($diff, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            $output->writeln(json_encode($diff, JSON_UNESCAPED_SLASHES));
             return Command::SUCCESS;
         }
 

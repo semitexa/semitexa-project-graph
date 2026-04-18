@@ -74,20 +74,7 @@ final class ReviewGraphImpactCommand extends BaseCommand
         }
 
         if ($input->getOption('json')) {
-            $data = [
-                'changed'   => $impact->changed,
-                'impacted'  => array_map(fn($id, $n) => [
-                    'id'       => $n->node->id,
-                    'fqcn'     => $n->node->fqcn,
-                    'type'     => $n->node->type->value,
-                    'module'   => $n->node->module,
-                    'distance' => $n->distance,
-                ], array_keys($impact->impacted), $impact->impacted),
-                'total'     => $impact->totalImpacted(),
-                'max_depth' => $impact->maxDepth(),
-                'modules'   => $impact->getModulesAffected(),
-            ];
-            $output->writeln(json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            $this->emitNdjson($output, $impact);
             return self::SUCCESS;
         }
 
@@ -116,6 +103,43 @@ final class ReviewGraphImpactCommand extends BaseCommand
         }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Emit NDJSON: one object per line. First line is a summary an agent can
+     * short-circuit on; subsequent lines tag each impacted node with a `kind`
+     * discriminator (`direct` for changed nodes, `transitive` otherwise) and
+     * an `action` the agent should take. Kept intentionally flat — no nesting —
+     * so downstream tools can grep/filter without a JSON parser.
+     */
+    private function emitNdjson(OutputInterface $output, object $impact): void
+    {
+        $direct = count($impact->changed);
+        $total = $impact->totalImpacted();
+        $modules = $impact->getModulesAffected();
+
+        $output->writeln(json_encode([
+            'kind'      => 'summary',
+            'direct'    => $direct,
+            'transitive' => max(0, $total - $direct),
+            'total'     => $total,
+            'max_depth' => $impact->maxDepth(),
+            'modules'   => $modules,
+        ], JSON_UNESCAPED_SLASHES));
+
+        $changedSet = array_flip($impact->changed);
+        foreach ($impact->impacted as $impacted) {
+            $node = $impacted->node;
+            $isDirect = isset($changedSet[$node->id]) || isset($changedSet[$node->fqcn]);
+            $output->writeln(json_encode([
+                'kind'     => $isDirect ? 'direct' : 'transitive',
+                'fqcn'     => $node->fqcn,
+                'type'     => $node->type->value,
+                'module'   => $node->module,
+                'distance' => $impacted->distance,
+                'action'   => $isDirect ? 'edit' : 'review',
+            ], JSON_UNESCAPED_SLASHES));
+        }
     }
 
     private function resolveNodeId(GraphStorage $storage, string $target): ?string

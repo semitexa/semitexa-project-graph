@@ -53,7 +53,7 @@ final class ReviewGraphGenerateCommand extends BaseCommand
             : $engine->update($this->getProjectRoot());
 
         if ($input->getOption('json')) {
-            $output->writeln(json_encode($result->toArray(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            $output->writeln(json_encode($result->toArray(), JSON_UNESCAPED_SLASHES));
             return self::SUCCESS;
         }
 
