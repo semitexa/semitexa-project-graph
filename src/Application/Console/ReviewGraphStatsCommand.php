@@ -57,7 +57,7 @@ final class ReviewGraphStatsCommand extends BaseCommand
         ];
 
         if ($input->getOption('json')) {
-            $output->writeln(json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            $output->writeln(json_encode($payload, JSON_UNESCAPED_SLASHES));
             return self::SUCCESS;
         }
 

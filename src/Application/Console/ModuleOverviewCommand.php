@@ -41,7 +41,7 @@ final class ModuleOverviewCommand extends Command
         $overview = $this->buildOverview($module, $includeEvents, $includeFlows);
 
         if ($format === 'json') {
-            $output->writeln(json_encode($overview, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            $output->writeln(json_encode($overview, JSON_UNESCAPED_SLASHES));
             return Command::SUCCESS;
         }
 

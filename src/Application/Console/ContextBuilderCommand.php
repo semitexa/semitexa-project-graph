@@ -45,7 +45,7 @@ final class ContextBuilderCommand extends Command
         $context = $this->buildContext($task, $depth, $module, $intelligence);
 
         if ($format === 'json') {
-            $output->writeln(json_encode($context, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            $output->writeln(json_encode($context, JSON_UNESCAPED_SLASHES));
             return Command::SUCCESS;
         }
 

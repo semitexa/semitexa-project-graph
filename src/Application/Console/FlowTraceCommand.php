@@ -65,7 +65,7 @@ final class FlowTraceCommand extends Command
                 'sync_boundary' => $flow->syncBoundary,
                 'events_emitted' => $flow->eventsEmitted,
             ];
-            $output->writeln(json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            $output->writeln(json_encode($data, JSON_UNESCAPED_SLASHES));
             return Command::SUCCESS;
         }
 
