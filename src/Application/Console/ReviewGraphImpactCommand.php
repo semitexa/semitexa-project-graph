@@ -6,6 +6,7 @@ namespace Semitexa\ProjectGraph\Application\Console;
 
 use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Console\Command\BaseCommand;
+use Semitexa\ProjectGraph\Application\Analysis\ImpactResult;
 use Semitexa\Orm\Connection\ConnectionRegistry;
 use Semitexa\ProjectGraph\Application\Analysis\ImpactAnalyzer;
 use Semitexa\ProjectGraph\Application\Context\ContextPacker;
@@ -40,6 +41,7 @@ final class ReviewGraphImpactCommand extends BaseCommand
         $this->addArgument('target', InputArgument::REQUIRED, 'Class FQCN, file path, or node ID');
         $this->addOption('depth', 'd', InputOption::VALUE_REQUIRED, 'Maximum traversal depth', '5');
         $this->addOption('json', null, InputOption::VALUE_NONE, 'Output as JSON');
+        $this->addOption('ndjson', null, InputOption::VALUE_NONE, 'Output as NDJSON');
         $this->addOption('context', null, InputOption::VALUE_NONE, 'Include source snippets in context package');
         $this->addOption('prompt', 'p', InputOption::VALUE_REQUIRED, 'Generate LLM prompt: review, refactor, test');
         $this->addOption('module', 'm', InputOption::VALUE_REQUIRED, 'Scope to a specific module');
@@ -49,7 +51,19 @@ final class ReviewGraphImpactCommand extends BaseCommand
     {
         $io = new SymfonyStyle($input, $output);
         $target = $input->getArgument('target');
-        $depth = (int) $input->getOption('depth');
+        $depth = $input->getOption('depth');
+
+        if (!is_string($target) || $target === '') {
+            $io->error('Target must be a non-empty string.');
+            return self::FAILURE;
+        }
+
+        if (!is_scalar($depth)) {
+            $io->error('Depth must be scalar.');
+            return self::FAILURE;
+        }
+
+        $depth = (int) $depth;
 
         $storage = $this->createStorage();
         $totalNodes = (int)($storage->getMeta('total_nodes') ?: 0);
@@ -73,9 +87,24 @@ final class ReviewGraphImpactCommand extends BaseCommand
             return self::SUCCESS;
         }
 
+        if ($input->getOption('json') && $input->getOption('ndjson')) {
+            $io->error('Use either --json or --ndjson, not both.');
+            return self::FAILURE;
+        }
+
         if ($input->getOption('json')) {
-            $this->emitNdjson($output, $impact);
+            $payload = json_encode($this->buildJsonPayload($impact), JSON_UNESCAPED_SLASHES);
+            if ($payload === false) {
+                $io->error('Failed to encode JSON payload.');
+                return self::FAILURE;
+            }
+
+            $output->writeln($payload);
             return self::SUCCESS;
+        }
+
+        if ($input->getOption('ndjson')) {
+            return $this->emitNdjson($output, $impact);
         }
 
         $this->renderImpact($impact, $io);
@@ -108,38 +137,82 @@ final class ReviewGraphImpactCommand extends BaseCommand
     /**
      * Emit NDJSON: one object per line. First line is a summary an agent can
      * short-circuit on; subsequent lines tag each impacted node with a `kind`
-     * discriminator (`direct` for changed nodes, `transitive` otherwise) and
-     * an `action` the agent should take. Kept intentionally flat — no nesting —
-     * so downstream tools can grep/filter without a JSON parser.
+     * discriminator (`direct` for immediate downstream nodes, `transitive`
+     * otherwise) and an `action` the agent should take. The payload is kept
+     * mostly flat to make downstream grep/filter workflows practical, though
+     * the summary line includes a `modules` collection.
      */
-    private function emitNdjson(OutputInterface $output, object $impact): void
+    private function emitNdjson(OutputInterface $output, ImpactResult $impact): int
     {
-        $direct = count($impact->changed);
+        $direct = 0;
+        foreach ($impact->impacted as $impacted) {
+            if ($impacted->distance === 1) {
+                $direct++;
+            }
+        }
+
         $total = $impact->totalImpacted();
         $modules = $impact->getModulesAffected();
 
-        $output->writeln(json_encode([
+        $summary = json_encode([
             'kind'      => 'summary',
             'direct'    => $direct,
             'transitive' => max(0, $total - $direct),
             'total'     => $total,
             'max_depth' => $impact->maxDepth(),
             'modules'   => $modules,
-        ], JSON_UNESCAPED_SLASHES));
+        ], JSON_UNESCAPED_SLASHES);
+        if ($summary === false) {
+            return self::FAILURE;
+        }
 
-        $changedSet = array_flip($impact->changed);
+        $output->writeln($summary);
+
         foreach ($impact->impacted as $impacted) {
             $node = $impacted->node;
-            $isDirect = isset($changedSet[$node->id]) || isset($changedSet[$node->fqcn]);
-            $output->writeln(json_encode([
+            $isDirect = $impacted->distance === 1;
+            $line = json_encode([
                 'kind'     => $isDirect ? 'direct' : 'transitive',
                 'fqcn'     => $node->fqcn,
                 'type'     => $node->type->value,
                 'module'   => $node->module,
                 'distance' => $impacted->distance,
                 'action'   => $isDirect ? 'edit' : 'review',
-            ], JSON_UNESCAPED_SLASHES));
+            ], JSON_UNESCAPED_SLASHES);
+            if ($line === false) {
+                return self::FAILURE;
+            }
+
+            $output->writeln($line);
         }
+
+        return self::SUCCESS;
+    }
+
+    /**
+     * @return array{
+     *   changed: list<string>,
+     *   impacted: list<array{id: string, fqcn: string, type: string, module: string, distance: int}>,
+     *   total: int,
+     *   max_depth: int,
+     *   modules: array<string, int>
+     * }
+     */
+    private function buildJsonPayload(ImpactResult $impact): array
+    {
+        return [
+            'changed'   => $impact->changed,
+            'impacted'  => array_map(fn($id, $n) => [
+                'id'       => $n->node->id,
+                'fqcn'     => $n->node->fqcn,
+                'type'     => $n->node->type->value,
+                'module'   => $n->node->module,
+                'distance' => $n->distance,
+            ], array_keys($impact->impacted), $impact->impacted),
+            'total'     => $impact->totalImpacted(),
+            'max_depth' => $impact->maxDepth(),
+            'modules'   => $impact->getModulesAffected(),
+        ];
     }
 
     private function resolveNodeId(GraphStorage $storage, string $target): ?string
@@ -169,7 +242,7 @@ final class ReviewGraphImpactCommand extends BaseCommand
         return null;
     }
 
-    private function renderImpact(object $impact, SymfonyStyle $io): void
+    private function renderImpact(ImpactResult $impact, SymfonyStyle $io): void
     {
         $io->title('Impact Analysis');
         $io->definitionList(

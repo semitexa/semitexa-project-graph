@@ -6,7 +6,6 @@ namespace Semitexa\ProjectGraph\Application\Analysis;
 
 use Semitexa\ProjectGraph\Application\Db\GraphStorage;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
-use Semitexa\ProjectGraph\Application\Graph\EdgeType;
 use Semitexa\ProjectGraph\Domain\Model\Node;
 use Semitexa\ProjectGraph\Application\Query\Direction;
 
@@ -16,13 +15,20 @@ final class ImpactAnalyzer
         private readonly GraphStorage $storage,
     ) {}
 
+    /**
+     * @param list<string> $changedNodeIds
+     */
     public function analyze(array $changedNodeIds, int $maxDepth = 5): ImpactResult
     {
+        /** @var array<string, ImpactedNode> $impacted */
         $impacted = [];
+        /** @var array<string, true> $visited */
         $visited = array_fill_keys($changedNodeIds, true);
+        /** @var list<string> $currentLevel */
         $currentLevel = $changedNodeIds;
 
         for ($depth = 1; $depth <= $maxDepth; $depth++) {
+            /** @var list<string> $nextLevel */
             $nextLevel = [];
             foreach ($currentLevel as $nodeId) {
                 $edges = $this->storage->edges->findByTarget($nodeId);
@@ -62,13 +68,21 @@ final class ImpactAnalyzer
         );
     }
 
+    /**
+     * @param list<string> $startNodeIds
+     * @return list<Edge>
+     */
     public function analyzeForward(array $startNodeIds, int $maxDepth = 3): array
     {
+        /** @var list<Edge> $allEdges */
         $allEdges = [];
+        /** @var array<string, true> $visited */
         $visited = array_fill_keys($startNodeIds, true);
+        /** @var list<string> $currentLevel */
         $currentLevel = $startNodeIds;
 
         for ($depth = 1; $depth <= $maxDepth; $depth++) {
+            /** @var list<string> $nextLevel */
             $nextLevel = [];
             foreach ($currentLevel as $nodeId) {
                 $edges = $this->storage->edges->findBySource($nodeId);
@@ -89,16 +103,26 @@ final class ImpactAnalyzer
         return $allEdges;
     }
 
+    /**
+     * @return array{node: Node|null, edges: list<Edge>, children: list<array{edge: Edge, child: array{node: Node|null, edges: list<Edge>, children: list<mixed>}}>}
+     */
     public function getDependencyTree(string $nodeId, int $maxDepth = 3): array
     {
         return $this->buildTree($nodeId, Direction::Outgoing, $maxDepth, []);
     }
 
+    /**
+     * @return array{node: Node|null, edges: list<Edge>, children: list<array{edge: Edge, child: array{node: Node|null, edges: list<Edge>, children: list<mixed>}}>}
+     */
     public function getUsageTree(string $nodeId, int $maxDepth = 3): array
     {
         return $this->buildTree($nodeId, Direction::Incoming, $maxDepth, []);
     }
 
+    /**
+     * @param array<string, true> $visited
+     * @return array{node: Node|null, edges: list<Edge>, children: list<array{edge: Edge, child: array{node: Node|null, edges: list<Edge>, children: list<mixed>}}>}
+     */
     private function buildTree(string $nodeId, Direction $direction, int $maxDepth, array $visited): array
     {
         if (isset($visited[$nodeId]) || $maxDepth <= 0) {
@@ -111,11 +135,20 @@ final class ImpactAnalyzer
         $edges = match ($direction) {
             Direction::Outgoing => $this->storage->edges->findBySource($nodeId),
             Direction::Incoming => $this->storage->edges->findByTarget($nodeId),
+            Direction::Both => [
+                ...$this->storage->edges->findBySource($nodeId),
+                ...$this->storage->edges->findByTarget($nodeId),
+            ],
         };
 
+        /** @var list<array{edge: Edge, child: array{node: Node|null, edges: list<Edge>, children: list<mixed>}}> $children */
         $children = [];
         foreach ($edges as $edge) {
-            $neighborId = $direction === Direction::Outgoing ? $edge->targetId : $edge->sourceId;
+            $neighborId = match ($direction) {
+                Direction::Outgoing => $edge->targetId,
+                Direction::Incoming => $edge->sourceId,
+                Direction::Both => $edge->sourceId === $nodeId ? $edge->targetId : $edge->sourceId,
+            };
             $children[] = [
                 'edge'   => $edge,
                 'child'  => $this->buildTree($neighborId, $direction, $maxDepth - 1, $visited),
@@ -128,62 +161,4 @@ final class ImpactAnalyzer
             'children' => $children,
         ];
     }
-}
-
-final readonly class ImpactResult
-{
-    public function __construct(
-        /** @var list<string> */
-        public array $changed,
-        /** @var array<string, ImpactedNode> */
-        public array $impacted,
-    ) {}
-
-    public function totalImpacted(): int
-    {
-        return count($this->impacted);
-    }
-
-    public function maxDepth(): int
-    {
-        $max = 0;
-        foreach ($this->impacted as $node) {
-            if ($node->distance > $max) {
-                $max = $node->distance;
-            }
-        }
-        return $max;
-    }
-
-    public function getNodesByDepth(): array
-    {
-        $grouped = [];
-        foreach ($this->impacted as $id => $node) {
-            $grouped[$node->distance][] = $node;
-        }
-        ksort($grouped);
-        return $grouped;
-    }
-
-    public function getModulesAffected(): array
-    {
-        $modules = [];
-        foreach ($this->impacted as $node) {
-            if ($node->node->module !== '') {
-                $modules[$node->node->module] = ($modules[$node->node->module] ?? 0) + 1;
-            }
-        }
-        arsort($modules);
-        return $modules;
-    }
-}
-
-final readonly class ImpactedNode
-{
-    public function __construct(
-        public Node   $node,
-        public int    $distance,
-        /** @var list<list<Edge>> */
-        public array  $paths,
-    ) {}
 }
