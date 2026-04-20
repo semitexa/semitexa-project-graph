@@ -51,19 +51,24 @@ final class ReviewGraphImpactCommand extends BaseCommand
     {
         $io = new SymfonyStyle($input, $output);
         $target = $input->getArgument('target');
-        $depth = $input->getOption('depth');
+        $depthOption = $input->getOption('depth');
+        $json = (bool) $input->getOption('json');
+        $ndjson = (bool) $input->getOption('ndjson');
 
         if (!is_string($target) || $target === '') {
             $io->error('Target must be a non-empty string.');
             return self::FAILURE;
         }
 
-        if (!is_scalar($depth)) {
-            $io->error('Depth must be scalar.');
+        if ($json && $ndjson) {
+            $io->error('Use either --json or --ndjson, not both.');
             return self::FAILURE;
         }
 
-        $depth = (int) $depth;
+        $depth = $this->parseDepth($depthOption, $io);
+        if ($depth === null) {
+            return self::FAILURE;
+        }
 
         $storage = $this->createStorage();
         $totalNodes = (int)($storage->getMeta('total_nodes') ?: 0);
@@ -82,17 +87,7 @@ final class ReviewGraphImpactCommand extends BaseCommand
 
         $impact = $analyzer->analyze([$nodeId], $depth);
 
-        if ($impact->totalImpacted() === 0) {
-            $io->text('No downstream impact detected for ' . $target);
-            return self::SUCCESS;
-        }
-
-        if ($input->getOption('json') && $input->getOption('ndjson')) {
-            $io->error('Use either --json or --ndjson, not both.');
-            return self::FAILURE;
-        }
-
-        if ($input->getOption('json')) {
+        if ($json) {
             $payload = json_encode($this->buildJsonPayload($impact), JSON_UNESCAPED_SLASHES);
             if ($payload === false) {
                 $io->error('Failed to encode JSON payload.');
@@ -103,8 +98,13 @@ final class ReviewGraphImpactCommand extends BaseCommand
             return self::SUCCESS;
         }
 
-        if ($input->getOption('ndjson')) {
-            return $this->emitNdjson($output, $impact);
+        if ($ndjson) {
+            return $this->emitNdjson($io, $output, $impact);
+        }
+
+        if ($impact->totalImpacted() === 0) {
+            $io->text('No downstream impact detected for ' . $target);
+            return self::SUCCESS;
         }
 
         $this->renderImpact($impact, $io);
@@ -142,7 +142,7 @@ final class ReviewGraphImpactCommand extends BaseCommand
      * mostly flat to make downstream grep/filter workflows practical, though
      * the summary line includes a `modules` collection.
      */
-    private function emitNdjson(OutputInterface $output, ImpactResult $impact): int
+    private function emitNdjson(SymfonyStyle $io, OutputInterface $output, ImpactResult $impact): int
     {
         $direct = 0;
         foreach ($impact->impacted as $impacted) {
@@ -163,6 +163,7 @@ final class ReviewGraphImpactCommand extends BaseCommand
             'modules'   => $modules,
         ], JSON_UNESCAPED_SLASHES);
         if ($summary === false) {
+            $io->error('Failed to encode NDJSON summary payload.');
             return self::FAILURE;
         }
 
@@ -180,6 +181,7 @@ final class ReviewGraphImpactCommand extends BaseCommand
                 'action'   => $isDirect ? 'edit' : 'review',
             ], JSON_UNESCAPED_SLASHES);
             if ($line === false) {
+                $io->error('Failed to encode NDJSON impacted-node payload.');
                 return self::FAILURE;
             }
 
@@ -187,6 +189,24 @@ final class ReviewGraphImpactCommand extends BaseCommand
         }
 
         return self::SUCCESS;
+    }
+
+    private function parseDepth(mixed $depthOption, SymfonyStyle $io): ?int
+    {
+        if (!is_scalar($depthOption)) {
+            $io->error('Depth must be a scalar integer value.');
+
+            return null;
+        }
+
+        $depth = trim((string) $depthOption);
+        if ($depth === '' || !preg_match('/^[1-9][0-9]*$/', $depth)) {
+            $io->error('Depth must be an integer greater than or equal to 1.');
+
+            return null;
+        }
+
+        return (int) $depth;
     }
 
     /**

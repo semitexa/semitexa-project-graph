@@ -66,10 +66,10 @@ final class ReviewGraphQueryCommand extends BaseCommand
 
         if (is_string($usages) && $usages !== '') {
             $edges = $query->getUsages($usages, 3);
-            $this->renderEdges($io, $edges, $query, $json, $ndjson);
+            return $this->renderEdges($io, $edges, $query, $json, $ndjson);
         } elseif (is_string($deps) && $deps !== '') {
             $edges = $query->getDependencies($deps, 3);
-            $this->renderEdges($io, $edges, $query, $json, $ndjson);
+            return $this->renderEdges($io, $edges, $query, $json, $ndjson);
         } elseif ($crossModule) {
             $from = $input->getOption('from');
             $to = $input->getOption('to');
@@ -82,27 +82,25 @@ final class ReviewGraphQueryCommand extends BaseCommand
                 return self::FAILURE;
             }
             $edges = $query->getCrossModuleEdges($from, $to);
-            $this->renderEdges($io, $edges, $query, $json, $ndjson);
+            return $this->renderEdges($io, $edges, $query, $json, $ndjson);
         } elseif (is_string($search) && $search !== '') {
             $nodes = $query->search($search);
-            $this->renderNodes($io, $nodes, $json, $ndjson);
+            return $this->renderNodes($io, $nodes, $json, $ndjson);
         } elseif (is_string($type) && $type !== '') {
             if ($module !== null && !is_string($module)) {
                 $io->error('Option --module must be a string.');
                 return self::FAILURE;
             }
             $nodes = $query->findNodes(type: $type, module: $module);
-            $this->renderNodes($io, $nodes, $json, $ndjson);
+            return $this->renderNodes($io, $nodes, $json, $ndjson);
         } else {
             $io->error('No query specified. Use --usages, --dependencies, --cross-module, --search, or --type.');
             return self::FAILURE;
         }
-
-        return self::SUCCESS;
     }
 
     /** @param list<\Semitexa\ProjectGraph\Domain\Model\Edge> $edges */
-    private function renderEdges(SymfonyStyle $io, array $edges, GraphQueryService $query, bool $json, bool $ndjson): void
+    private function renderEdges(SymfonyStyle $io, array $edges, GraphQueryService $query, bool $json, bool $ndjson): int
     {
         if ($json) {
             $data = array_map(fn($e) => [
@@ -114,11 +112,11 @@ final class ReviewGraphQueryCommand extends BaseCommand
             $payload = json_encode($data, JSON_UNESCAPED_SLASHES);
             if ($payload === false) {
                 $io->error('Failed to encode JSON payload.');
-                return;
+                return self::FAILURE;
             }
 
             $io->writeln($payload);
-            return;
+            return self::SUCCESS;
         }
 
         if ($ndjson) {
@@ -132,17 +130,18 @@ final class ReviewGraphQueryCommand extends BaseCommand
                 ], JSON_UNESCAPED_SLASHES);
                 if ($line === false) {
                     $io->error('Failed to encode NDJSON edge.');
-                    return;
+                    return self::FAILURE;
                 }
 
                 $io->writeln($line);
             }
-            return;
+
+            return self::SUCCESS;
         }
 
         if (empty($edges)) {
             $io->text('No edges found.');
-            return;
+            return self::SUCCESS;
         }
 
         foreach ($edges as $edge) {
@@ -152,10 +151,12 @@ final class ReviewGraphQueryCommand extends BaseCommand
             $tgtLabel = $target ? $target->fqcn : $edge->targetId;
             $io->text($srcLabel . ' --[' . $edge->type->value . ']--> ' . $tgtLabel);
         }
+
+        return self::SUCCESS;
     }
 
     /** @param list<\Semitexa\ProjectGraph\Domain\Model\Node> $nodes */
-    private function renderNodes(SymfonyStyle $io, array $nodes, bool $json, bool $ndjson): void
+    private function renderNodes(SymfonyStyle $io, array $nodes, bool $json, bool $ndjson): int
     {
         if ($json) {
             $data = array_map(fn($n) => [
@@ -168,11 +169,11 @@ final class ReviewGraphQueryCommand extends BaseCommand
             $payload = json_encode($data, JSON_UNESCAPED_SLASHES);
             if ($payload === false) {
                 $io->error('Failed to encode JSON payload.');
-                return;
+                return self::FAILURE;
             }
 
             $io->writeln($payload);
-            return;
+            return self::SUCCESS;
         }
 
         if ($ndjson) {
@@ -187,22 +188,25 @@ final class ReviewGraphQueryCommand extends BaseCommand
                 ], JSON_UNESCAPED_SLASHES);
                 if ($line === false) {
                     $io->error('Failed to encode NDJSON node.');
-                    return;
+                    return self::FAILURE;
                 }
 
                 $io->writeln($line);
             }
-            return;
+
+            return self::SUCCESS;
         }
 
         if (empty($nodes)) {
             $io->text('No nodes found.');
-            return;
+            return self::SUCCESS;
         }
 
         foreach ($nodes as $node) {
             $io->text('[' . $node->type->value . '] ' . $node->fqcn . ' (' . $node->module . ')');
         }
+
+        return self::SUCCESS;
     }
 
     private function createStorage(): GraphStorage
