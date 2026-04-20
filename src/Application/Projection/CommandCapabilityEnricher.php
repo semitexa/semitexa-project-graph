@@ -61,7 +61,9 @@ final class CommandCapabilityEnricher
 
         return new CommandCapability(
             name:            $commandName,
-            kind:            $curated?->kind ?? $this->inferKind($commandName),
+            kind:            $curated?->kind !== null && $curated->kind !== ''
+                                 ? $curated->kind
+                                 : $this->inferKind($commandName),
             summary:         $curated?->summary !== null && $curated->summary !== ''
                                  ? $curated->summary
                                  : ($asCommand?->description ?? ''),
