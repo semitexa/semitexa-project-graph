@@ -5,11 +5,26 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Projection;
 
 use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Dev\Capability\CapabilityRegistry;
+use Semitexa\Dev\Generation\Data\CommandCapability as CuratedCapability;
 use Semitexa\ProjectGraph\Attribute\CapabilityHint;
 use Semitexa\ProjectGraph\Domain\Model\Node;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputOption;
 
+/**
+ * Enriches a command node with metadata that makes it agent-actionable.
+ *
+ * Resolution order (first populated field wins — no silent mixing):
+ *   1. Curated {@see CapabilityRegistry} entry (ai:ask capabilities is the
+ *      canonical source — rich use_when/avoid_when/outputs/follow_up).
+ *   2. {@see CapabilityHint} attribute on the command class.
+ *   3. Symfony {@see AsCommand} attribute + discovered input definition.
+ *   4. Empty strings / empty arrays.
+ *
+ * Before this resolver existed, `ai:review-graph:capabilities` returned
+ * ~75 commands with almost every descriptive field empty. See AI_USAGE_REPORT.md §2 Finding 3.
+ */
 final class CommandCapabilityEnricher
 {
     public function enrich(Node $commandNode): CommandCapability
@@ -41,19 +56,51 @@ final class CommandCapabilityEnricher
         $inputs = $this->discoverInputs($ref);
         $flags = $this->discoverFlags($ref);
 
+        $commandName = $asCommand?->name ?? $commandNode->metadata['commandName'] ?? $commandNode->fqcn;
+        $curated = $this->findCurated($commandName);
+
         return new CommandCapability(
-            name:            $asCommand?->name ?? $commandNode->metadata['commandName'] ?? $commandNode->fqcn,
-            kind:            $this->inferKind($asCommand?->name ?? ''),
-            summary:         $asCommand?->description ?? '',
-            useWhen:         $hintInstance?->useWhen ?? '',
-            avoidWhen:       $hintInstance?->avoidWhen ?? '',
-            requiredInputs:  $inputs['required'],
-            optionalInputs:  $inputs['optional'],
-            outputs:         $hintInstance?->outputs ?? [],
-            supports:        $flags,
-            followUp:        $hintInstance?->followUp ?? [],
+            name:            $commandName,
+            kind:            $curated?->kind ?? $this->inferKind($commandName),
+            summary:         $curated?->summary !== null && $curated->summary !== ''
+                                 ? $curated->summary
+                                 : ($asCommand?->description ?? ''),
+            useWhen:         $curated?->use_when !== null && $curated->use_when !== ''
+                                 ? $curated->use_when
+                                 : ($hintInstance?->useWhen ?? ''),
+            avoidWhen:       $curated?->avoid_when !== null && $curated->avoid_when !== ''
+                                 ? $curated->avoid_when
+                                 : ($hintInstance?->avoidWhen ?? ''),
+            requiredInputs:  $curated?->required_inputs !== null && $curated->required_inputs !== []
+                                 ? $curated->required_inputs
+                                 : $inputs['required'],
+            optionalInputs:  $curated?->optional_inputs !== null && $curated->optional_inputs !== []
+                                 ? $curated->optional_inputs
+                                 : $inputs['optional'],
+            outputs:         $curated?->outputs !== null && $curated->outputs !== []
+                                 ? $curated->outputs
+                                 : ($hintInstance?->outputs ?? []),
+            supports:        $curated?->supports !== null && $curated->supports !== []
+                                 ? $curated->supports
+                                 : $flags,
+            followUp:        $curated?->follow_up !== null && $curated->follow_up !== []
+                                 ? $curated->follow_up
+                                 : ($hintInstance?->followUp ?? []),
             module:          $commandNode->module,
         );
+    }
+
+    private function findCurated(string $commandName): ?CuratedCapability
+    {
+        if (!class_exists(CapabilityRegistry::class)) {
+            return null;
+        }
+        foreach (CapabilityRegistry::all() as $entry) {
+            if ($entry->name === $commandName) {
+                return $entry;
+            }
+        }
+        return null;
     }
 
     private function inferKind(string $commandName): string

@@ -59,7 +59,13 @@ final class ReviewGraphCapabilitiesCommand extends BaseCommand
         $manifest = $projection->build(category: $category, module: $module);
 
         if ($input->getOption('json')) {
-            $output->writeln(json_encode($manifest->toArray(), JSON_UNESCAPED_SLASHES));
+            $payload = $manifest->toArray();
+            $payload['next_command'] = [
+                ['cmd' => 'ai:task', 'args' => ['"<what the user asked>"', '--json'], 'why' => 'classify the request before acting'],
+                ['cmd' => 'ai:ask', 'args' => ['capabilities', '--json'], 'why' => 'curated (non-graph) capability list — same fields, no project context'],
+                ['cmd' => 'ai:ask', 'args' => ['project', '--json'], 'why' => 'module-level structural overview'],
+            ];
+            $output->writeln(json_encode($payload, JSON_UNESCAPED_SLASHES));
             return self::SUCCESS;
         }
 
