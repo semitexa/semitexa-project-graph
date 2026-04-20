@@ -41,6 +41,7 @@ final class ReviewGraphQueryCommand extends BaseCommand
         $this->addOption('to', null, InputOption::VALUE_REQUIRED, 'Cross-module: to module');
         $this->addOption('search', null, InputOption::VALUE_REQUIRED, 'Full-text search');
         $this->addOption('json', null, InputOption::VALUE_NONE, 'Output as JSON');
+        $this->addOption('ndjson', null, InputOption::VALUE_NONE, 'Output as NDJSON');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -51,39 +52,55 @@ final class ReviewGraphQueryCommand extends BaseCommand
 
         $usages = $input->getOption('usages');
         $deps = $input->getOption('dependencies');
-        $crossModule = $input->getOption('cross-module');
+        $crossModule = (bool) $input->getOption('cross-module');
         $search = $input->getOption('search');
         $type = $input->getOption('type');
         $module = $input->getOption('module');
-        $json = $input->getOption('json');
+        $json = (bool) $input->getOption('json');
+        $ndjson = (bool) $input->getOption('ndjson');
 
-        if ($usages !== null) {
+        if ($json && $ndjson) {
+            $io->error('Use either --json or --ndjson, not both.');
+            return self::FAILURE;
+        }
+
+        if (is_string($usages) && $usages !== '') {
             $edges = $query->getUsages($usages, 3);
-            $this->renderEdges($io, $edges, $query, $json);
-        } elseif ($deps !== null) {
+            return $this->renderEdges($io, $edges, $query, $json, $ndjson);
+        } elseif (is_string($deps) && $deps !== '') {
             $edges = $query->getDependencies($deps, 3);
-            $this->renderEdges($io, $edges, $query, $json);
+            return $this->renderEdges($io, $edges, $query, $json, $ndjson);
         } elseif ($crossModule) {
             $from = $input->getOption('from');
             $to = $input->getOption('to');
+            if ($from !== null && !is_string($from)) {
+                $io->error('Option --from must be a string.');
+                return self::FAILURE;
+            }
+            if ($to !== null && !is_string($to)) {
+                $io->error('Option --to must be a string.');
+                return self::FAILURE;
+            }
             $edges = $query->getCrossModuleEdges($from, $to);
-            $this->renderEdges($io, $edges, $query, $json);
-        } elseif ($search !== null) {
+            return $this->renderEdges($io, $edges, $query, $json, $ndjson);
+        } elseif (is_string($search) && $search !== '') {
             $nodes = $query->search($search);
-            $this->renderNodes($io, $nodes, $json);
-        } elseif ($type !== null) {
+            return $this->renderNodes($io, $nodes, $json, $ndjson);
+        } elseif (is_string($type) && $type !== '') {
+            if ($module !== null && !is_string($module)) {
+                $io->error('Option --module must be a string.');
+                return self::FAILURE;
+            }
             $nodes = $query->findNodes(type: $type, module: $module);
-            $this->renderNodes($io, $nodes, $json);
+            return $this->renderNodes($io, $nodes, $json, $ndjson);
         } else {
             $io->error('No query specified. Use --usages, --dependencies, --cross-module, --search, or --type.');
             return self::FAILURE;
         }
-
-        return self::SUCCESS;
     }
 
     /** @param list<\Semitexa\ProjectGraph\Domain\Model\Edge> $edges */
-    private function renderEdges(SymfonyStyle $io, array $edges, GraphQueryService $query, bool $json): void
+    private function renderEdges(SymfonyStyle $io, array $edges, GraphQueryService $query, bool $json, bool $ndjson): int
     {
         if ($json) {
             $data = array_map(fn($e) => [
@@ -92,13 +109,39 @@ final class ReviewGraphQueryCommand extends BaseCommand
                 'type'     => $e->type->value,
                 'metadata' => $e->metadata,
             ], $edges);
-            $io->writeln(json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
-            return;
+            $payload = json_encode($data, JSON_UNESCAPED_SLASHES);
+            if ($payload === false) {
+                $io->error('Failed to encode JSON payload.');
+                return self::FAILURE;
+            }
+
+            $io->writeln($payload);
+            return self::SUCCESS;
+        }
+
+        if ($ndjson) {
+            foreach ($edges as $edge) {
+                $line = json_encode([
+                    'kind'     => 'edge',
+                    'source'   => $edge->sourceId,
+                    'target'   => $edge->targetId,
+                    'type'     => $edge->type->value,
+                    'metadata' => $edge->metadata,
+                ], JSON_UNESCAPED_SLASHES);
+                if ($line === false) {
+                    $io->error('Failed to encode NDJSON edge.');
+                    return self::FAILURE;
+                }
+
+                $io->writeln($line);
+            }
+
+            return self::SUCCESS;
         }
 
         if (empty($edges)) {
             $io->text('No edges found.');
-            return;
+            return self::SUCCESS;
         }
 
         foreach ($edges as $edge) {
@@ -108,10 +151,12 @@ final class ReviewGraphQueryCommand extends BaseCommand
             $tgtLabel = $target ? $target->fqcn : $edge->targetId;
             $io->text($srcLabel . ' --[' . $edge->type->value . ']--> ' . $tgtLabel);
         }
+
+        return self::SUCCESS;
     }
 
     /** @param list<\Semitexa\ProjectGraph\Domain\Model\Node> $nodes */
-    private function renderNodes(SymfonyStyle $io, array $nodes, bool $json): void
+    private function renderNodes(SymfonyStyle $io, array $nodes, bool $json, bool $ndjson): int
     {
         if ($json) {
             $data = array_map(fn($n) => [
@@ -121,18 +166,47 @@ final class ReviewGraphQueryCommand extends BaseCommand
                 'file'     => $n->file,
                 'module'   => $n->module,
             ], $nodes);
-            $io->writeln(json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
-            return;
+            $payload = json_encode($data, JSON_UNESCAPED_SLASHES);
+            if ($payload === false) {
+                $io->error('Failed to encode JSON payload.');
+                return self::FAILURE;
+            }
+
+            $io->writeln($payload);
+            return self::SUCCESS;
+        }
+
+        if ($ndjson) {
+            foreach ($nodes as $node) {
+                $line = json_encode([
+                    'kind'   => 'node',
+                    'id'     => $node->id,
+                    'type'   => $node->type->value,
+                    'fqcn'   => $node->fqcn,
+                    'file'   => $node->file,
+                    'module' => $node->module,
+                ], JSON_UNESCAPED_SLASHES);
+                if ($line === false) {
+                    $io->error('Failed to encode NDJSON node.');
+                    return self::FAILURE;
+                }
+
+                $io->writeln($line);
+            }
+
+            return self::SUCCESS;
         }
 
         if (empty($nodes)) {
             $io->text('No nodes found.');
-            return;
+            return self::SUCCESS;
         }
 
         foreach ($nodes as $node) {
             $io->text('[' . $node->type->value . '] ' . $node->fqcn . ' (' . $node->module . ')');
         }
+
+        return self::SUCCESS;
     }
 
     private function createStorage(): GraphStorage

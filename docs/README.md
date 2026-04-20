@@ -52,5 +52,5 @@ src/
 
 ## Related
 
-- [Technical Design](../../../var/docs/FOR_IMPLEMENTATION/PROJECT_GRAPH_INTELLIGENCE_LAYER/design.md) — Full intelligence layer design
-- [Code Review Graph](../../../var/docs/FOR_IMPLEMENTATION/CODE_REVIEW_GRAPH/) — Related code review graph design
+- Canonical framework docs: `packages/semitexa-docs/docs/` and `packages/semitexa-docs/docs/workspace/`.
+- For package-local architecture and intelligence-layer notes, see the other files in this directory.

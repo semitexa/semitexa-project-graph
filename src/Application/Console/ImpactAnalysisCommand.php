@@ -46,7 +46,7 @@ final class ImpactAnalysisCommand extends Command
         $impact = $this->analyzeImpact($nodeId, $depth);
 
         if ($format === 'json') {
-            $output->writeln(json_encode($impact, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            $output->writeln(json_encode($impact, JSON_UNESCAPED_SLASHES));
             return Command::SUCCESS;
         }
 
