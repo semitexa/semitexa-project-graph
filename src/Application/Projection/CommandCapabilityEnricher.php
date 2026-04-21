@@ -5,8 +5,6 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Projection;
 
 use Semitexa\Core\Attribute\AsCommand;
-use Semitexa\Dev\Capability\CapabilityRegistry;
-use Semitexa\Dev\Generation\Data\CommandCapability as CuratedCapability;
 use Semitexa\ProjectGraph\Attribute\CapabilityHint;
 use Semitexa\ProjectGraph\Domain\Model\Node;
 use Symfony\Component\Console\Input\InputArgument;
@@ -27,6 +25,11 @@ use Symfony\Component\Console\Input\InputOption;
  */
 final class CommandCapabilityEnricher
 {
+    private const CURATED_REGISTRY_CLASS = 'Semitexa\\Dev\\Capability\\CapabilityRegistry';
+
+    /** @var array<string, object>|null */
+    private static ?array $curatedByName = null;
+
     public function enrich(Node $commandNode): CommandCapability
     {
         $fqcn = $commandNode->fqcn;
@@ -92,17 +95,23 @@ final class CommandCapabilityEnricher
         );
     }
 
-    private function findCurated(string $commandName): ?CuratedCapability
+    private function findCurated(string $commandName): ?object
     {
-        if (!class_exists(CapabilityRegistry::class)) {
+        if (!class_exists(self::CURATED_REGISTRY_CLASS)) {
             return null;
         }
-        foreach (CapabilityRegistry::all() as $entry) {
-            if ($entry->name === $commandName) {
-                return $entry;
+
+        if (self::$curatedByName === null) {
+            self::$curatedByName = [];
+            foreach (self::CURATED_REGISTRY_CLASS::all() as $entry) {
+                if (!isset($entry->name) || !is_string($entry->name) || $entry->name === '') {
+                    continue;
+                }
+                self::$curatedByName[$entry->name] = $entry;
             }
         }
-        return null;
+
+        return self::$curatedByName[$commandName] ?? null;
     }
 
     private function inferKind(string $commandName): string

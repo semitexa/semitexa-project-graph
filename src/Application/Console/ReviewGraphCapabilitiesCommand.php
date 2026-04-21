@@ -60,8 +60,9 @@ final class ReviewGraphCapabilitiesCommand extends BaseCommand
 
         if ($input->getOption('json')) {
             $payload = $manifest->toArray();
-            $payload['next_command'] = [
-                ['cmd' => 'ai:task', 'args' => ['"<what the user asked>"', '--json'], 'why' => 'classify the request before acting'],
+            $payload['artifact'] = 'semitexa.review-graph-capabilities/v3';
+            $payload['next_commands'] = [
+                ['cmd' => 'ai:task', 'args' => ['--json'], 'placeholder' => '<what the user asked>', 'why' => 'classify the request before acting'],
                 ['cmd' => 'ai:ask', 'args' => ['capabilities', '--json'], 'why' => 'curated (non-graph) capability list — same fields, no project context'],
                 ['cmd' => 'ai:ask', 'args' => ['project', '--json'], 'why' => 'module-level structural overview'],
             ];
