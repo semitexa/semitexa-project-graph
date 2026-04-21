@@ -49,9 +49,27 @@ final class GraphNodeRepository
 
     public function findByFqcn(string $fqcn): ?Node
     {
-        return $this->newQuery()
+        $candidates = $this->newQuery()
             ->where(ColumnRef::for(GraphNodeResource::class, 'fqcn'), Operator::Equals, $fqcn)
-            ->fetchOneAs(Node::class, $this->mapperRegistry) ?: null;
+            ->fetchAllAs(Node::class, $this->mapperRegistry);
+
+        if (empty($candidates)) {
+            return null;
+        }
+
+        foreach ($candidates as $node) {
+            if (!$node->isPlaceholder && str_starts_with($node->id, 'class:')) {
+                return $node;
+            }
+        }
+
+        foreach ($candidates as $node) {
+            if (!$node->isPlaceholder) {
+                return $node;
+            }
+        }
+
+        return $candidates[0];
     }
 
     /** @return list<Node> */

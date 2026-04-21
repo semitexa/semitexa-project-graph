@@ -21,7 +21,7 @@ use Symfony\Component\Console\Input\InputOption;
  *   4. Empty strings / empty arrays.
  *
  * Before this resolver existed, `ai:review-graph:capabilities` returned
- * ~75 commands with almost every descriptive field empty. See AI_USAGE_REPORT.md §2 Finding 3.
+ * ~75 commands with almost every descriptive field empty. See var/docs/ai-usage-report.md §2 Finding 3.
  */
 final class CommandCapabilityEnricher
 {

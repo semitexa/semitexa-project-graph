@@ -65,10 +65,20 @@ final class ReviewGraphQueryCommand extends BaseCommand
         }
 
         if (is_string($usages) && $usages !== '') {
-            $edges = $query->getUsages($usages, 3);
+            $nodeId = $this->resolveNodeId($storage, $usages);
+            if ($nodeId === null) {
+                $io->error('Node not found: ' . $usages);
+                return self::FAILURE;
+            }
+            $edges = $query->getUsages($nodeId, 3);
             return $this->renderEdges($io, $edges, $query, $json, $ndjson);
         } elseif (is_string($deps) && $deps !== '') {
-            $edges = $query->getDependencies($deps, 3);
+            $nodeId = $this->resolveNodeId($storage, $deps);
+            if ($nodeId === null) {
+                $io->error('Node not found: ' . $deps);
+                return self::FAILURE;
+            }
+            $edges = $query->getDependencies($nodeId, 3);
             return $this->renderEdges($io, $edges, $query, $json, $ndjson);
         } elseif ($crossModule) {
             $from = $input->getOption('from');
@@ -212,5 +222,20 @@ final class ReviewGraphQueryCommand extends BaseCommand
     private function createStorage(): GraphStorage
     {
         return $this->createProjectGraphStorage($this->connections);
+    }
+
+    private function resolveNodeId(GraphStorage $storage, string $target): ?string
+    {
+        $node = $storage->nodes->findById($target);
+        if ($node !== null) {
+            return $node->id;
+        }
+
+        $node = $storage->nodes->findByFqcn($target);
+        if ($node !== null) {
+            return $node->id;
+        }
+
+        return null;
     }
 }
