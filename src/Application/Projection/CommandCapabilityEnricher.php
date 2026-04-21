@@ -97,13 +97,14 @@ final class CommandCapabilityEnricher
 
     private function findCurated(string $commandName): ?object
     {
-        if (!class_exists(self::CURATED_REGISTRY_CLASS)) {
+        $registryClass = self::CURATED_REGISTRY_CLASS;
+        if (!class_exists($registryClass) || !method_exists($registryClass, 'all')) {
             return null;
         }
 
         if (self::$curatedByName === null) {
             self::$curatedByName = [];
-            foreach (self::CURATED_REGISTRY_CLASS::all() as $entry) {
+            foreach ($registryClass::all() as $entry) {
                 if (!isset($entry->name) || !is_string($entry->name) || $entry->name === '') {
                     continue;
                 }
