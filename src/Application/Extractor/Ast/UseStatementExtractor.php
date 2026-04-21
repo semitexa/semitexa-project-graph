@@ -6,6 +6,7 @@ namespace Semitexa\ProjectGraph\Application\Extractor\Ast;
 
 use PhpParser\Node as AstNode;
 use PhpParser\NodeVisitorAbstract;
+use PhpParser\NodeTraverser;
 use Semitexa\ProjectGraph\Application\Extractor\ExtractionResult;
 use Semitexa\ProjectGraph\Application\Extractor\ExtractorInterface;
 use Semitexa\ProjectGraph\Application\Graph\EdgeType;
@@ -25,8 +26,13 @@ final class UseStatementExtractor implements ExtractorInterface
         $result = new ExtractionResult();
 
         $visitor = new class($result) extends NodeVisitorAbstract {
-            /** @var list<array{fqcn: string, alias: ?string}> */
-            private array $pendingImports = [];
+            private string $currentNamespace = '';
+
+            /** @var array<string, list<array{fqcn: string, alias: ?string}>> */
+            private array $importsByNamespace = [];
+
+            /** @var array<string, list<string>> */
+            private array $classesByNamespace = [];
 
             public function __construct(
                 private readonly ExtractionResult $result,
@@ -35,7 +41,9 @@ final class UseStatementExtractor implements ExtractorInterface
             public function enterNode(AstNode $node): ?int
             {
                 if ($node instanceof AstNode\Stmt\Namespace_) {
-                    $this->pendingImports = [];
+                    $this->currentNamespace = $node->name?->toString() ?? '';
+                    $this->importsByNamespace[$this->currentNamespace] ??= [];
+                    $this->classesByNamespace[$this->currentNamespace] ??= [];
                 }
 
                 if ($node instanceof AstNode\Stmt\Use_) {
@@ -44,7 +52,7 @@ final class UseStatementExtractor implements ExtractorInterface
                             && $use->type !== AstNode\Stmt\Use_::TYPE_UNKNOWN) {
                             continue;
                         }
-                        $this->pendingImports[] = [
+                        $this->importsByNamespace[$this->currentNamespace][] = [
                             'fqcn'  => $use->name->toString(),
                             'alias' => $use->alias?->toString(),
                         ];
@@ -58,7 +66,7 @@ final class UseStatementExtractor implements ExtractorInterface
                         if ($type !== AstNode\Stmt\Use_::TYPE_NORMAL) {
                             continue;
                         }
-                        $this->pendingImports[] = [
+                        $this->importsByNamespace[$this->currentNamespace][] = [
                             'fqcn'  => $prefix . '\\' . $use->name->toString(),
                             'alias' => $use->alias?->toString(),
                         ];
@@ -66,14 +74,24 @@ final class UseStatementExtractor implements ExtractorInterface
                 }
 
                 if ($node instanceof AstNode\Stmt\ClassLike && $node->namespacedName !== null) {
-                    $classFqcn = $node->namespacedName->toString();
-                    foreach ($this->pendingImports as $import) {
-                        $this->result->addEdge(new Edge(
-                            sourceId: NodeId::forClass($classFqcn),
-                            targetId: NodeId::forClass($import['fqcn']),
-                            type:     EdgeType::Imports,
-                            metadata: ['alias' => $import['alias']],
-                        ));
+                    $this->classesByNamespace[$this->currentNamespace][] = $node->namespacedName->toString();
+                }
+
+                return null;
+            }
+
+            public function afterTraverse(array $nodes): ?array
+            {
+                foreach ($this->classesByNamespace as $namespace => $classes) {
+                    foreach ($classes as $classFqcn) {
+                        foreach ($this->importsByNamespace[$namespace] ?? [] as $import) {
+                            $this->result->addEdge(new Edge(
+                                sourceId: NodeId::forClass($classFqcn),
+                                targetId: NodeId::forClass($import['fqcn']),
+                                type:     EdgeType::Imports,
+                                metadata: ['alias' => $import['alias']],
+                            ));
+                        }
                     }
                 }
 
@@ -81,7 +99,7 @@ final class UseStatementExtractor implements ExtractorInterface
             }
         };
 
-        $traverser = new \PhpParser\NodeTraverser();
+        $traverser = new NodeTraverser();
         $traverser->addVisitor($visitor);
         $traverser->traverse($file->ast());
 
