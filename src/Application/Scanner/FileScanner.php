@@ -27,6 +27,9 @@ final class FileScanner
                         return !in_array($file->getBasename(), self::EXCLUDED_DIRS, true);
                     }
                     $path = $file->getRealPath();
+                    if ($path === false) {
+                        return false;
+                    }
                     foreach ($ignorePatterns as $pattern) {
                         if (str_ends_with($pattern, '/')) {
                             $relative = str_replace($projectRoot . '/', '', $path);
