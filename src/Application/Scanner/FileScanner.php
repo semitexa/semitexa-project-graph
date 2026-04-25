@@ -26,7 +26,10 @@ final class FileScanner
                     if ($file->isDir()) {
                         return !in_array($file->getBasename(), self::EXCLUDED_DIRS, true);
                     }
-                    $path = $file->getRealPath();
+                    $path = self::resolvePath($file);
+                    if ($path === null) {
+                        return false;
+                    }
                     foreach ($ignorePatterns as $pattern) {
                         if (str_ends_with($pattern, '/')) {
                             $relative = str_replace($projectRoot . '/', '', $path);
@@ -47,8 +50,15 @@ final class FileScanner
                 continue;
             }
 
-            $path = $file->getRealPath();
+            $path = self::resolvePath($file);
+            if ($path === null) {
+                continue;
+            }
+
             $hash = hash_file('xxh3', $path);
+            if ($hash === false) {
+                throw new \RuntimeException(sprintf('Unable to hash scanned file: %s', $path));
+            }
 
             if (!isset($indexedFiles[$path])) {
                 $results[] = new FileScanResult($path, $hash, FileStatus::Added);
@@ -64,5 +74,20 @@ final class FileScanner
         }
 
         return $results;
+    }
+
+    private static function resolvePath(\SplFileInfo $file): ?string
+    {
+        $path = $file->getRealPath();
+        if (is_string($path)) {
+            return $path;
+        }
+
+        $path = $file->getPathname();
+        if ($path !== '' && file_exists($path)) {
+            return $path;
+        }
+
+        return null;
     }
 }
