@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Db\Mapper;
 
 use Semitexa\Orm\Attribute\AsMapper;
-use Semitexa\Orm\Contract\ResourceModelMapperInterface;
+use Semitexa\Orm\Domain\Contract\ResourceModelMapperInterface;
 use Semitexa\ProjectGraph\Application\Db\Model\GraphEdgeResource;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Application\Graph\EdgeType;

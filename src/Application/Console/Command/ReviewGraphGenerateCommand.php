@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace Semitexa\ProjectGraph\Application\Console;
+namespace Semitexa\ProjectGraph\Application\Console\Command;
 
 use Semitexa\Core\Attribute\AsCommand;
-use Semitexa\Core\Console\Command\BaseCommand;
+use Semitexa\Core\Console\BaseCommand;
 use Semitexa\ProjectGraph\Application\Extractor\ExtractorPipeline;
 use Semitexa\ProjectGraph\Application\Graph\GraphBuilder;
 use Semitexa\ProjectGraph\Application\Index\IncrementalEngine;

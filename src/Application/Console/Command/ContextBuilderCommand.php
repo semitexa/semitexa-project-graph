@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Semitexa\ProjectGraph\Application\Console;
+namespace Semitexa\ProjectGraph\Application\Console\Command;
 
 use Semitexa\ProjectGraph\Application\Graph\EdgeType;
 use Semitexa\ProjectGraph\Application\Graph\NodeId;
