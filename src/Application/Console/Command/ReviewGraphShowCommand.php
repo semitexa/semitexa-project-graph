@@ -6,11 +6,11 @@ namespace Semitexa\ProjectGraph\Application\Console\Command;
 
 use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Console\BaseCommand;
-use Semitexa\Orm\Connection\ConnectionRegistry;
-use Semitexa\ProjectGraph\Application\Db\GraphStorage;
-use Semitexa\ProjectGraph\Application\Query\GraphQueryService;
-use Semitexa\ProjectGraph\Application\Query\ReviewGraphRenderer;
-use Semitexa\ProjectGraph\Application\Support\UsesProjectGraphConnection;
+use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
+use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
+use Semitexa\ProjectGraph\Application\Service\Query\GraphQueryService;
+use Semitexa\ProjectGraph\Application\Service\Query\ReviewGraphRenderer;
+use Semitexa\ProjectGraph\Application\Service\Support\UsesProjectGraphConnection;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;

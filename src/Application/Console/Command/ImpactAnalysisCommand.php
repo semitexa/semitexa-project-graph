@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Console\Command;
 
-use Semitexa\ProjectGraph\Application\Graph\EdgeType;
-use Semitexa\ProjectGraph\Application\Graph\NodeId;
-use Semitexa\ProjectGraph\Application\Query\Direction;
-use Semitexa\ProjectGraph\Application\Query\GraphQueryService;
+use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
+use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
+use Semitexa\ProjectGraph\Application\Service\Query\Direction;
+use Semitexa\ProjectGraph\Application\Service\Query\GraphQueryService;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
