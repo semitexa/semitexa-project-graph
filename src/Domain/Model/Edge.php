@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Domain\Model;
 
-use Semitexa\ProjectGraph\Application\Graph\EdgeType;
+use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
 
 final readonly class Edge
 {
