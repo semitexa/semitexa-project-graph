@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Service\Extractor\Attribute;
 
+use Semitexa\Authorization\Attribute\AsProtectedPayload;
+use Semitexa\Authorization\Attribute\AsServicePayload;
 use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Attribute\AsEventListener;
-use Semitexa\Core\Attribute\AsPayload;
 use Semitexa\Core\Attribute\AsPayloadHandler;
+use Semitexa\Core\Attribute\AsPublicPayload;
 use Semitexa\Core\Attribute\AsResource;
 use Semitexa\Core\Attribute\AsService;
 use Semitexa\Core\Attribute\ExecutionScoped;
@@ -16,15 +18,17 @@ use Semitexa\Core\Attribute\InjectAsMutable;
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractionResult;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractorInterface;
-use Semitexa\ProjectGraph\Domain\Model\Node;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
 use Semitexa\ProjectGraph\Application\Service\Parser\ParsedFile;
+use Semitexa\ProjectGraph\Domain\Model\Node;
 
 final class GenericAttributeExtractor implements ExtractorInterface
 {
     private const HANDLED = [
-        AsPayload::class,
+        AsPublicPayload::class,
+        AsProtectedPayload::class,
+        AsServicePayload::class,
         AsPayloadHandler::class,
         AsResource::class,
         AsService::class,
