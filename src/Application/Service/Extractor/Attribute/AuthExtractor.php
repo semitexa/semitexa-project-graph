@@ -4,19 +4,19 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Service\Extractor\Attribute;
 
-use Semitexa\Core\Attribute\AsAuthHandler;
-use Semitexa\Core\Attribute\AuthLevel;
-use Semitexa\Core\Attribute\PublicEndpoint;
-use Semitexa\Core\Attribute\RequiresCapability;
-use Semitexa\Core\Attribute\RequiresPermission;
+use Semitexa\Auth\Attribute\AsAuthHandler;
+use Semitexa\Authorization\Attribute\AsServicePayload;
+use Semitexa\Authorization\Attribute\RequiresCapability;
+use Semitexa\Authorization\Attribute\RequiresPermission;
+use Semitexa\Core\Attribute\AsPublicPayload;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractionResult;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractorInterface;
-use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
-use Semitexa\ProjectGraph\Domain\Model\Node;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
 use Semitexa\ProjectGraph\Application\Service\Parser\ParsedFile;
+use Semitexa\ProjectGraph\Domain\Model\Edge;
+use Semitexa\ProjectGraph\Domain\Model\Node;
 
 final class AuthExtractor implements ExtractorInterface
 {
@@ -25,7 +25,8 @@ final class AuthExtractor implements ExtractorInterface
         return $file->hasAttribute(AsAuthHandler::class)
             || $file->hasAttribute(RequiresPermission::class)
             || $file->hasAttribute(RequiresCapability::class)
-            || $file->hasAttribute(PublicEndpoint::class);
+            || $file->hasAttribute(AsPublicPayload::class)
+            || $file->hasAttribute(AsServicePayload::class);
     }
 
     public function extract(ParsedFile $file): ExtractionResult
@@ -50,12 +51,6 @@ final class AuthExtractor implements ExtractorInterface
                     ],
                 ));
 
-                if ($classInfo->hasAttribute(AuthLevel::class)) {
-                    $levelAttr = $classInfo->getAttribute(AuthLevel::class);
-                    $levelInstance = $levelAttr?->newInstance();
-                    $result->addNodeMetadata(NodeId::forClass($classInfo->fqcn), 'authLevel', $levelInstance);
-                }
-
                 $result->addEdge(new Edge(
                     sourceId: NodeId::forClass($classInfo->fqcn),
                     targetId: 'auth:handler',
@@ -66,7 +61,7 @@ final class AuthExtractor implements ExtractorInterface
 
             foreach ($classInfo->getAttributes(RequiresPermission::class) as $permAttr) {
                 $perm = $permAttr->newInstance();
-                $slug = $perm->slug ?? '';
+                $slug = $perm->permission ?? '';
                 $result->addEdge(new Edge(
                     sourceId: NodeId::forClass($classInfo->fqcn),
                     targetId: 'permission:' . $slug,
@@ -77,7 +72,8 @@ final class AuthExtractor implements ExtractorInterface
 
             foreach ($classInfo->getAttributes(RequiresCapability::class) as $capAttr) {
                 $cap = $capAttr->newInstance();
-                $slug = $cap->slug ?? '';
+                $capability = $cap->capability ?? null;
+                $slug = $capability instanceof \BackedEnum ? (string) $capability->value : '';
                 $result->addEdge(new Edge(
                     sourceId: NodeId::forClass($classInfo->fqcn),
                     targetId: 'capability:' . $slug,
@@ -86,8 +82,10 @@ final class AuthExtractor implements ExtractorInterface
                 ));
             }
 
-            if ($classInfo->hasAttribute(PublicEndpoint::class)) {
-                $result->addNodeMetadata(NodeId::forClass($classInfo->fqcn), 'public', true);
+            if ($classInfo->hasAttribute(AsPublicPayload::class)) {
+                $result->addNodeMetadata(NodeId::forClass($classInfo->fqcn), 'accessType', 'public');
+            } elseif ($classInfo->hasAttribute(AsServicePayload::class)) {
+                $result->addNodeMetadata(NodeId::forClass($classInfo->fqcn), 'accessType', 'service');
             }
         }
 

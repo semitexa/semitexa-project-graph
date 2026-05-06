@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Service\Extractor\Attribute;
 
-use Semitexa\Core\Attribute\AsPayload;
+use Semitexa\Authorization\Attribute\AsProtectedPayload;
+use Semitexa\Authorization\Attribute\AsServicePayload;
 use Semitexa\Core\Attribute\AsPayloadHandler;
+use Semitexa\Core\Attribute\AsPublicPayload;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractionResult;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractorInterface;
 use Semitexa\ProjectGraph\Application\Service\Extractor\SafeAttributeResolver;
@@ -20,18 +22,33 @@ final class ExecutionFlowExtractor implements ExtractorInterface
 {
     use SafeAttributeResolver;
 
+    private const PAYLOAD_ROUTE_ATTRIBUTES = [
+        AsPublicPayload::class,
+        AsProtectedPayload::class,
+        AsServicePayload::class,
+        'Semitexa\Core\Attribute\AsPayload',
+    ];
+
     public function supports(ParsedFile $file): bool
     {
-        return $file->hasAttribute(AsPayload::class)
-            || $file->hasAttribute(AsPayloadHandler::class);
+        if ($file->hasAttribute(AsPayloadHandler::class)) {
+            return true;
+        }
+        foreach (self::PAYLOAD_ROUTE_ATTRIBUTES as $attributeClass) {
+            if ($file->hasAttribute($attributeClass)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public function extract(ParsedFile $file): ExtractionResult
     {
         $result = new ExtractionResult();
 
-        foreach ($file->getClassesWithAttribute(AsPayload::class) as $payload) {
-            $attr = $payload->getAttribute(AsPayload::class);
+        foreach (self::PAYLOAD_ROUTE_ATTRIBUTES as $attributeClass) {
+        foreach ($file->getClassesWithAttribute($attributeClass) as $payload) {
+            $attr = $payload->getAttribute($attributeClass);
             if ($attr === null) continue;
             $instance = $this->safeNewInstance($attr);
             if ($instance === null) continue;
@@ -78,6 +95,7 @@ final class ExecutionFlowExtractor implements ExtractorInterface
                 type: EdgeType::ParticipatesInFlow,
                 metadata: ['role' => 'entry'],
             ));
+        }
         }
 
         foreach ($file->getClassesWithAttribute(AsPayloadHandler::class) as $handler) {
