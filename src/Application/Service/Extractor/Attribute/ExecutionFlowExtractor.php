@@ -26,6 +26,7 @@ final class ExecutionFlowExtractor implements ExtractorInterface
         AsPublicPayload::class,
         AsProtectedPayload::class,
         AsServicePayload::class,
+        'Semitexa\Core\Attribute\AsPayload',
     ];
 
     public function supports(ParsedFile $file): bool

@@ -32,9 +32,10 @@ final class PayloadExtractor implements ExtractorInterface
     use SafeAttributeResolver;
 
     private const ACCESS_ATTRIBUTES = [
-        AsPublicPayload::class    => 'public',
-        AsProtectedPayload::class => 'protected',
-        AsServicePayload::class   => 'service',
+        AsPublicPayload::class                      => 'public',
+        AsProtectedPayload::class                   => 'protected',
+        AsServicePayload::class                     => 'service',
+        'Semitexa\Core\Attribute\AsPayload'         => 'protected',
     ];
 
     public function supports(ParsedFile $file): bool
