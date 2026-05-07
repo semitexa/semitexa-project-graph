@@ -28,5 +28,11 @@
             "Semitexa\\ProjectGraph\\Tests\\": "tests/"
         }
     },
-    "keywords": ["semitexa", "project-graph", "code-analysis", "knowledge-graph"]
+    "keywords": [
+        "semitexa",
+        "project-graph",
+        "code-analysis",
+        "knowledge-graph"
+    ],
+    "version": "v0.0.1"
 }
