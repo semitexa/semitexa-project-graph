@@ -33,6 +33,5 @@
         "project-graph",
         "code-analysis",
         "knowledge-graph"
-    ],
-    "version": "v0.0.1"
+    ]
 }
