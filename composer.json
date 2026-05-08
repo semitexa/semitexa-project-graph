@@ -1,6 +1,6 @@
 {
     "name": "semitexa/project-graph",
-    "description": "Semitexa Project Graph — persistent codebase knowledge graph for impact analysis and LLM context",
+    "description": "Semitexa Project Graph \u2014 persistent codebase knowledge graph for impact analysis and LLM context",
     "type": "semitexa-module",
     "license": "MIT",
     "authors": [
@@ -33,6 +33,5 @@
         "project-graph",
         "code-analysis",
         "knowledge-graph"
-    ],
-    "version": "v0.0.1"
+    ]
 }
