@@ -4,13 +4,13 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Service\Extractor\Attribute;
 
-use Semitexa\Core\Attribute\AsComponent;
-use Semitexa\Core\Attribute\AsDataProvider;
-use Semitexa\Core\Attribute\AsDeferred;
-use Semitexa\Core\Attribute\AsLayoutSlot;
-use Semitexa\Core\Attribute\AsSlotHandler;
-use Semitexa\Core\Attribute\AsSlotResource;
-use Semitexa\Core\Attribute\AsTwigExtension;
+use Semitexa\Ssr\Attribute\AsComponent;
+use Semitexa\Ssr\Attribute\AsDataProvider;
+use Semitexa\Ssr\Attribute\AsDeferred;
+use Semitexa\Ssr\Attribute\AsLayoutSlot;
+use Semitexa\Ssr\Attribute\AsSlotHandler;
+use Semitexa\Ssr\Attribute\AsSlotResource;
+use Semitexa\Ssr\Attribute\AsTwigExtension;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractionResult;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractorInterface;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
