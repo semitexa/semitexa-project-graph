@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Service\Extractor\Attribute;
 
-use Semitexa\Core\Attribute\AsScheduledJob;
+use Semitexa\Scheduler\Attribute\AsScheduledJob;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractionResult;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractorInterface;
 use Semitexa\ProjectGraph\Domain\Model\Edge;

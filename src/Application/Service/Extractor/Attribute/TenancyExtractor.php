@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Service\Extractor\Attribute;
 
-use Semitexa\Core\Attribute\AsTenancyLayersProvider;
-use Semitexa\Core\Attribute\AsTenantLayerStrategy;
-use Semitexa\Core\Attribute\TenantIsolated;
+use Semitexa\Tenancy\Attribute\AsTenancyLayersProvider;
+use Semitexa\Tenancy\Attribute\AsTenantLayerStrategy;
+use Semitexa\Tenancy\Attribute\TenantIsolated;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractionResult;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractorInterface;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
