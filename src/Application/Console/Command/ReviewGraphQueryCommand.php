@@ -40,6 +40,7 @@ final class ReviewGraphQueryCommand extends BaseCommand
         $this->addOption('from', null, InputOption::VALUE_REQUIRED, 'Cross-module: from module');
         $this->addOption('to', null, InputOption::VALUE_REQUIRED, 'Cross-module: to module');
         $this->addOption('search', null, InputOption::VALUE_REQUIRED, 'Full-text search');
+        $this->addOption('compact', null, InputOption::VALUE_NONE, 'Deduplicated per-class summary (LLM-friendly): one row per counterpart class with edge kinds + count');
         $this->addOption('json', null, InputOption::VALUE_NONE, 'Output as JSON');
         $this->addOption('ndjson', null, InputOption::VALUE_NONE, 'Output as NDJSON');
     }
@@ -57,6 +58,7 @@ final class ReviewGraphQueryCommand extends BaseCommand
         $type = $input->getOption('type');
         $module = $input->getOption('module');
         $json = (bool) $input->getOption('json');
+        $compact = (bool) $input->getOption('compact');
         $ndjson = (bool) $input->getOption('ndjson');
 
         if ($json && $ndjson) {
@@ -71,7 +73,9 @@ final class ReviewGraphQueryCommand extends BaseCommand
                 return self::FAILURE;
             }
             $edges = $query->getUsages($nodeId, 3);
-            return $this->renderEdges($io, $edges, $query, $json, $ndjson);
+            return $compact
+                ? $this->renderCompact($io, $edges, $query, $nodeId, $json)
+                : $this->renderEdges($io, $edges, $query, $json, $ndjson);
         } elseif (is_string($deps) && $deps !== '') {
             $nodeId = $this->resolveNodeId($storage, $deps);
             if ($nodeId === null) {
@@ -79,7 +83,9 @@ final class ReviewGraphQueryCommand extends BaseCommand
                 return self::FAILURE;
             }
             $edges = $query->getDependencies($nodeId, 3);
-            return $this->renderEdges($io, $edges, $query, $json, $ndjson);
+            return $compact
+                ? $this->renderCompact($io, $edges, $query, $nodeId, $json)
+                : $this->renderEdges($io, $edges, $query, $json, $ndjson);
         } elseif ($crossModule) {
             $from = $input->getOption('from');
             $to = $input->getOption('to');
@@ -107,6 +113,51 @@ final class ReviewGraphQueryCommand extends BaseCommand
             $io->error('No query specified. Use --usages, --dependencies, --cross-module, --search, or --type.');
             return self::FAILURE;
         }
+    }
+
+    /**
+     * LLM-friendly summary: raw edge dumps repeat the anchor on every row and
+     * list one row per edge (a hot class yields hundreds of rows / tens of KB).
+     * Group by the counterpart class instead — one row per class with its
+     * distinct edge kinds and edge count. Same information an agent needs to
+     * judge blast radius, at ~1/20 the tokens.
+     *
+     * @param list<\Semitexa\ProjectGraph\Domain\Model\Edge> $edges
+     */
+    private function renderCompact(SymfonyStyle $io, array $edges, GraphQueryService $query, string $anchorId, bool $json): int
+    {
+        $groups = [];
+        foreach ($edges as $e) {
+            $otherId = $e->sourceId === $anchorId ? $e->targetId : $e->sourceId;
+            $node = $query->getNode($otherId);
+            $label = $node ? $node->fqcn : $otherId;
+            $groups[$label]['kinds'][$e->type->value] = true;
+            $groups[$label]['count'] = ($groups[$label]['count'] ?? 0) + 1;
+        }
+        ksort($groups);
+
+        if ($json) {
+            $out = [];
+            foreach ($groups as $fqcn => $g) {
+                $out[] = ['class' => $fqcn, 'kinds' => array_keys($g['kinds']), 'edges' => $g['count']];
+            }
+            $io->writeln((string) json_encode(['anchor' => $anchorId, 'classes' => count($out), 'related' => $out], JSON_UNESCAPED_SLASHES));
+
+            return self::SUCCESS;
+        }
+
+        if ($groups === []) {
+            $io->text('No edges found.');
+
+            return self::SUCCESS;
+        }
+
+        foreach ($groups as $fqcn => $g) {
+            $io->text($fqcn . '  [' . implode(', ', array_keys($g['kinds'])) . '] ×' . $g['count']);
+        }
+        $io->text(count($groups) . ' related class(es).');
+
+        return self::SUCCESS;
     }
 
     /** @param list<\Semitexa\ProjectGraph\Domain\Model\Edge> $edges */
