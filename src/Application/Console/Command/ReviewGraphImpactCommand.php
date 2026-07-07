@@ -15,6 +15,7 @@ use Semitexa\ProjectGraph\Application\Service\Context\RelevanceScorer;
 use Semitexa\ProjectGraph\Application\Service\Context\SourceSnippetLoader;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
+use Semitexa\ProjectGraph\Application\Service\Support\AutoRefreshesProjectGraph;
 use Semitexa\ProjectGraph\Application\Service\Support\UsesProjectGraphConnection;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
@@ -28,6 +29,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 final class ReviewGraphImpactCommand extends BaseCommand
 {
+    use AutoRefreshesProjectGraph;
     use UsesProjectGraphConnection;
 
     public function __construct(
@@ -41,6 +43,7 @@ final class ReviewGraphImpactCommand extends BaseCommand
         $this->addArgument('target', InputArgument::REQUIRED, 'Class FQCN, file path, or node ID');
         $this->addOption('depth', 'd', InputOption::VALUE_REQUIRED, 'Maximum traversal depth', '5');
         $this->addOption('json', null, InputOption::VALUE_NONE, 'Output as JSON');
+        $this->addOption('no-refresh', null, InputOption::VALUE_NONE, 'Skip the incremental staleness refresh before analysing');
         $this->addOption('ndjson', null, InputOption::VALUE_NONE, 'Output as NDJSON');
         $this->addOption('context', null, InputOption::VALUE_NONE, 'Include source snippets in context package');
         $this->addOption('prompt', 'p', InputOption::VALUE_REQUIRED, 'Generate LLM prompt: review, refactor, test');
@@ -71,6 +74,12 @@ final class ReviewGraphImpactCommand extends BaseCommand
         }
 
         $storage = $this->createStorage();
+        $this->refreshProjectGraph(
+            $storage,
+            $io,
+            (bool) $input->getOption('no-refresh'),
+            (bool) $input->getOption('json') || (bool) $input->getOption('ndjson'),
+        );
         $totalNodes = (int)($storage->getMeta('total_nodes') ?: 0);
         if ($totalNodes === 0) {
             $io->warning('Graph is empty. Run ai:review-graph:generate first.');
