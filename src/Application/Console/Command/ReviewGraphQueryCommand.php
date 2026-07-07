@@ -46,6 +46,7 @@ final class ReviewGraphQueryCommand extends BaseCommand
         $this->addOption('json', null, InputOption::VALUE_NONE, 'Output as JSON');
         $this->addOption('ndjson', null, InputOption::VALUE_NONE, 'Output as NDJSON');
         $this->addOption('no-refresh', null, InputOption::VALUE_NONE, 'Skip the incremental staleness refresh before querying');
+        $this->addOption('depth', null, InputOption::VALUE_REQUIRED, 'Traversal depth for --usages/--dependencies (1 = direct relations only; higher values expand transitively and grow output fast)', '1');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -81,7 +82,7 @@ final class ReviewGraphQueryCommand extends BaseCommand
                 $io->error('Node not found: ' . $usages);
                 return self::FAILURE;
             }
-            $edges = $query->getUsages($nodeId, 3);
+            $edges = $query->getUsages($nodeId, max(1, (int) $input->getOption('depth')));
             return $compact
                 ? $this->renderCompact($io, $edges, $query, $nodeId, $json)
                 : $this->renderEdges($io, $edges, $query, $json, $ndjson);
@@ -91,7 +92,7 @@ final class ReviewGraphQueryCommand extends BaseCommand
                 $io->error('Node not found: ' . $deps);
                 return self::FAILURE;
             }
-            $edges = $query->getDependencies($nodeId, 3);
+            $edges = $query->getDependencies($nodeId, max(1, (int) $input->getOption('depth')));
             return $compact
                 ? $this->renderCompact($io, $edges, $query, $nodeId, $json)
                 : $this->renderEdges($io, $edges, $query, $json, $ndjson);
