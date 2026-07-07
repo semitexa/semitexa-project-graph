@@ -78,7 +78,7 @@ final class ReviewGraphImpactCommand extends BaseCommand
             $storage,
             $io,
             (bool) $input->getOption('no-refresh'),
-            (bool) $input->getOption('json'),
+            (bool) $input->getOption('json') || (bool) $input->getOption('ndjson'),
         );
         $totalNodes = (int)($storage->getMeta('total_nodes') ?: 0);
         if ($totalNodes === 0) {
