@@ -10,6 +10,7 @@ use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
 use Semitexa\ProjectGraph\Application\Service\Query\Direction;
 use Semitexa\ProjectGraph\Application\Service\Query\GraphQueryService;
+use Semitexa\ProjectGraph\Application\Service\Support\AutoRefreshesProjectGraph;
 use Semitexa\ProjectGraph\Application\Service\Support\UsesProjectGraphConnection;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -22,6 +23,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 final class ReviewGraphQueryCommand extends BaseCommand
 {
+    use AutoRefreshesProjectGraph;
     use UsesProjectGraphConnection;
 
     public function __construct(
@@ -43,12 +45,19 @@ final class ReviewGraphQueryCommand extends BaseCommand
         $this->addOption('compact', null, InputOption::VALUE_NONE, 'Deduplicated per-class summary (LLM-friendly): one row per counterpart class with edge kinds + count');
         $this->addOption('json', null, InputOption::VALUE_NONE, 'Output as JSON');
         $this->addOption('ndjson', null, InputOption::VALUE_NONE, 'Output as NDJSON');
+        $this->addOption('no-refresh', null, InputOption::VALUE_NONE, 'Skip the incremental staleness refresh before querying');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
         $storage = $this->createStorage();
+        $this->refreshProjectGraph(
+            $storage,
+            $io,
+            (bool) $input->getOption('no-refresh'),
+            (bool) $input->getOption('json') || (bool) $input->getOption('ndjson'),
+        );
         $query = new GraphQueryService($storage);
 
         $usages = $input->getOption('usages');
