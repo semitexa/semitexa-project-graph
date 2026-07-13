@@ -13,6 +13,7 @@
         "php": "^8.4",
         "semitexa/core": "*",
         "semitexa/orm": "*",
+        "semitexa/prompt": "*",
         "nikic/php-parser": "^5.0"
     },
     "require-dev": {

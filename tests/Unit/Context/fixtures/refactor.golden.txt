@@ -1,0 +1,21 @@
+You are a senior PHP architect. Help refactor the following code to achieve: extract a service
+
+## Current State
+
+### App\Foo\Bar
+Type: file
+Relevance score: 0.88
+
+```php
+class Bar {
+    public int $x = 1;
+}
+```
+
+## Instructions
+
+1. Analyze the current architecture based on the code above
+2. Propose a refactoring strategy to achieve: extract a service
+3. Identify dependencies that need to be updated
+4. Provide step-by-step migration instructions
+5. Highlight any risks or breaking changes

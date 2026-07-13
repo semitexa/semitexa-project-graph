@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Service\Context;
 
 use Semitexa\ProjectGraph\Application\Service\Analysis\ImpactResult;
-use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Domain\Model\Node;
 
 final class ContextPacker
@@ -62,52 +61,4 @@ final class ContextPacker
             changed:     $impact->changed,
         );
     }
-}
-
-final readonly class ContextPackage
-{
-    public function __construct(
-        /** @var list<ContextNode> */
-        public array $nodes,
-        /** @var list<Edge> */
-        public array $edges,
-        public int   $totalTokens,
-        /** @var list<string> */
-        public array $changed,
-    ) {}
-
-    public function toMarkdown(): string
-    {
-        $lines = ['# Context Package', ''];
-        $lines[] = '**Changed:** ' . implode(', ', $this->changed);
-        $lines[] = '**Nodes:** ' . count($this->nodes);
-        $lines[] = '**Edges:** ' . count($this->edges);
-        $lines[] = '**Estimated tokens:** ' . $this->totalTokens;
-        $lines[] = '';
-
-        foreach ($this->nodes as $ctxNode) {
-            $lines[] = '## ' . $ctxNode->node->fqcn;
-            $lines[] = '**Type:** ' . $ctxNode->node->type->value;
-            $lines[] = '**Score:** ' . round($ctxNode->score, 2);
-            $lines[] = '**File:** ' . $ctxNode->node->file . ':' . $ctxNode->node->line;
-            $lines[] = '';
-            if ($ctxNode->snippet !== null) {
-                $lines[] = '```php';
-                $lines[] = $ctxNode->snippet;
-                $lines[] = '```';
-                $lines[] = '';
-            }
-        }
-
-        return implode("\n", $lines);
-    }
-}
-
-final readonly class ContextNode
-{
-    public function __construct(
-        public Node   $node,
-        public float  $score,
-        public ?string $snippet,
-    ) {}
 }
