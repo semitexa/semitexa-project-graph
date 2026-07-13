@@ -12,7 +12,7 @@ use Semitexa\Prompt\Attribute\AsPrompt;
 #[AsPrompt(
     id: self::ID,
     channel: 'project-graph',
-    template: 'project-graph.review.twig',
+    template: 'resources/prompts/project-graph.review.twig',
     description: 'Senior-PHP-reviewer prompt over a context package (changed files + affected code).',
 )]
 final class ReviewContextPrompt

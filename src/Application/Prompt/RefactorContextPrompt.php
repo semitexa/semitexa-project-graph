@@ -12,7 +12,7 @@ use Semitexa\Prompt\Attribute\AsPrompt;
 #[AsPrompt(
     id: self::ID,
     channel: 'project-graph',
-    template: 'project-graph.refactor.twig',
+    template: 'resources/prompts/project-graph.refactor.twig',
     description: 'Senior-PHP-architect refactor prompt toward a {{ goal }} over a context package.',
 )]
 final class RefactorContextPrompt
