@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Service\Context;
 
-use Semitexa\ProjectGraph\Application\Service\Prompt\RefactorContextPrompt;
-use Semitexa\ProjectGraph\Application\Service\Prompt\ReviewContextPrompt;
-use Semitexa\ProjectGraph\Application\Service\Prompt\TestsContextPrompt;
+use Semitexa\ProjectGraph\Application\Prompt\RefactorContextPrompt;
+use Semitexa\ProjectGraph\Application\Prompt\ReviewContextPrompt;
+use Semitexa\ProjectGraph\Application\Prompt\TestsContextPrompt;
 use Semitexa\Prompt\Application\Service\PromptRegistry;
 use Semitexa\Prompt\Application\Service\PromptRenderer;
 
