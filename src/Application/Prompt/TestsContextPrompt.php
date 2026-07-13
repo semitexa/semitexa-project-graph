@@ -12,6 +12,7 @@ use Semitexa\Prompt\Attribute\AsPrompt;
 #[AsPrompt(
     id: self::ID,
     channel: 'project-graph',
+    template: 'project-graph.tests.twig',
     description: 'Senior-PHP-test-engineer prompt to generate coverage over a context package.',
 )]
 final class TestsContextPrompt
