@@ -7,7 +7,6 @@ namespace Semitexa\ProjectGraph\Application\Service\Context;
 use Semitexa\ProjectGraph\Application\Prompt\RefactorContextPrompt;
 use Semitexa\ProjectGraph\Application\Prompt\ReviewContextPrompt;
 use Semitexa\ProjectGraph\Application\Prompt\TestsContextPrompt;
-use Semitexa\Prompt\Application\Service\PromptRegistry;
 use Semitexa\Prompt\Application\Service\PromptRenderer;
 
 /**
@@ -46,9 +45,9 @@ final class PromptFormatter
             }
         }
 
-        return $this->render(ReviewContextPrompt::class, ReviewContextPrompt::ID, [
-            'body' => implode("\n", $body),
-        ]);
+        return $this->renderer()->render(
+            (new ReviewContextPrompt())->withData(implode("\n", $body)),
+        )->system;
     }
 
     public function formatForRefactor(ContextPackage $context, string $goal): string
@@ -68,10 +67,9 @@ final class PromptFormatter
             }
         }
 
-        return $this->render(RefactorContextPrompt::class, RefactorContextPrompt::ID, [
-            'goal' => $goal,
-            'body' => implode("\n", $body),
-        ]);
+        return $this->renderer()->render(
+            (new RefactorContextPrompt())->withData($goal, implode("\n", $body)),
+        )->system;
     }
 
     public function formatForTests(ContextPackage $context): string
@@ -90,19 +88,9 @@ final class PromptFormatter
             }
         }
 
-        return $this->render(TestsContextPrompt::class, TestsContextPrompt::ID, [
-            'body' => implode("\n", $body),
-        ]);
-    }
-
-    /**
-     * @param array<string, string> $variables
-     */
-    private function render(string $class, string $id, array $variables): string
-    {
-        $template = (new PromptRegistry())->buildFromClasses([$class])[$id];
-
-        return $this->renderer()->renderTemplate($template, $variables)->system;
+        return $this->renderer()->render(
+            (new TestsContextPrompt())->withData(implode("\n", $body)),
+        )->system;
     }
 
     private function renderer(): PromptRenderer
