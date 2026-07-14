@@ -14,8 +14,8 @@ use Semitexa\ProjectGraph\Domain\Model\Node;
 /**
  * Byte-identity guard for the PromptFormatter -> prompt-catalog migration. The
  * golden fixtures were captured from the pre-migration formatter; the catalog
- * templates (with the assembled {{ body }} / {{ goal }}) must reproduce them
- * exactly.
+ * templates (with the assembled {{ prompt.body }} / {{ prompt.goal }}) must
+ * reproduce them exactly.
  */
 final class PromptFormatterCatalogTest extends TestCase
 {
@@ -29,7 +29,11 @@ final class PromptFormatterCatalogTest extends TestCase
 
     private function golden(string $name): string
     {
-        return (string) file_get_contents(__DIR__ . '/fixtures/' . $name . '.golden.txt');
+        $path = __DIR__ . '/fixtures/' . $name . '.golden.txt';
+        $contents = file_get_contents($path);
+        self::assertNotFalse($contents, "Missing golden fixture: {$path}");
+
+        return $contents;
     }
 
     public function testReviewIsByteIdenticalToLegacy(): void

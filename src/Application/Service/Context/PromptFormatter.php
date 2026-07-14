@@ -14,7 +14,7 @@ use Semitexa\Prompt\Application\Service\PromptRenderer;
  * text lives in the prompt catalog ({@see ReviewContextPrompt},
  * {@see RefactorContextPrompt}, {@see TestsContextPrompt}); this formatter
  * assembles the dynamic middle (changed files, affected code, snippets) and
- * binds it as the templates' {{ body }} section.
+ * binds it as the templates' {{ prompt.body }} section.
  */
 final class PromptFormatter
 {

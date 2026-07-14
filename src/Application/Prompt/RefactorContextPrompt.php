@@ -14,7 +14,7 @@ use Semitexa\Prompt\Domain\Contract\BoundPromptInterface;
     id: self::ID,
     channel: 'project-graph',
     template: 'resources/prompts/project-graph.refactor.twig',
-    description: 'Senior-PHP-architect refactor prompt toward a {{ goal }} over a context package.',
+    description: 'Senior-PHP-architect refactor prompt toward a {{ prompt.goal }} over a context package.',
 )]
 final class RefactorContextPrompt implements BoundPromptInterface
 {
