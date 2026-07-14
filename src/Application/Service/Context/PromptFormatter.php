@@ -4,111 +4,97 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Service\Context;
 
+use Semitexa\ProjectGraph\Application\Prompt\RefactorContextPrompt;
+use Semitexa\ProjectGraph\Application\Prompt\ReviewContextPrompt;
+use Semitexa\ProjectGraph\Application\Prompt\TestsContextPrompt;
+use Semitexa\Prompt\Application\Service\PromptRenderer;
+
+/**
+ * Formats a {@see ContextPackage} into an LLM prompt. The static instruction
+ * text lives in the prompt catalog ({@see ReviewContextPrompt},
+ * {@see RefactorContextPrompt}, {@see TestsContextPrompt}); this formatter
+ * assembles the dynamic middle (changed files, affected code, snippets) and
+ * binds it as the templates' {{ prompt.body }} section.
+ */
 final class PromptFormatter
 {
+    private ?PromptRenderer $renderer = null;
+
     public function formatForReview(ContextPackage $context): string
     {
-        $lines = [
-            'You are a senior PHP code reviewer. Review the following code changes and their potential impact on the codebase.',
-            '',
-            '## Changed Files',
-            '',
-        ];
+        $body = ['## Changed Files', ''];
 
         foreach ($context->changed as $changed) {
-            $lines[] = '- ' . $changed;
+            $body[] = '- ' . $changed;
         }
 
-        $lines[] = '';
-        $lines[] = '## Affected Code (by relevance)';
-        $lines[] = '';
+        $body[] = '';
+        $body[] = '## Affected Code (by relevance)';
+        $body[] = '';
 
         foreach ($context->nodes as $ctxNode) {
-            $lines[] = '### ' . $ctxNode->node->fqcn . ' (score: ' . round($ctxNode->score, 2) . ')';
-            $lines[] = 'Type: ' . $ctxNode->node->type->value;
-            $lines[] = 'File: ' . $ctxNode->node->file . ':' . $ctxNode->node->line;
-            $lines[] = '';
+            $body[] = '### ' . $ctxNode->node->fqcn . ' (score: ' . round($ctxNode->score, 2) . ')';
+            $body[] = 'Type: ' . $ctxNode->node->type->value;
+            $body[] = 'File: ' . $ctxNode->node->file . ':' . $ctxNode->node->line;
+            $body[] = '';
             if ($ctxNode->snippet !== null) {
-                $lines[] = '```php';
-                $lines[] = $ctxNode->snippet;
-                $lines[] = '```';
-                $lines[] = '';
+                $body[] = '```php';
+                $body[] = $ctxNode->snippet;
+                $body[] = '```';
+                $body[] = '';
             }
         }
 
-        $lines[] = '## Instructions';
-        $lines[] = '';
-        $lines[] = '1. Review each changed file for correctness, performance, and security issues';
-        $lines[] = '2. Consider the impact on affected nodes listed above';
-        $lines[] = '3. Flag any breaking changes to public interfaces';
-        $lines[] = '4. Suggest improvements with specific code examples';
-        $lines[] = '5. Check for missing error handling, edge cases, and type safety';
-
-        return implode("\n", $lines);
+        return $this->renderer()->render(
+            (new ReviewContextPrompt())->withData(implode("\n", $body)),
+        )->system;
     }
 
     public function formatForRefactor(ContextPackage $context, string $goal): string
     {
-        $lines = [
-            'You are a senior PHP architect. Help refactor the following code to achieve: ' . $goal,
-            '',
-            '## Current State',
-            '',
-        ];
+        $body = ['## Current State', ''];
 
         foreach ($context->nodes as $ctxNode) {
-            $lines[] = '### ' . $ctxNode->node->fqcn;
-            $lines[] = 'Type: ' . $ctxNode->node->type->value;
-            $lines[] = 'Relevance score: ' . round($ctxNode->score, 2);
-            $lines[] = '';
+            $body[] = '### ' . $ctxNode->node->fqcn;
+            $body[] = 'Type: ' . $ctxNode->node->type->value;
+            $body[] = 'Relevance score: ' . round($ctxNode->score, 2);
+            $body[] = '';
             if ($ctxNode->snippet !== null) {
-                $lines[] = '```php';
-                $lines[] = $ctxNode->snippet;
-                $lines[] = '```';
-                $lines[] = '';
+                $body[] = '```php';
+                $body[] = $ctxNode->snippet;
+                $body[] = '```';
+                $body[] = '';
             }
         }
 
-        $lines[] = '## Instructions';
-        $lines[] = '';
-        $lines[] = '1. Analyze the current architecture based on the code above';
-        $lines[] = '2. Propose a refactoring strategy to achieve: ' . $goal;
-        $lines[] = '3. Identify dependencies that need to be updated';
-        $lines[] = '4. Provide step-by-step migration instructions';
-        $lines[] = '5. Highlight any risks or breaking changes';
-
-        return implode("\n", $lines);
+        return $this->renderer()->render(
+            (new RefactorContextPrompt())->withData($goal, implode("\n", $body)),
+        )->system;
     }
 
     public function formatForTests(ContextPackage $context): string
     {
-        $lines = [
-            'You are a senior PHP test engineer. Generate comprehensive test coverage for the following code.',
-            '',
-            '## Code to Test',
-            '',
-        ];
+        $body = ['## Code to Test', ''];
 
         foreach ($context->nodes as $ctxNode) {
-            $lines[] = '### ' . $ctxNode->node->fqcn;
-            $lines[] = 'Type: ' . $ctxNode->node->type->value;
-            $lines[] = '';
+            $body[] = '### ' . $ctxNode->node->fqcn;
+            $body[] = 'Type: ' . $ctxNode->node->type->value;
+            $body[] = '';
             if ($ctxNode->snippet !== null) {
-                $lines[] = '```php';
-                $lines[] = $ctxNode->snippet;
-                $lines[] = '```';
-                $lines[] = '';
+                $body[] = '```php';
+                $body[] = $ctxNode->snippet;
+                $body[] = '```';
+                $body[] = '';
             }
         }
 
-        $lines[] = '## Instructions';
-        $lines[] = '';
-        $lines[] = '1. Identify test cases for each class/method';
-        $lines[] = '2. Cover happy paths, edge cases, and error conditions';
-        $lines[] = '3. Include integration tests for cross-component interactions';
-        $lines[] = '4. Use PHPUnit conventions';
-        $lines[] = '5. Prioritize tests by risk and business impact';
+        return $this->renderer()->render(
+            (new TestsContextPrompt())->withData(implode("\n", $body)),
+        )->system;
+    }
 
-        return implode("\n", $lines);
+    private function renderer(): PromptRenderer
+    {
+        return $this->renderer ??= new PromptRenderer();
     }
 }
