@@ -61,15 +61,12 @@ final class BlastRadiusScorer
             };
 
             $nodeModule = $impactedNode->node->module;
-            $isCrossModule = false;
-            
-            // Check cross module relative to changed nodes
-            foreach ($impact->changed as $changedId) {
-                if ($nodeModule !== '' && !str_contains($changedId, $nodeModule)) {
-                    $isCrossModule = true;
-                    break;
-                }
-            }
+
+            // A node's impact is cross-module only when one of the edges on its
+            // own impact paths actually connects two different modules. Deriving
+            // both endpoints' module keys from the edge itself avoids the false
+            // positives of a global scan over every changed id.
+            $isCrossModule = $this->pathsCrossModule($impactedNode);
 
             $moduleMultiplier = $isCrossModule ? 1.5 : 1.0;
 
@@ -111,5 +108,36 @@ final class BlastRadiusScorer
             recommendation: $recommendation,
             edgeBreakdown: $edgeBreakdown,
         );
+    }
+
+    /**
+     * True when any edge on the node's impact paths links two different modules.
+     */
+    private function pathsCrossModule(ImpactedNode $impactedNode): bool
+    {
+        foreach ($impactedNode->paths as $path) {
+            foreach ($path as $edge) {
+                if ($this->moduleKeyForId($edge->sourceId) !== $this->moduleKeyForId($edge->targetId)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Derive a comparable module key from a node id's namespace, e.g.
+     * `Semitexa\Orm\Contracts\X` => `Orm`, `App\Services\Y` => `App`.
+     */
+    private function moduleKeyForId(string $id): string
+    {
+        $parts = explode('\\', $id);
+
+        if ($parts[0] === 'Semitexa' && isset($parts[1]) && $parts[1] !== '') {
+            return $parts[1];
+        }
+
+        return $parts[0];
     }
 }

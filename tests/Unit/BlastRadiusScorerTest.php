@@ -49,7 +49,7 @@ final class BlastRadiusScorerTest extends TestCase
 
         $score = $scorer->score($impact);
 
-        $this->assertSame(3, $score->score);
+        $this->assertSame(2, $score->score);
         $this->assertSame('low', $score->level);
         $this->assertSame('inline', $score->recommendation);
         $this->assertContains('MyModule', $score->impactedModules);
