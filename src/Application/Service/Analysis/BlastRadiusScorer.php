@@ -33,14 +33,18 @@ final class BlastRadiusScorer
     ];
 
     /**
+     * Normalized module names as produced by IncrementalEngine::resolveModule()
+     * (package dir `semitexa-orm` becomes module `Orm`), so this list must match
+     * the resolved module names rather than raw package directory names.
+     *
      * @var list<string>
      */
-    private const CORE_PACKAGES = [
-        'semitexa-orm',
-        'semitexa-ssr',
-        'semitexa-auth',
-        'semitexa-tenancy',
-        'semitexa-workflow',
+    private const CORE_MODULES = [
+        'Orm',
+        'Ssr',
+        'Auth',
+        'Tenancy',
+        'Workflow',
     ];
 
     public function score(ImpactResult $impact): BlastRadiusScore
@@ -78,7 +82,7 @@ final class BlastRadiusScorer
                 }
             }
 
-            if (in_array($nodeModule, self::CORE_PACKAGES, true) || str_contains($impactedNode->node->id, 'Contract')) {
+            if (in_array($nodeModule, self::CORE_MODULES, true) || str_contains($impactedNode->node->id, 'Contract')) {
                 if (!in_array($impactedNode->node->id, $hotspots, true)) {
                     $hotspots[] = $impactedNode->node->id;
                 }
