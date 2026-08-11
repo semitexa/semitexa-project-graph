@@ -6,7 +6,10 @@ namespace Semitexa\ProjectGraph\Application\Console\Command;
 
 use Semitexa\ProjectGraph\Application\Service\Intelligence\IntelligenceLayer;
 use Semitexa\ProjectGraph\Application\Service\Query\GraphQueryService;
-use Symfony\Component\Console\Attribute\AsCommand;
+use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Core\Console\BaseCommand;
+use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
+use Semitexa\ProjectGraph\Application\Service\Support\UsesProjectGraphConnection;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
@@ -14,12 +17,23 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 
 #[AsCommand(name: 'ai:review-graph:event-trace', description: 'Trace the full lifecycle of an event')]
-final class EventTraceCommand extends Command
+final class EventTraceCommand extends BaseCommand
 {
+    use UsesProjectGraphConnection;
+
+    private ?GraphQueryService $queryService = null;
+
     public function __construct(
-        private readonly GraphQueryService $query,
+        private readonly ConnectionRegistry $connections,
     ) {
         parent::__construct();
+    }
+
+    private function query(): GraphQueryService
+    {
+        return $this->queryService ??= new GraphQueryService(
+            $this->createProjectGraphStorage($this->connections),
+        );
     }
 
     protected function configure(): void
@@ -31,7 +45,7 @@ final class EventTraceCommand extends Command
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $intelligence = new IntelligenceLayer($this->query);
+        $intelligence = new IntelligenceLayer($this->query());
         $eventArg = $input->getArgument('event');
         $format = $input->getOption('format') ?? 'text';
         $includeCode = $input->getOption('include-code');
@@ -41,7 +55,7 @@ final class EventTraceCommand extends Command
             $output->writeln("<error>Event not found: {$eventArg}</error>");
             $output->writeln('');
             $output->writeln('Search results:');
-            $results = $this->query->search($eventArg);
+            $results = $this->query()->search($eventArg);
             foreach ($results as $node) {
                 if ($node->type->value === 'event' || str_ends_with($node->fqcn, 'Event')) {
                     $output->writeln("  - {$node->fqcn}");
@@ -88,7 +102,7 @@ final class EventTraceCommand extends Command
             foreach ($lifecycle->emitters as $emitter) {
                 $output->writeln("  → {$emitter}");
                 if ($includeCode) {
-                    $node = $this->query->getNode($emitter);
+                    $node = $this->query()->getNode($emitter);
                     if ($node !== null && $node->file !== '') {
                         $output->writeln("    file: {$node->file}");
                     }
@@ -102,7 +116,7 @@ final class EventTraceCommand extends Command
             foreach ($lifecycle->syncListeners as $listener) {
                 $output->writeln("  → {$listener}");
                 if ($includeCode) {
-                    $node = $this->query->getNode($listener);
+                    $node = $this->query()->getNode($listener);
                     if ($node !== null && $node->file !== '') {
                         $output->writeln("    file: {$node->file}");
                     }
@@ -139,7 +153,7 @@ final class EventTraceCommand extends Command
                 foreach ($lifecycle->replayHandlers as $handler) {
                     $output->writeln("    → {$handler}");
                     if ($includeCode) {
-                        $node = $this->query->getNode($handler);
+                        $node = $this->query()->getNode($handler);
                         if ($node !== null && $node->file !== '') {
                             $output->writeln("      file: {$node->file}");
                         }
@@ -169,7 +183,7 @@ final class EventTraceCommand extends Command
             return $eventArg;
         }
 
-        $results = $this->query->search($eventArg);
+        $results = $this->query()->search($eventArg);
         foreach ($results as $node) {
             if ($node->type->value === 'event' || str_ends_with($node->fqcn, 'Event')) {
                 return $node->fqcn;
@@ -181,7 +195,7 @@ final class EventTraceCommand extends Command
 
     private function showBasicEventInfo(string $eventClass, OutputInterface $output): void
     {
-        $edges = $this->query->getEdges($eventClass);
+        $edges = $this->query()->getEdges($eventClass);
         $listeners = [];
         $emitters = [];
 

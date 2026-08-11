@@ -6,21 +6,35 @@ namespace Semitexa\ProjectGraph\Application\Console\Command;
 
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
 use Semitexa\ProjectGraph\Application\Service\Query\GraphQueryService;
-use Symfony\Component\Console\Attribute\AsCommand;
+use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Core\Console\BaseCommand;
+use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
+use Semitexa\ProjectGraph\Application\Service\Support\UsesProjectGraphConnection;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 
 #[AsCommand(name: 'ai:review-graph:diff', description: 'Show how the graph changed since last scan')]
-final class GraphDiffCommand extends Command
+final class GraphDiffCommand extends BaseCommand
 {
     private const META_KEY = 'graph_diff_last_scan';
 
+    use UsesProjectGraphConnection;
+
+    private ?GraphQueryService $queryService = null;
+
     public function __construct(
-        private readonly GraphQueryService $query,
+        private readonly ConnectionRegistry $connections,
     ) {
         parent::__construct();
+    }
+
+    private function query(): GraphQueryService
+    {
+        return $this->queryService ??= new GraphQueryService(
+            $this->createProjectGraphStorage($this->connections),
+        );
     }
 
     protected function configure(): void
@@ -154,11 +168,11 @@ final class GraphDiffCommand extends Command
 
     private function getCurrentStats(?string $module): array
     {
-        $nodes = $module !== null ? $this->query->findNodes(module: $module) : $this->query->findNodes();
-        $allNodes = $this->query->findNodes();
+        $nodes = $module !== null ? $this->query()->findNodes(module: $module) : $this->query()->findNodes();
+        $allNodes = $this->query()->findNodes();
         $edgeCount = 0;
         foreach ($allNodes as $node) {
-            $edgeCount += count($this->query->getEdges($node->id));
+            $edgeCount += count($this->query()->getEdges($node->id));
         }
         $edgeCount = (int) ($edgeCount / 2);
 

@@ -7,7 +7,10 @@ namespace Semitexa\ProjectGraph\Application\Console\Command;
 use Semitexa\ProjectGraph\Application\Service\Intelligence\IntelligenceLayer;
 use Semitexa\ProjectGraph\Application\Service\Intelligence\NaturalLanguageQueryResolver;
 use Semitexa\ProjectGraph\Application\Service\Query\GraphQueryService;
-use Symfony\Component\Console\Attribute\AsCommand;
+use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Core\Console\BaseCommand;
+use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
+use Semitexa\ProjectGraph\Application\Service\Support\UsesProjectGraphConnection;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
@@ -15,12 +18,23 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 
 #[AsCommand(name: 'ai:review-graph:intelligence', description: 'Query the project graph intelligence layer')]
-final class ReviewGraphIntelligenceCommand extends Command
+final class ReviewGraphIntelligenceCommand extends BaseCommand
 {
+    use UsesProjectGraphConnection;
+
+    private ?GraphQueryService $queryService = null;
+
     public function __construct(
-        private readonly GraphQueryService $query,
+        private readonly ConnectionRegistry $connections,
     ) {
         parent::__construct();
+    }
+
+    private function query(): GraphQueryService
+    {
+        return $this->queryService ??= new GraphQueryService(
+            $this->createProjectGraphStorage($this->connections),
+        );
     }
 
     protected function configure(): void
@@ -36,8 +50,8 @@ final class ReviewGraphIntelligenceCommand extends Command
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $intelligence = new IntelligenceLayer($this->query);
-        $resolver = new NaturalLanguageQueryResolver($this->query, $intelligence);
+        $intelligence = new IntelligenceLayer($this->query());
+        $resolver = new NaturalLanguageQueryResolver($this->query(), $intelligence);
 
         if ($input->getOption('hotspots')) {
             $this->showHotspots($intelligence, $output);

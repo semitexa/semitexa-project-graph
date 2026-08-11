@@ -10,7 +10,10 @@ use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
 use Semitexa\ProjectGraph\Application\Service\Intelligence\IntelligenceLayer;
 use Semitexa\ProjectGraph\Application\Service\Query\Direction;
 use Semitexa\ProjectGraph\Application\Service\Query\GraphQueryService;
-use Symfony\Component\Console\Attribute\AsCommand;
+use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Core\Console\BaseCommand;
+use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
+use Semitexa\ProjectGraph\Application\Service\Support\UsesProjectGraphConnection;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
@@ -18,12 +21,23 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 
 #[AsCommand(name: 'ai:review-graph:context', description: 'Build relevant context for a task')]
-final class ContextBuilderCommand extends Command
+final class ContextBuilderCommand extends BaseCommand
 {
+    use UsesProjectGraphConnection;
+
+    private ?GraphQueryService $queryService = null;
+
     public function __construct(
-        private readonly GraphQueryService $query,
+        private readonly ConnectionRegistry $connections,
     ) {
         parent::__construct();
+    }
+
+    private function query(): GraphQueryService
+    {
+        return $this->queryService ??= new GraphQueryService(
+            $this->createProjectGraphStorage($this->connections),
+        );
     }
 
     protected function configure(): void
@@ -36,7 +50,7 @@ final class ContextBuilderCommand extends Command
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $intelligence = new IntelligenceLayer($this->query);
+        $intelligence = new IntelligenceLayer($this->query());
         $task = $input->getArgument('task');
         $format = $input->getOption('format') ?? 'text';
         $depth = (int) ($input->getOption('depth') ?? 2);
@@ -138,7 +152,7 @@ final class ContextBuilderCommand extends Command
         $matchedIds = [];
 
         foreach ($keywords as $keyword) {
-            $results = $this->query->search($keyword);
+            $results = $this->query()->search($keyword);
             foreach ($results as $node) {
                 if ($module !== null && $node->module !== $module) {
                     continue;
@@ -212,7 +226,7 @@ final class ContextBuilderCommand extends Command
 
     private function addDependencies(string $nodeId, array &$context, int $depth): void
     {
-        $edges = $this->query->getEdges($nodeId, direction: Direction::Outgoing);
+        $edges = $this->query()->getEdges($nodeId, direction: Direction::Outgoing);
         foreach ($edges as $edge) {
             if (in_array($edge->type, [EdgeType::Calls, EdgeType::Instantiates, EdgeType::InjectsReadonly, EdgeType::InjectsMutable], true)) {
                 $context['dependencies'][] = [
@@ -225,7 +239,7 @@ final class ContextBuilderCommand extends Command
 
     private function addDependents(string $nodeId, array &$context, int $depth): void
     {
-        $edges = $this->query->getEdges($nodeId, direction: Direction::Incoming);
+        $edges = $this->query()->getEdges($nodeId, direction: Direction::Incoming);
         foreach ($edges as $edge) {
             if (in_array($edge->type, [EdgeType::Calls, EdgeType::Instantiates, EdgeType::InjectsReadonly, EdgeType::InjectsMutable], true)) {
                 $context['dependents'][] = [
