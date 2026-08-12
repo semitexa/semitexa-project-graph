@@ -1,56 +1,17 @@
-# semitexa-project-graph Documentation
+# project-graph docs
 
-Technical reference for the Semitexa project graph — the intelligence layer that enables LLMs and developers to understand a codebase in minutes instead of hours.
+The documentation for this module lives in the documentation hub
+(`semitexa/docs`), served at `/docs/project-graph`.
 
-## Quick Start
+| Subject | Page |
+|---|---|
+| What the graph is and when to reach for it | `project-graph/overview` |
+| Inspecting the graph | `project-graph/inspection` |
+| Impact, context and watch mode | `project-graph/impact` |
+| Parsers, extractor pipeline, node and edge types | `project-graph/architecture` |
+| Every command, option and output shape | `project-graph/commands` |
+| Relevance scoring, flow tracing, intent inference | `project-graph/intelligence` |
+| Feeding graph slices to an assistant | `project-graph/ai-integration` |
 
-```bash
-# Generate or update the graph
-bin/semitexa ai:review-graph:generate
-
-# View stats
-bin/semitexa ai:review-graph:stats
-
-# Trace an event lifecycle
-bin/semitexa ai:review-graph:event-trace OrderCreated
-
-# Analyze impact of a change
-bin/semitexa ai:review-graph:impact PaymentService
-
-# Get context for a task
-bin/semitexa ai:review-graph:context "adding payment method"
-```
-
-## Documentation Map
-
-| Document | What it covers |
-|----------|---------------|
-| [ARCHITECTURE](ARCHITECTURE.md) | Graph data model, node/edge types, storage, extractors |
-| [COMMANDS](COMMANDS.md) | Complete CLI reference with examples |
-| [AI_INTEGRATION](AI_INTEGRATION.md) | How AI agents consume the graph, JSON output, query patterns |
-| [INTELLIGENCE](INTELLIGENCE.md) | Intelligence layer: domains, flows, events, hotspots, intent inference |
-
-## Package Structure
-
-```
-src/
-├── Application/
-│   ├── Console/          # CLI commands
-│   ├── Db/               # ORM storage layer
-│   ├── Extractor/        # Code analysis extractors
-│   │   ├── Attribute/    # Attribute-based extractors
-│   │   └── Ast/          # AST-based extractors
-│   ├── Graph/            # Core graph model (Node, Edge, NodeType, EdgeType, NodeId)
-│   ├── Index/            # Incremental indexing engine
-│   ├── Intelligence/     # Intelligence layer (domains, flows, hotspots, intent)
-│   ├── Parser/           # PHP-Parser adapter
-│   ├── Query/            # Graph query service
-│   └── Scanner/          # File scanner
-└── Domain/
-    └── Model/            # Domain entities
-```
-
-## Related
-
-- Canonical framework docs: `packages/semitexa-docs/docs/` and `packages/semitexa-docs/docs/workspace/`.
-- For package-local architecture and intelligence-layer notes, see the other files in this directory.
+The commands are also listed, generated from the source, in
+`reference/commands-project-graph.md`.
