@@ -121,6 +121,25 @@ final class GraphEdgeRepository
         return $count;
     }
 
+    /**
+     * Edges with at least one end inside $module.
+     *
+     * The alternative — reporting the graph-wide edge total next to a module's node count —
+     * reads as a real measurement and is not one: a module with no nodes came out as zero
+     * nodes and forty thousand edges.
+     */
+    public function countTouchingModule(string $module): int
+    {
+        $result = $this->adapter->execute(
+            'SELECT COUNT(*) as cnt FROM graph_edges WHERE source_id IN '
+                . '(SELECT id FROM graph_nodes WHERE module = :module) '
+                . 'OR target_id IN (SELECT id FROM graph_nodes WHERE module = :module)',
+            ['module' => $module],
+        );
+
+        return (int) ($result->fetchOne()['cnt'] ?? 0);
+    }
+
     public function countAll(): int
     {
         $result = $this->adapter->execute('SELECT COUNT(*) as cnt FROM graph_edges');

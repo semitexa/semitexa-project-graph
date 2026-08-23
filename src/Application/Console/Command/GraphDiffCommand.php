@@ -189,17 +189,19 @@ final class GraphDiffCommand extends BaseCommand
     private function getCurrentStats(?string $module): array
     {
         $nodes = $this->storage()->nodes;
-        $totalEdges = $this->storage()->edges->countAll();
 
         if ($module === null) {
             return [
                 'total_nodes' => $nodes->countAll(),
-                'total_edges' => $totalEdges,
+                'total_edges' => $this->storage()->edges->countAll(),
                 'by_type' => $nodes->countByType(),
                 'modules' => $nodes->distinctModules(),
             ];
         }
 
+        // Scoped run: the edge total has to be scoped too. Reporting the graph-wide count
+        // beside a module's node count is not a smaller truth, it is a wrong one — a module
+        // with no nodes would read as zero nodes and every edge in the project.
         $scoped = $nodes->findByModule($module);
         $byType = [];
         $modules = [];
@@ -212,7 +214,7 @@ final class GraphDiffCommand extends BaseCommand
 
         return [
             'total_nodes' => count($scoped),
-            'total_edges' => $totalEdges,
+            'total_edges' => $this->storage()->edges->countTouchingModule($module),
             'by_type' => $byType,
             'modules' => array_keys($modules),
         ];

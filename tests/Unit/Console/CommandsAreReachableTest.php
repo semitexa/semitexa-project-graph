@@ -51,10 +51,16 @@ final class CommandsAreReachableTest extends TestCase
 
         $cases = [];
         foreach ($files as $file) {
-            $class = 'Semitexa\\ProjectGraph\\Application\\Console\\Command\\' . basename($file, '.php');
-            if (class_exists($class)) {
-                $cases[basename($file, '.php')] = [$class];
-            }
+            $name = basename($file, '.php');
+            $class = 'Semitexa\\ProjectGraph\\Application\\Console\\Command\\' . $name;
+            // Assert rather than skip. A file that does not autoload to its expected FQCN is
+            // precisely a reachability failure — silently dropping it from the provider would
+            // turn the one thing this guard exists to catch into an empty test run.
+            self::assertTrue(
+                class_exists($class),
+                $file . ' does not autoload as ' . $class,
+            );
+            $cases[$name] = [$class];
         }
 
         self::assertNotEmpty($cases);
