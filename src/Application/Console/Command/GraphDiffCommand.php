@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Console\Command;
 
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
+use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
 use Semitexa\ProjectGraph\Application\Service\Query\GraphQueryService;
 use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
 use Semitexa\ProjectGraph\Application\Service\Support\UsesProjectGraphConnection;
@@ -22,19 +24,26 @@ final class GraphDiffCommand extends BaseCommand
 
     use UsesProjectGraphConnection;
 
+    private ?GraphStorage $graphStorage = null;
     private ?GraphQueryService $queryService = null;
 
-    public function __construct(
-        private readonly ConnectionRegistry $connections,
-    ) {
-        parent::__construct();
-    }
+    /**
+     * Property injection, not a constructor parameter: #[AsCommand] classes are
+     * container-managed, and semitexa.injectionViaConstructor makes that the only DI channel.
+     * The rule fires per changed file, so a constructor here is a violation waiting for the
+     * next person to edit the file rather than a clean build.
+     */
+    #[InjectAsReadonly]
+    protected ConnectionRegistry $connections;
 
     private function query(): GraphQueryService
     {
-        return $this->queryService ??= new GraphQueryService(
-            $this->createProjectGraphStorage($this->connections),
-        );
+        return $this->queryService ??= new GraphQueryService($this->storage());
+    }
+
+    private function storage(): GraphStorage
+    {
+        return $this->graphStorage ??= $this->createProjectGraphStorage($this->connections);
     }
 
     protected function configure(): void
@@ -166,29 +175,44 @@ final class GraphDiffCommand extends BaseCommand
         file_put_contents($metaFile, json_encode($data));
     }
 
+    /**
+     * A census of the graph, counted in the database rather than in PHP.
+     *
+     * This asked GraphQueryService::findNodes() with no filters, which returns an empty list
+     * by contract — there is no "everything" branch — so an unscoped diff reported 0 no matter
+     * what the graph held. It then summed getEdges() per node, one query each, to arrive at a
+     * number the edge repository already knows. Neither was observable until the command could
+     * be run at all; the first thing it said once registered was 6396 → 0.
+     *
+     * @return array{total_nodes: int, total_edges: int, by_type: array<string, int>, modules: list<string>}
+     */
     private function getCurrentStats(?string $module): array
     {
-        $nodes = $module !== null ? $this->query()->findNodes(module: $module) : $this->query()->findNodes();
-        $allNodes = $this->query()->findNodes();
-        $edgeCount = 0;
-        foreach ($allNodes as $node) {
-            $edgeCount += count($this->query()->getEdges($node->id));
-        }
-        $edgeCount = (int) ($edgeCount / 2);
+        $nodes = $this->storage()->nodes;
+        $totalEdges = $this->storage()->edges->countAll();
 
+        if ($module === null) {
+            return [
+                'total_nodes' => $nodes->countAll(),
+                'total_edges' => $totalEdges,
+                'by_type' => $nodes->countByType(),
+                'modules' => $nodes->distinctModules(),
+            ];
+        }
+
+        $scoped = $nodes->findByModule($module);
         $byType = [];
         $modules = [];
-        foreach ($nodes as $node) {
-            $type = $node->type->value;
-            $byType[$type] = ($byType[$type] ?? 0) + 1;
+        foreach ($scoped as $node) {
+            $byType[$node->type->value] = ($byType[$node->type->value] ?? 0) + 1;
             if ($node->module !== '') {
                 $modules[$node->module] = true;
             }
         }
 
         return [
-            'total_nodes' => count($nodes),
-            'total_edges' => $edgeCount,
+            'total_nodes' => count($scoped),
+            'total_edges' => $totalEdges,
             'by_type' => $byType,
             'modules' => array_keys($modules),
         ];

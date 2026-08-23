@@ -8,6 +8,7 @@ use Semitexa\ProjectGraph\Application\Service\Intelligence\IntelligenceLayer;
 use Semitexa\ProjectGraph\Application\Service\Intelligence\NaturalLanguageQueryResolver;
 use Semitexa\ProjectGraph\Application\Service\Query\GraphQueryService;
 use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
 use Semitexa\ProjectGraph\Application\Service\Support\UsesProjectGraphConnection;
@@ -24,11 +25,14 @@ final class ReviewGraphIntelligenceCommand extends BaseCommand
 
     private ?GraphQueryService $queryService = null;
 
-    public function __construct(
-        private readonly ConnectionRegistry $connections,
-    ) {
-        parent::__construct();
-    }
+    /**
+     * Property injection, not a constructor parameter: #[AsCommand] classes are
+     * container-managed, and semitexa.injectionViaConstructor makes that the only DI channel.
+     * The rule fires per changed file, so a constructor here is a violation waiting for the
+     * next person to edit the file rather than a clean build.
+     */
+    #[InjectAsReadonly]
+    protected ConnectionRegistry $connections;
 
     private function query(): GraphQueryService
     {
@@ -105,13 +109,15 @@ final class ReviewGraphIntelligenceCommand extends BaseCommand
 
         foreach ($hotspots as $h) {
             $level = $h->riskLevel();
+            // fg=… , not a bare colour name: Symfony ships <info>/<comment>/<error> and
+            // nothing else, so <blue> reached the terminal verbatim.
             $color = match ($level) {
-                'CRITICAL' => 'red',
-                'HIGH' => 'yellow',
-                'MEDIUM' => 'blue',
-                default => 'green',
+                'CRITICAL' => 'fg=red',
+                'HIGH' => 'fg=yellow',
+                'MEDIUM' => 'fg=blue',
+                default => 'fg=green',
             };
-            $output->writeln("<{$color}>[{$level}]</{$color}> {$h->nodeId} (score: {$h->riskScore})");
+            $output->writeln("<{$color}>[{$level}]</> {$h->nodeId} (score: {$h->riskScore})");
             $output->writeln("  Incoming: {$h->incomingEdges} | Cross-module: {$h->crossModuleDeps} | Complexity: {$h->complexityScore}");
             if ($h->recommendation !== null) {
                 $output->writeln("  → {$h->recommendation}");
