@@ -197,6 +197,24 @@ final class GraphNodeRepository
         $this->adapter->execute('DELETE FROM graph_nodes');
     }
 
+    /**
+     * Every module that currently owns at least one node.
+     *
+     * Counting modules is not the same question as listing nodes, and the difference used to
+     * be paid in full: the only way to learn the module set was to pull every node object out
+     * of the database and collect the field. One GROUP BY answers it.
+     *
+     * @return list<string>
+     */
+    public function distinctModules(): array
+    {
+        $rows = $this->adapter->execute(
+            "SELECT DISTINCT module FROM graph_nodes WHERE module IS NOT NULL AND module != ''",
+        )->fetchAll();
+
+        return array_values(array_map(static fn (array $r): string => (string) $r['module'], $rows));
+    }
+
     /** @return list<string> */
     public function getNodeIdsByFile(string $filePath): array
     {

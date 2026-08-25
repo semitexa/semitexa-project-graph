@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Console\Command;
 
 use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Console\BaseCommand;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractorPipeline;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphBuilder;
@@ -28,11 +29,14 @@ final class ReviewGraphGenerateCommand extends BaseCommand
 {
     use UsesProjectGraphConnection;
 
-    public function __construct(
-        private readonly ConnectionRegistry $connections,
-    ) {
-        parent::__construct();
-    }
+    /**
+     * Property injection, not a constructor parameter: #[AsCommand] classes are
+     * container-managed, and semitexa.injectionViaConstructor makes that the only DI channel.
+     * The rule fires per changed file, so a constructor here is a violation waiting for the
+     * next person to edit the file rather than a clean build.
+     */
+    #[InjectAsReadonly]
+    protected ConnectionRegistry $connections;
 
     protected function configure(): void
     {

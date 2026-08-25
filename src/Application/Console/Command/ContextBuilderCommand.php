@@ -11,6 +11,7 @@ use Semitexa\ProjectGraph\Application\Service\Intelligence\IntelligenceLayer;
 use Semitexa\ProjectGraph\Application\Service\Query\Direction;
 use Semitexa\ProjectGraph\Application\Service\Query\GraphQueryService;
 use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
 use Semitexa\ProjectGraph\Application\Service\Support\UsesProjectGraphConnection;
@@ -27,11 +28,14 @@ final class ContextBuilderCommand extends BaseCommand
 
     private ?GraphQueryService $queryService = null;
 
-    public function __construct(
-        private readonly ConnectionRegistry $connections,
-    ) {
-        parent::__construct();
-    }
+    /**
+     * Property injection, not a constructor parameter: #[AsCommand] classes are
+     * container-managed, and semitexa.injectionViaConstructor makes that the only DI channel.
+     * The rule fires per changed file, so a constructor here is a violation waiting for the
+     * next person to edit the file rather than a clean build.
+     */
+    #[InjectAsReadonly]
+    protected ConnectionRegistry $connections;
 
     private function query(): GraphQueryService
     {
