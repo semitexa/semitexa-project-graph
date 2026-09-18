@@ -12,17 +12,17 @@ final class SourceSnippetLoader
 {
     public function loadSnippet(Node $node, int $contextLines = 5): ?string
     {
-        if ($node->file === '' || !is_file($node->file)) {
+        if ($node->getFile() === '' || !is_file($node->getFile())) {
             return null;
         }
 
-        $lines = file($node->file);
+        $lines = file($node->getFile());
         if ($lines === false) {
             return null;
         }
 
-        $start = max(0, $node->line - 1 - $contextLines);
-        $end = min(count($lines), $node->endLine + $contextLines);
+        $start = max(0, $node->getLine() - 1 - $contextLines);
+        $end = min(count($lines), $node->getEndLine() + $contextLines);
         $snippetLines = array_slice($lines, $start, $end - $start);
 
         return implode('', $snippetLines);

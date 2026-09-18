@@ -135,7 +135,7 @@ final class ReviewGraphIntelligenceCommand extends BaseCommand
 
         foreach (array_slice($gaps, 0, 20) as $gap) {
             $node = $gap['node'];
-            $output->writeln("[{$gap['score']}] {$node->fqcn} ({$node->type->value})");
+            $output->writeln("[{$gap['score']}] {$node->fqcn} ({$node->getType()->value})");
         }
 
         $output->writeln('');

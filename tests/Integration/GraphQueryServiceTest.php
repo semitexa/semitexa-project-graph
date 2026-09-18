@@ -93,15 +93,15 @@ final class GraphQueryServiceTest extends TestCase
         $node = $this->query->getNode('handler:CreateOrder');
 
         self::assertNotNull($node);
-        self::assertSame('handler:CreateOrder', $node->id);
-        self::assertSame(NodeType::Handler, $node->type);
-        self::assertSame('App\\Orders\\CreateOrderHandler', $node->fqcn);
-        self::assertSame('src/Orders/CreateOrderHandler.php', $node->file);
-        self::assertSame(12, $node->line);
-        self::assertSame(48, $node->endLine);
-        self::assertSame('Orders', $node->module);
-        self::assertSame(['route' => '/orders'], $node->metadata);
-        self::assertFalse($node->isPlaceholder);
+        self::assertSame('handler:CreateOrder', $node->getId());
+        self::assertSame(NodeType::Handler, $node->getType());
+        self::assertSame('App\\Orders\\CreateOrderHandler', $node->getFqcn());
+        self::assertSame('src/Orders/CreateOrderHandler.php', $node->getFile());
+        self::assertSame(12, $node->getLine());
+        self::assertSame(48, $node->getEndLine());
+        self::assertSame('Orders', $node->getModule());
+        self::assertSame(['route' => '/orders'], $node->getMetadata());
+        self::assertFalse($node->getIsPlaceholder());
     }
 
     #[Test]
@@ -109,7 +109,7 @@ final class GraphQueryServiceTest extends TestCase
     {
         self::assertSame(
             'handler:CreateOrder',
-            $this->query->getNode('App\\Orders\\CreateOrderHandler')?->id,
+            $this->query->getNode('App\\Orders\\CreateOrderHandler')?->getId(),
         );
     }
 
@@ -126,10 +126,10 @@ final class GraphQueryServiceTest extends TestCase
     {
         self::assertSame(
             ['handler:CreateOrder'],
-            array_map(static fn (Node $n): string => $n->id, $this->query->findNodes(type: 'handler')),
+            array_map(static fn (Node $n): string => $n->getId(), $this->query->findNodes(type: 'handler')),
         );
 
-        $orders = array_map(static fn (Node $n): string => $n->id, $this->query->findNodes(module: 'Orders'));
+        $orders = array_map(static fn (Node $n): string => $n->getId(), $this->query->findNodes(module: 'Orders'));
         sort($orders);
         self::assertSame(['handler:CreateOrder', 'service:Bare', 'service:OrderRepo'], $orders);
 
@@ -143,9 +143,9 @@ final class GraphQueryServiceTest extends TestCase
         $edges = $this->query->getEdges('handler:CreateOrder', direction: Direction::Outgoing);
 
         self::assertCount(1, $edges);
-        self::assertSame('handler:CreateOrder', $edges[0]->sourceId);
-        self::assertSame('service:OrderRepo', $edges[0]->targetId);
-        self::assertSame(EdgeType::Uses, $edges[0]->type);
+        self::assertSame('handler:CreateOrder', $edges[0]->getSourceId());
+        self::assertSame('service:OrderRepo', $edges[0]->getTargetId());
+        self::assertSame(EdgeType::Uses, $edges[0]->getType());
     }
 
     #[Test]
@@ -153,7 +153,7 @@ final class GraphQueryServiceTest extends TestCase
     {
         // Two things use the repo; both arrive as incoming, neither as outgoing.
         $incoming = array_map(
-            static fn (Edge $e): string => $e->sourceId,
+            static fn (Edge $e): string => $e->getSourceId(),
             $this->query->getEdges('service:OrderRepo', direction: Direction::Incoming),
         );
         sort($incoming);
@@ -167,10 +167,10 @@ final class GraphQueryServiceTest extends TestCase
     {
         // Both return EDGES, walked in opposite directions — the far end is
         // the target going out and the source coming back.
-        $deps = array_map(static fn (Edge $e): string => $e->targetId, $this->query->getDependencies('handler:CreateOrder'));
+        $deps = array_map(static fn (Edge $e): string => $e->getTargetId(), $this->query->getDependencies('handler:CreateOrder'));
         self::assertContains('service:OrderRepo', $deps);
 
-        $usages = array_map(static fn (Edge $e): string => $e->sourceId, $this->query->getUsages('service:OrderRepo'));
+        $usages = array_map(static fn (Edge $e): string => $e->getSourceId(), $this->query->getUsages('service:OrderRepo'));
         self::assertContains('handler:CreateOrder', $usages);
     }
 
@@ -182,7 +182,7 @@ final class GraphQueryServiceTest extends TestCase
         $impact = $this->query->getImpact(['service:OrderRepo'], maxDepth: 5);
 
         self::assertArrayHasKey('handler:CreateOrder', $impact->impacted);
-        self::assertSame('handler:CreateOrder', $impact->impacted['handler:CreateOrder']->node->id);
+        self::assertSame('handler:CreateOrder', $impact->impacted['handler:CreateOrder']->node->getId());
         self::assertSame(1, $impact->impacted['handler:CreateOrder']->distance);
         // Invoicer uses the handler, so it is reached on the second hop.
         self::assertArrayHasKey('service:Invoicer', $impact->impacted);
@@ -198,8 +198,8 @@ final class GraphQueryServiceTest extends TestCase
         $cross = $this->query->getCrossModuleEdges();
 
         self::assertCount(1, $cross);
-        self::assertSame('service:Invoicer', $cross[0]->sourceId);
-        self::assertSame('handler:CreateOrder', $cross[0]->targetId);
+        self::assertSame('service:Invoicer', $cross[0]->getSourceId());
+        self::assertSame('handler:CreateOrder', $cross[0]->getTargetId());
 
         self::assertSame([], $this->query->getCrossModuleEdges(moduleA: 'Orders'));
     }
@@ -210,7 +210,7 @@ final class GraphQueryServiceTest extends TestCase
         $hits = $this->query->search('CreateOrder', limit: 10);
 
         self::assertNotSame([], $hits);
-        self::assertContains('handler:CreateOrder', array_map(static fn (Node $n): string => $n->id, $hits));
+        self::assertContains('handler:CreateOrder', array_map(static fn (Node $n): string => $n->getId(), $hits));
     }
 
     /**

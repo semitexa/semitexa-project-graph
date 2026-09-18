@@ -61,8 +61,8 @@ final class EventTraceCommand extends BaseCommand
             $output->writeln('Search results:');
             $results = $this->query()->search($eventArg);
             foreach ($results as $node) {
-                if ($node->type->value === 'event' || str_ends_with($node->fqcn, 'Event')) {
-                    $output->writeln("  - {$node->fqcn}");
+                if ($node->getType()->value === 'event' || str_ends_with($node->getFqcn(), 'Event')) {
+                    $output->writeln("  - {$node->getFqcn()}");
                 }
             }
             return Command::FAILURE;
@@ -107,8 +107,8 @@ final class EventTraceCommand extends BaseCommand
                 $output->writeln("  → {$emitter}");
                 if ($includeCode) {
                     $node = $this->query()->getNode($emitter);
-                    if ($node !== null && $node->file !== '') {
-                        $output->writeln("    file: {$node->file}");
+                    if ($node !== null && $node->getFile() !== '') {
+                        $output->writeln("    file: {$node->getFile()}");
                     }
                 }
             }
@@ -121,8 +121,8 @@ final class EventTraceCommand extends BaseCommand
                 $output->writeln("  → {$listener}");
                 if ($includeCode) {
                     $node = $this->query()->getNode($listener);
-                    if ($node !== null && $node->file !== '') {
-                        $output->writeln("    file: {$node->file}");
+                    if ($node !== null && $node->getFile() !== '') {
+                        $output->writeln("    file: {$node->getFile()}");
                     }
                 }
             }
@@ -158,8 +158,8 @@ final class EventTraceCommand extends BaseCommand
                     $output->writeln("    → {$handler}");
                     if ($includeCode) {
                         $node = $this->query()->getNode($handler);
-                        if ($node !== null && $node->file !== '') {
-                            $output->writeln("      file: {$node->file}");
+                        if ($node !== null && $node->getFile() !== '') {
+                            $output->writeln("      file: {$node->getFile()}");
                         }
                     }
                 }
@@ -189,8 +189,8 @@ final class EventTraceCommand extends BaseCommand
 
         $results = $this->query()->search($eventArg);
         foreach ($results as $node) {
-            if ($node->type->value === 'event' || str_ends_with($node->fqcn, 'Event')) {
-                return $node->fqcn;
+            if ($node->getType()->value === 'event' || str_ends_with($node->getFqcn(), 'Event')) {
+                return $node->getFqcn();
             }
         }
 
@@ -204,11 +204,11 @@ final class EventTraceCommand extends BaseCommand
         $emitters = [];
 
         foreach ($edges as $edge) {
-            if ($edge->type->value === 'listens_to' && $edge->targetId === 'class:' . $eventClass) {
-                $listeners[] = $edge->sourceId;
+            if ($edge->getType()->value === 'listens_to' && $edge->getTargetId() === 'class:' . $eventClass) {
+                $listeners[] = $edge->getSourceId();
             }
-            if ($edge->type->value === 'emits' && str_starts_with($edge->sourceId, 'class:')) {
-                $emitters[] = $edge->sourceId;
+            if ($edge->getType()->value === 'emits' && str_starts_with($edge->getSourceId(), 'class:')) {
+                $emitters[] = $edge->getSourceId();
             }
         }
 

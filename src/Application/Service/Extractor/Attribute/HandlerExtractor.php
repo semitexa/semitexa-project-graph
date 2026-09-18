@@ -56,7 +56,7 @@ final class HandlerExtractor implements ExtractorInterface
             $payloadClass = $asHandler->payload ?? null;
             if ($payloadClass !== null) {
                 $result->addEdge(new Edge(
-                    sourceId: $handlerNode->id,
+                    sourceId: $handlerNode->getId(),
                     targetId: NodeId::forClass($payloadClass),
                     type:     EdgeType::Handles,
                     metadata: [],
@@ -78,8 +78,8 @@ final class HandlerExtractor implements ExtractorInterface
                 $result->addNode($resourceNode);
 
                 $result->addEdge(new Edge(
-                    sourceId: $handlerNode->id,
-                    targetId: $resourceNode->id,
+                    sourceId: $handlerNode->getId(),
+                    targetId: $resourceNode->getId(),
                     type:     EdgeType::Produces,
                     metadata: [],
                 ));
@@ -87,7 +87,7 @@ final class HandlerExtractor implements ExtractorInterface
 
             foreach ($classInfo->usedTraits as $traitFqcn) {
                 $result->addEdge(new Edge(
-                    sourceId: $handlerNode->id,
+                    sourceId: $handlerNode->getId(),
                     targetId: NodeId::forClass($traitFqcn),
                     type:     EdgeType::ComposedOf,
                     metadata: [],

@@ -33,9 +33,9 @@ final class PromptFormatter
         $body[] = '';
 
         foreach ($context->nodes as $ctxNode) {
-            $body[] = '### ' . $ctxNode->node->fqcn . ' (score: ' . round($ctxNode->score, 2) . ')';
-            $body[] = 'Type: ' . $ctxNode->node->type->value;
-            $body[] = 'File: ' . $ctxNode->node->file . ':' . $ctxNode->node->line;
+            $body[] = '### ' . $ctxNode->node->getFqcn() . ' (score: ' . round($ctxNode->score, 2) . ')';
+            $body[] = 'Type: ' . $ctxNode->node->getType()->value;
+            $body[] = 'File: ' . $ctxNode->node->getFile() . ':' . $ctxNode->node->getLine();
             $body[] = '';
             if ($ctxNode->snippet !== null) {
                 $body[] = '```php';
@@ -55,8 +55,8 @@ final class PromptFormatter
         $body = ['## Current State', ''];
 
         foreach ($context->nodes as $ctxNode) {
-            $body[] = '### ' . $ctxNode->node->fqcn;
-            $body[] = 'Type: ' . $ctxNode->node->type->value;
+            $body[] = '### ' . $ctxNode->node->getFqcn();
+            $body[] = 'Type: ' . $ctxNode->node->getType()->value;
             $body[] = 'Relevance score: ' . round($ctxNode->score, 2);
             $body[] = '';
             if ($ctxNode->snippet !== null) {
@@ -77,8 +77,8 @@ final class PromptFormatter
         $body = ['## Code to Test', ''];
 
         foreach ($context->nodes as $ctxNode) {
-            $body[] = '### ' . $ctxNode->node->fqcn;
-            $body[] = 'Type: ' . $ctxNode->node->type->value;
+            $body[] = '### ' . $ctxNode->node->getFqcn();
+            $body[] = 'Type: ' . $ctxNode->node->getType()->value;
             $body[] = '';
             if ($ctxNode->snippet !== null) {
                 $body[] = '```php';

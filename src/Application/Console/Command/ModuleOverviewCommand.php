@@ -147,7 +147,7 @@ final class ModuleOverviewCommand extends BaseCommand
 
         $nodes = $this->query()->findNodes(module: $module);
         foreach ($nodes as $node) {
-            match ($node->type) {
+            match ($node->getType()) {
                 NodeType::Class_ => $overview['summary']['classes']++,
                 NodeType::Event => $overview['summary']['events']++,
                 NodeType::Handler => $overview['summary']['handlers']++,
@@ -173,9 +173,9 @@ final class ModuleOverviewCommand extends BaseCommand
         if ($includeEvents) {
             $eventNodes = $this->query()->findNodes(type: NodeType::Event->value, module: $module);
             foreach ($eventNodes as $eventNode) {
-                $lifecycle = $intelligence->getEventLifecycle($eventNode->fqcn);
+                $lifecycle = $intelligence->getEventLifecycle($eventNode->getFqcn());
                 $overview['events'][] = [
-                    'class' => $eventNode->fqcn,
+                    'class' => $eventNode->getFqcn(),
                     'nats_subject' => $lifecycle?->natsSubject,
                     'listeners' => array_merge(
                         $lifecycle?->syncListeners ?? [],
@@ -189,7 +189,7 @@ final class ModuleOverviewCommand extends BaseCommand
         $allHotspots = $intelligence->getHotspots(20);
         foreach ($allHotspots as $h) {
             $node = $this->query()->getNode($h->nodeId);
-            if ($node !== null && $node->module === $module) {
+            if ($node !== null && $node->getModule() === $module) {
                 $overview['hotspots'][] = [
                     'node_id' => $h->nodeId,
                     'risk_score' => $h->riskScore,
@@ -200,11 +200,11 @@ final class ModuleOverviewCommand extends BaseCommand
         $crossModuleEdges = $this->query()->getCrossModuleEdges($module);
         foreach ($crossModuleEdges as $edge) {
             $overview['cross_module_deps'][] = [
-                'source' => $edge->sourceId,
-                'target' => $edge->targetId,
-                'type' => $edge->type->value,
+                'source' => $edge->getSourceId(),
+                'target' => $edge->getTargetId(),
+                'type' => $edge->getType()->value,
             ];
-            if (!str_starts_with($edge->targetId, 'module:') && !str_starts_with($edge->targetId, 'class:')) {
+            if (!str_starts_with($edge->getTargetId(), 'module:') && !str_starts_with($edge->getTargetId(), 'class:')) {
                 $overview['summary']['external_deps']++;
             }
         }

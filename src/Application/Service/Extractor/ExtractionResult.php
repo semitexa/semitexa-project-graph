@@ -20,15 +20,15 @@ final class ExtractionResult
 
     public function addNode(Node $node): self
     {
-        if (isset($this->nodeIndex[$node->id])) {
-            $idx = $this->nodeIndex[$node->id];
+        if (isset($this->nodeIndex[$node->getId()])) {
+            $idx = $this->nodeIndex[$node->getId()];
             $existing = $this->nodes[$idx];
             $this->nodes[$idx] = $this->mergeNode($existing, $node);
 
             return $this;
         }
 
-        $this->nodeIndex[$node->id] = count($this->nodes);
+        $this->nodeIndex[$node->getId()] = count($this->nodes);
         $this->nodes[] = $node;
         return $this;
     }
@@ -47,15 +47,15 @@ final class ExtractionResult
         $idx = $this->nodeIndex[$nodeId];
         $node = $this->nodes[$idx];
         $this->nodes[$idx] = new Node(
-            id:            $node->id,
-            type:          $node->type,
-            fqcn:          $node->fqcn,
-            file:          $node->file,
-            line:          $node->line,
-            endLine:       $node->endLine,
-            module:        $node->module,
-            metadata:      array_merge($node->metadata, [$key => $value]),
-            isPlaceholder: $node->isPlaceholder,
+            id:            $node->getId(),
+            type:          $node->getType(),
+            fqcn:          $node->getFqcn(),
+            file:          $node->getFile(),
+            line:          $node->getLine(),
+            endLine:       $node->getEndLine(),
+            module:        $node->getModule(),
+            metadata:      array_merge($node->getMetadata(), [$key => $value]),
+            isPlaceholder: $node->getIsPlaceholder(),
         );
         return $this;
     }
@@ -90,21 +90,21 @@ final class ExtractionResult
 
     private function mergeNode(Node $existing, Node $incoming): Node
     {
-        $winner = $this->typePriority($incoming->type->value) >= $this->typePriority($existing->type->value)
+        $winner = $this->typePriority($incoming->getType()->value) >= $this->typePriority($existing->getType()->value)
             ? $incoming
             : $existing;
         $loser = $winner === $incoming ? $existing : $incoming;
 
         return new Node(
-            id:            $winner->id,
-            type:          $winner->type,
-            fqcn:          $winner->fqcn !== '' ? $winner->fqcn : $loser->fqcn,
-            file:          $winner->file !== '' ? $winner->file : $loser->file,
-            line:          $winner->line !== 0 ? $winner->line : $loser->line,
-            endLine:       $winner->endLine !== 0 ? $winner->endLine : $loser->endLine,
-            module:        $winner->module !== '' ? $winner->module : $loser->module,
-            metadata:      array_merge($loser->metadata, $winner->metadata),
-            isPlaceholder: $existing->isPlaceholder && $incoming->isPlaceholder,
+            id:            $winner->getId(),
+            type:          $winner->getType(),
+            fqcn:          $winner->getFqcn() !== '' ? $winner->getFqcn() : $loser->getFqcn(),
+            file:          $winner->getFile() !== '' ? $winner->getFile() : $loser->getFile(),
+            line:          $winner->getLine() !== 0 ? $winner->getLine() : $loser->getLine(),
+            endLine:       $winner->getEndLine() !== 0 ? $winner->getEndLine() : $loser->getEndLine(),
+            module:        $winner->getModule() !== '' ? $winner->getModule() : $loser->getModule(),
+            metadata:      array_merge($loser->getMetadata(), $winner->getMetadata()),
+            isPlaceholder: $existing->getIsPlaceholder() && $incoming->getIsPlaceholder(),
         );
     }
 

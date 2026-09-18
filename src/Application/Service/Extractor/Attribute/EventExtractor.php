@@ -78,7 +78,7 @@ final class EventExtractor implements ExtractorInterface
 
                 if ($eventClass !== null) {
                     $result->addEdge(new Edge(
-                        sourceId: $listenerNode->id,
+                        sourceId: $listenerNode->getId(),
                         targetId: NodeId::forClass($eventClass),
                         type:     EdgeType::ListensTo,
                         metadata: ['executionMode' => $executionMode],

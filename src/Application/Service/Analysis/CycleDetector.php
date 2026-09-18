@@ -26,12 +26,12 @@ final class CycleDetector
             : $this->storage->nodes->findByType('class');
 
         foreach ($nodes as $node) {
-            $color[$node->id] = 'white';
+            $color[$node->getId()] = 'white';
         }
 
         foreach ($nodes as $node) {
-            if ($color[$node->id] === 'white') {
-                $this->dfs($node->id, $color, $parent, $pathEdges, $cycles, $maxDepth, 0);
+            if ($color[$node->getId()] === 'white') {
+                $this->dfs($node->getId(), $color, $parent, $pathEdges, $cycles, $maxDepth, 0);
             }
         }
 
@@ -49,14 +49,14 @@ final class CycleDetector
 
         $edges = $this->storage->edges->findBySource($nodeId);
         foreach ($edges as $edge) {
-            $targetId = $edge->targetId;
+            $targetId = $edge->getTargetId();
 
             if (($color[$targetId] ?? 'white') === 'gray') {
                 $cycleEdges = $this->reconstructCycle($targetId, $nodeId, $edge, $pathEdges);
                 if (!empty($cycleEdges)) {
                     $cycleNodes = [];
                     foreach ($cycleEdges as $e) {
-                        $cycleNodes[] = $e->sourceId;
+                        $cycleNodes[] = $e->getSourceId();
                     }
                     $cycleNodes[] = $targetId;
                     $cycles[] = new Cycle(
@@ -84,7 +84,7 @@ final class CycleDetector
         while ($node !== $cycleStart && isset($pathEdges[$node])) {
             $edge = $pathEdges[$node];
             array_unshift($cycleEdges, $edge);
-            $node = $edge->sourceId;
+            $node = $edge->getSourceId();
         }
 
         if ($node !== $cycleStart) {

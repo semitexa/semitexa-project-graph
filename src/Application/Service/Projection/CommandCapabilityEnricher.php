@@ -32,10 +32,10 @@ final class CommandCapabilityEnricher
 
     public function enrich(Node $commandNode): CommandCapability
     {
-        $fqcn = $commandNode->fqcn;
+        $fqcn = $commandNode->getFqcn();
         if (!class_exists($fqcn)) {
             return new CommandCapability(
-                name:            $commandNode->metadata['commandName'] ?? $commandNode->fqcn,
+                name:            $commandNode->getMetadata()['commandName'] ?? $commandNode->getFqcn(),
                 kind:            'other',
                 summary:         '',
                 useWhen:         '',
@@ -45,7 +45,7 @@ final class CommandCapabilityEnricher
                 outputs:         [],
                 supports:        [],
                 followUp:        [],
-                module:          $commandNode->module,
+                module:          $commandNode->getModule(),
             );
         }
 
@@ -59,7 +59,7 @@ final class CommandCapabilityEnricher
         $inputs = $this->discoverInputs($ref);
         $flags = $this->discoverFlags($ref);
 
-        $commandName = $asCommand?->name ?? $commandNode->metadata['commandName'] ?? $commandNode->fqcn;
+        $commandName = $asCommand?->name ?? $commandNode->getMetadata()['commandName'] ?? $commandNode->getFqcn();
         $curated = $this->findCurated($commandName);
 
         return new CommandCapability(
@@ -91,7 +91,7 @@ final class CommandCapabilityEnricher
             followUp:        $curated?->follow_up !== null && $curated->follow_up !== []
                                  ? $curated->follow_up
                                  : ($hintInstance?->followUp ?? []),
-            module:          $commandNode->module,
+            module:          $commandNode->getModule(),
         );
     }
 

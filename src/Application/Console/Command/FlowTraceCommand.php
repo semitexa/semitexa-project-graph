@@ -60,7 +60,7 @@ final class FlowTraceCommand extends BaseCommand
             $output->writeln('Available flows:');
             $flows = $this->query()->findNodes(type: 'execution_flow');
             foreach ($flows as $node) {
-                $name = $node->metadata['name'] ?? $node->id;
+                $name = $node->getMetadata()['name'] ?? $node->getId();
                 $output->writeln("  - {$name}");
             }
             return Command::FAILURE;
@@ -107,8 +107,8 @@ final class FlowTraceCommand extends BaseCommand
 
             if ($input->getOption('include-code')) {
                 $graphNode = $this->query()->getNode($node);
-                if ($graphNode !== null && $graphNode->file !== '') {
-                    $output->writeln("     file: {$graphNode->file}");
+                if ($graphNode !== null && $graphNode->getFile() !== '') {
+                    $output->writeln("     file: {$graphNode->getFile()}");
                 }
             }
         }
@@ -144,11 +144,11 @@ final class FlowTraceCommand extends BaseCommand
     {
         $flows = $this->query()->findNodes(type: 'execution_flow');
         foreach ($flows as $node) {
-            $name = $node->metadata['name'] ?? '';
+            $name = $node->getMetadata()['name'] ?? '';
             if (stripos($name, $flowArg) !== false) {
                 return $name;
             }
-            $entryPoint = $node->metadata['entry_point'] ?? '';
+            $entryPoint = $node->getMetadata()['entry_point'] ?? '';
             if (stripos($entryPoint, $flowArg) !== false) {
                 return $name;
             }

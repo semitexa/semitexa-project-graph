@@ -80,18 +80,18 @@ final class GraphEdgeRepository
     public function upsert(Edge $edge): void
     {
         $existing = $this->newQuery()
-            ->where(ColumnRef::for(GraphEdgeResource::class, 'source_id'), Operator::Equals, $edge->sourceId)
-            ->where(ColumnRef::for(GraphEdgeResource::class, 'target_id'), Operator::Equals, $edge->targetId)
-            ->where(ColumnRef::for(GraphEdgeResource::class, 'type'), Operator::Equals, $edge->type->value)
+            ->where(ColumnRef::for(GraphEdgeResource::class, 'source_id'), Operator::Equals, $edge->getSourceId())
+            ->where(ColumnRef::for(GraphEdgeResource::class, 'target_id'), Operator::Equals, $edge->getTargetId())
+            ->where(ColumnRef::for(GraphEdgeResource::class, 'type'), Operator::Equals, $edge->getType()->value)
             ->fetchOneAs(Edge::class, $this->mapperRegistry) ?: null;
 
         if ($existing !== null) {
             $updated = new Edge(
-                id:       $existing->id,
-                sourceId: $edge->sourceId,
-                targetId: $edge->targetId,
-                type:     $edge->type,
-                metadata: $edge->metadata,
+                id:       $existing->getId(),
+                sourceId: $edge->getSourceId(),
+                targetId: $edge->getTargetId(),
+                type:     $edge->getType(),
+                metadata: $edge->getMetadata(),
             );
             $this->writeEngine->update($updated, GraphEdgeResource::class, $this->mapperRegistry);
         } else {
