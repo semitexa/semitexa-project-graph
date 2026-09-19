@@ -58,13 +58,13 @@ final class GraphNodeRepository
         }
 
         foreach ($candidates as $node) {
-            if (!$node->isPlaceholder && str_starts_with($node->id, 'class:')) {
+            if (!$node->getIsPlaceholder() && str_starts_with($node->getId(), 'class:')) {
                 return $node;
             }
         }
 
         foreach ($candidates as $node) {
-            if (!$node->isPlaceholder) {
+            if (!$node->getIsPlaceholder()) {
                 return $node;
             }
         }
@@ -123,14 +123,14 @@ final class GraphNodeRepository
 
         $merged = [];
         foreach ([...$byName, ...$byFqcn] as $node) {
-            $merged[$node->id] = $node;
+            $merged[$node->getId()] = $node;
         }
         return array_slice(array_values($merged), 0, $limit);
     }
 
     public function upsert(Node $node): void
     {
-        $existing = $this->findById($node->id);
+        $existing = $this->findById($node->getId());
         if ($existing !== null) {
             $this->writeEngine->update($node, GraphNodeResource::class, $this->mapperRegistry);
         } else {

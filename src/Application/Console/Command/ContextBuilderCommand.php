@@ -158,23 +158,23 @@ final class ContextBuilderCommand extends BaseCommand
         foreach ($keywords as $keyword) {
             $results = $this->query()->search($keyword);
             foreach ($results as $node) {
-                if ($module !== null && $node->module !== $module) {
+                if ($module !== null && $node->getModule() !== $module) {
                     continue;
                 }
-                if (!isset($matchedIds[$node->id])) {
-                    $matchedIds[$node->id] = true;
-                    $intent = $intelligence->getIntent($node->id);
+                if (!isset($matchedIds[$node->getId()])) {
+                    $matchedIds[$node->getId()] = true;
+                    $intent = $intelligence->getIntent($node->getId());
                     $context['matched_nodes'][] = [
-                        'id' => $node->id,
-                        'fqcn' => $node->fqcn,
-                        'type' => $node->type->value,
-                        'file' => $node->file,
+                        'id' => $node->getId(),
+                        'fqcn' => $node->getFqcn(),
+                        'type' => $node->getType()->value,
+                        'file' => $node->getFile(),
                         'intent' => $intent?->purpose,
                     ];
 
                     if ($depth >= 2) {
-                        $this->addDependencies($node->id, $context, $depth);
-                        $this->addDependents($node->id, $context, $depth);
+                        $this->addDependencies($node->getId(), $context, $depth);
+                        $this->addDependents($node->getId(), $context, $depth);
                     }
                 }
             }
@@ -232,10 +232,10 @@ final class ContextBuilderCommand extends BaseCommand
     {
         $edges = $this->query()->getEdges($nodeId, direction: Direction::Outgoing);
         foreach ($edges as $edge) {
-            if (in_array($edge->type, [EdgeType::Calls, EdgeType::Instantiates, EdgeType::InjectsReadonly, EdgeType::InjectsMutable], true)) {
+            if (in_array($edge->getType(), [EdgeType::Calls, EdgeType::Instantiates, EdgeType::InjectsReadonly, EdgeType::InjectsMutable], true)) {
                 $context['dependencies'][] = [
-                    'target' => $edge->targetId,
-                    'type' => $edge->type->value,
+                    'target' => $edge->getTargetId(),
+                    'type' => $edge->getType()->value,
                 ];
             }
         }
@@ -245,10 +245,10 @@ final class ContextBuilderCommand extends BaseCommand
     {
         $edges = $this->query()->getEdges($nodeId, direction: Direction::Incoming);
         foreach ($edges as $edge) {
-            if (in_array($edge->type, [EdgeType::Calls, EdgeType::Instantiates, EdgeType::InjectsReadonly, EdgeType::InjectsMutable], true)) {
+            if (in_array($edge->getType(), [EdgeType::Calls, EdgeType::Instantiates, EdgeType::InjectsReadonly, EdgeType::InjectsMutable], true)) {
                 $context['dependents'][] = [
-                    'source' => $edge->sourceId,
-                    'type' => $edge->type->value,
+                    'source' => $edge->getSourceId(),
+                    'type' => $edge->getType()->value,
                 ];
             }
         }

@@ -96,8 +96,8 @@ final class PayloadExtractor implements ExtractorInterface
                     $result->addNode($routeNode);
 
                     $result->addEdge(new Edge(
-                        sourceId: $payloadNode->id,
-                        targetId: $routeNode->id,
+                        sourceId: $payloadNode->getId(),
+                        targetId: $routeNode->getId(),
                         type:     EdgeType::ServesRoute,
                         metadata: [],
                     ));
@@ -105,7 +105,7 @@ final class PayloadExtractor implements ExtractorInterface
 
                 foreach ($classInfo->usedTraits as $traitFqcn) {
                     $result->addEdge(new Edge(
-                        sourceId: $payloadNode->id,
+                        sourceId: $payloadNode->getId(),
                         targetId: NodeId::forClass($traitFqcn),
                         type:     EdgeType::ComposedOf,
                         metadata: [],
@@ -117,7 +117,7 @@ final class PayloadExtractor implements ExtractorInterface
                     if ($permInstance !== null) {
                         $slug = $permInstance->permission ?? '';
                         $result->addEdge(new Edge(
-                            sourceId: $payloadNode->id,
+                            sourceId: $payloadNode->getId(),
                             targetId: 'permission:' . $slug,
                             type:     EdgeType::RequiresPermission,
                             metadata: ['slug' => $slug],
@@ -131,7 +131,7 @@ final class PayloadExtractor implements ExtractorInterface
                         $capability = $capInstance->capability ?? null;
                         $slug = $capability instanceof \BackedEnum ? (string) $capability->value : '';
                         $result->addEdge(new Edge(
-                            sourceId: $payloadNode->id,
+                            sourceId: $payloadNode->getId(),
                             targetId: 'capability:' . $slug,
                             type:     EdgeType::RequiresCapability,
                             metadata: ['slug' => $slug],

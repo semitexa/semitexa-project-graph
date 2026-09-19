@@ -142,10 +142,10 @@ final class ReviewGraphQueryCommand extends BaseCommand
     {
         $groups = [];
         foreach ($edges as $e) {
-            $otherId = $e->sourceId === $anchorId ? $e->targetId : $e->sourceId;
+            $otherId = $e->getSourceId() === $anchorId ? $e->getTargetId() : $e->getSourceId();
             $node = $query->getNode($otherId);
-            $label = $node ? $node->fqcn : $otherId;
-            $groups[$label]['kinds'][$e->type->value] = true;
+            $label = $node ? $node->getFqcn() : $otherId;
+            $groups[$label]['kinds'][$e->getType()->value] = true;
             $groups[$label]['count'] = ($groups[$label]['count'] ?? 0) + 1;
         }
         ksort($groups);
@@ -179,10 +179,10 @@ final class ReviewGraphQueryCommand extends BaseCommand
     {
         if ($json) {
             $data = array_map(fn($e) => [
-                'source'   => $e->sourceId,
-                'target'   => $e->targetId,
-                'type'     => $e->type->value,
-                'metadata' => $e->metadata,
+                'source'   => $e->getSourceId(),
+                'target'   => $e->getTargetId(),
+                'type'     => $e->getType()->value,
+                'metadata' => $e->getMetadata(),
             ], $edges);
             $payload = json_encode($data, JSON_UNESCAPED_SLASHES);
             if ($payload === false) {
@@ -198,10 +198,10 @@ final class ReviewGraphQueryCommand extends BaseCommand
             foreach ($edges as $edge) {
                 $line = json_encode([
                     'kind'     => 'edge',
-                    'source'   => $edge->sourceId,
-                    'target'   => $edge->targetId,
-                    'type'     => $edge->type->value,
-                    'metadata' => $edge->metadata,
+                    'source'   => $edge->getSourceId(),
+                    'target'   => $edge->getTargetId(),
+                    'type'     => $edge->getType()->value,
+                    'metadata' => $edge->getMetadata(),
                 ], JSON_UNESCAPED_SLASHES);
                 if ($line === false) {
                     $io->error('Failed to encode NDJSON edge.');
@@ -220,11 +220,11 @@ final class ReviewGraphQueryCommand extends BaseCommand
         }
 
         foreach ($edges as $edge) {
-            $source = $query->getNode($edge->sourceId);
-            $target = $query->getNode($edge->targetId);
-            $srcLabel = $source ? $source->fqcn : $edge->sourceId;
-            $tgtLabel = $target ? $target->fqcn : $edge->targetId;
-            $io->text($srcLabel . ' --[' . $edge->type->value . ']--> ' . $tgtLabel);
+            $source = $query->getNode($edge->getSourceId());
+            $target = $query->getNode($edge->getTargetId());
+            $srcLabel = $source ? $source->getFqcn() : $edge->getSourceId();
+            $tgtLabel = $target ? $target->getFqcn() : $edge->getTargetId();
+            $io->text($srcLabel . ' --[' . $edge->getType()->value . ']--> ' . $tgtLabel);
         }
 
         return self::SUCCESS;
@@ -235,11 +235,11 @@ final class ReviewGraphQueryCommand extends BaseCommand
     {
         if ($json) {
             $data = array_map(fn($n) => [
-                'id'       => $n->id,
-                'type'     => $n->type->value,
-                'fqcn'     => $n->fqcn,
-                'file'     => $n->file,
-                'module'   => $n->module,
+                'id'       => $n->getId(),
+                'type'     => $n->getType()->value,
+                'fqcn'     => $n->getFqcn(),
+                'file'     => $n->getFile(),
+                'module'   => $n->getModule(),
             ], $nodes);
             $payload = json_encode($data, JSON_UNESCAPED_SLASHES);
             if ($payload === false) {
@@ -255,11 +255,11 @@ final class ReviewGraphQueryCommand extends BaseCommand
             foreach ($nodes as $node) {
                 $line = json_encode([
                     'kind'   => 'node',
-                    'id'     => $node->id,
-                    'type'   => $node->type->value,
-                    'fqcn'   => $node->fqcn,
-                    'file'   => $node->file,
-                    'module' => $node->module,
+                    'id'     => $node->getId(),
+                    'type'   => $node->getType()->value,
+                    'fqcn'   => $node->getFqcn(),
+                    'file'   => $node->getFile(),
+                    'module' => $node->getModule(),
                 ], JSON_UNESCAPED_SLASHES);
                 if ($line === false) {
                     $io->error('Failed to encode NDJSON node.');
@@ -278,7 +278,7 @@ final class ReviewGraphQueryCommand extends BaseCommand
         }
 
         foreach ($nodes as $node) {
-            $io->text('[' . $node->type->value . '] ' . $node->fqcn . ' (' . $node->module . ')');
+            $io->text('[' . $node->getType()->value . '] ' . $node->getFqcn() . ' (' . $node->getModule() . ')');
         }
 
         return self::SUCCESS;
@@ -293,12 +293,12 @@ final class ReviewGraphQueryCommand extends BaseCommand
     {
         $node = $storage->nodes->findById($target);
         if ($node !== null) {
-            return $node->id;
+            return $node->getId();
         }
 
         $node = $storage->nodes->findByFqcn($target);
         if ($node !== null) {
-            return $node->id;
+            return $node->getId();
         }
 
         return null;

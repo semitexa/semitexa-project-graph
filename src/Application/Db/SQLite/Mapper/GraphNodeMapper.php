@@ -38,16 +38,16 @@ final class GraphNodeMapper implements ResourceModelMapperInterface
         assert($domainModel instanceof Node);
 
         return new GraphNodeResource(
-            id:             $domainModel->id,
-            type:           $domainModel->type->value,
-            fqcn:           $domainModel->fqcn,
-            name:           $this->extractShortName($domainModel->fqcn),
-            file:           $domainModel->file,
-            line:           $domainModel->line,
-            end_line:       $domainModel->endLine,
-            module:         $domainModel->module,
-            metadata:       json_encode($domainModel->metadata),
-            is_placeholder: $domainModel->isPlaceholder,
+            id:             $domainModel->getId(),
+            type:           $domainModel->getType()->value,
+            fqcn:           $domainModel->getFqcn(),
+            name:           $this->extractShortName($domainModel->getFqcn()),
+            file:           $domainModel->getFile(),
+            line:           $domainModel->getLine(),
+            end_line:       $domainModel->getEndLine(),
+            module:         $domainModel->getModule(),
+            metadata:       json_encode($domainModel->getMetadata()),
+            is_placeholder: $domainModel->getIsPlaceholder(),
         );
     }
 

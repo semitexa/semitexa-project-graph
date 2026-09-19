@@ -73,7 +73,7 @@ final class NatsSubjectExtractor implements ExtractorInterface
             if ($aggAttr !== null) {
                 $aggInstance = $this->safeNewInstance($aggAttr);
                 if ($aggInstance !== null) {
-                    $aggregateId = NodeId::forAggregate($aggInstance->type);
+                    $aggregateId = NodeId::forAggregate($aggInstance->getType());
 
                     $aggNode = new Node(
                         id: $aggregateId,
@@ -84,7 +84,7 @@ final class NatsSubjectExtractor implements ExtractorInterface
                         endLine: $event->endLine,
                         module: $file->module,
                         metadata: [
-                            'aggregate_type' => $aggInstance->type,
+                            'aggregate_type' => $aggInstance->getType(),
                             'id_field' => $aggInstance->idField,
                             'creates_event' => $aggInstance->creates ? $event->fqcn : null,
                         ],

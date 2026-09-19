@@ -44,14 +44,14 @@ final class RelevanceScorer
 
     public function score(Node $node, int $distance = 1): float
     {
-        $typeWeight = self::TYPE_WEIGHTS[$node->type->value] ?? 3;
+        $typeWeight = self::TYPE_WEIGHTS[$node->getType()->value] ?? 3;
         $distanceFactor = 1.0 / max(1, $distance);
         return $typeWeight * $distanceFactor;
     }
 
     public function scoreEdge(Edge $edge): float
     {
-        return self::EDGE_WEIGHTS[$edge->type->value] ?? 3;
+        return self::EDGE_WEIGHTS[$edge->getType()->value] ?? 3;
     }
 
     public function rank(array $impactedNodes): array

@@ -206,9 +206,9 @@ final class GraphDiffCommand extends BaseCommand
         $byType = [];
         $modules = [];
         foreach ($scoped as $node) {
-            $byType[$node->type->value] = ($byType[$node->type->value] ?? 0) + 1;
-            if ($node->module !== '') {
-                $modules[$node->module] = true;
+            $byType[$node->getType()->value] = ($byType[$node->getType()->value] ?? 0) + 1;
+            if ($node->getModule() !== '') {
+                $modules[$node->getModule()] = true;
             }
         }
 

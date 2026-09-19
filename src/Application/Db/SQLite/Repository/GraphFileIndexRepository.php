@@ -47,7 +47,7 @@ final class GraphFileIndexRepository
     public function getHash(string $path): ?string
     {
         $entry = $this->findByPath($path);
-        return $entry?->contentHash;
+        return $entry?->getContentHash();
     }
 
     /** @return array<string, string> path => hash */

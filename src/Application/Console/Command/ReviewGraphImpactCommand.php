@@ -187,9 +187,9 @@ final class ReviewGraphImpactCommand extends BaseCommand
             $isDirect = $impacted->distance === 1;
             $line = json_encode([
                 'kind'     => $isDirect ? 'direct' : 'transitive',
-                'fqcn'     => $node->fqcn,
-                'type'     => $node->type->value,
-                'module'   => $node->module,
+                'fqcn'     => $node->getFqcn(),
+                'type'     => $node->getType()->value,
+                'module'   => $node->getModule(),
                 'distance' => $impacted->distance,
                 'action'   => $isDirect ? 'edit' : 'review',
             ], JSON_UNESCAPED_SLASHES);
@@ -236,10 +236,10 @@ final class ReviewGraphImpactCommand extends BaseCommand
         return [
             'changed'   => $impact->changed,
             'impacted'  => array_map(fn($id, $n) => [
-                'id'       => $n->node->id,
-                'fqcn'     => $n->node->fqcn,
-                'type'     => $n->node->type->value,
-                'module'   => $n->node->module,
+                'id'       => $n->node->getId(),
+                'fqcn'     => $n->node->getFqcn(),
+                'type'     => $n->node->getType()->value,
+                'module'   => $n->node->getModule(),
                 'distance' => $n->distance,
             ], array_keys($impact->impacted), $impact->impacted),
             'total'     => $impact->totalImpacted(),
@@ -252,24 +252,24 @@ final class ReviewGraphImpactCommand extends BaseCommand
     {
         $node = $storage->nodes->findById($target);
         if ($node !== null) {
-            return $node->id;
+            return $node->getId();
         }
 
         $node = $storage->nodes->findByFqcn($target);
         if ($node !== null) {
-            return $node->id;
+            return $node->getId();
         }
 
         if (is_file($target)) {
             $nodes = $storage->nodes->findByFile($target);
             if (!empty($nodes)) {
-                return $nodes[0]->id;
+                return $nodes[0]->getId();
             }
         }
 
         $nodes = $storage->nodes->searchFull($target, 1);
         if (!empty($nodes)) {
-            return $nodes[0]->id;
+            return $nodes[0]->getId();
         }
 
         return null;
@@ -296,7 +296,7 @@ final class ReviewGraphImpactCommand extends BaseCommand
         foreach ($byDepth as $depth => $nodes) {
             $io->section('Depth ' . $depth . ' (' . count($nodes) . ' nodes)');
             foreach ($nodes as $impacted) {
-                $io->text('<info>' . $impacted->node->fqcn . '</info> (' . $impacted->node->type->value . ', ' . $impacted->node->module . ')');
+                $io->text('<info>' . $impacted->node->getFqcn() . '</info> (' . $impacted->node->getType()->value . ', ' . $impacted->node->getModule() . ')');
             }
         }
     }

@@ -60,7 +60,7 @@ final class BlastRadiusScorer
                 default => 0.25,
             };
 
-            $nodeModule = $impactedNode->node->module;
+            $nodeModule = $impactedNode->node->getModule();
 
             // A node's impact is cross-module only when one of the edges on its
             // own impact paths actually connects two different modules. Deriving
@@ -72,16 +72,16 @@ final class BlastRadiusScorer
 
             foreach ($impactedNode->paths as $path) {
                 foreach ($path as $edge) {
-                    $typeStr = $edge->type->value;
+                    $typeStr = $edge->getType()->value;
                     $weight = self::EDGE_WEIGHTS[$typeStr] ?? 1;
                     $edgeBreakdown[$typeStr] = ($edgeBreakdown[$typeStr] ?? 0) + 1;
                     $rawScore += $weight * $distanceFactor * $moduleMultiplier;
                 }
             }
 
-            if (in_array($nodeModule, self::CORE_MODULES, true) || str_contains($impactedNode->node->id, 'Contract')) {
-                if (!in_array($impactedNode->node->id, $hotspots, true)) {
-                    $hotspots[] = $impactedNode->node->id;
+            if (in_array($nodeModule, self::CORE_MODULES, true) || str_contains($impactedNode->node->getId(), 'Contract')) {
+                if (!in_array($impactedNode->node->getId(), $hotspots, true)) {
+                    $hotspots[] = $impactedNode->node->getId();
                 }
             }
         }
@@ -117,7 +117,7 @@ final class BlastRadiusScorer
     {
         foreach ($impactedNode->paths as $path) {
             foreach ($path as $edge) {
-                if ($this->moduleKeyForId($edge->sourceId) !== $this->moduleKeyForId($edge->targetId)) {
+                if ($this->moduleKeyForId($edge->getSourceId()) !== $this->moduleKeyForId($edge->getTargetId())) {
                     return true;
                 }
             }

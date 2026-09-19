@@ -34,11 +34,11 @@ final class GraphEdgeMapper implements ResourceModelMapperInterface
         assert($domainModel instanceof Edge);
 
         return new GraphEdgeResource(
-            id:        $domainModel->id,
-            source_id: $domainModel->sourceId,
-            target_id: $domainModel->targetId,
-            type:      $domainModel->type->value,
-            metadata:  json_encode($domainModel->metadata),
+            id:        $domainModel->getId(),
+            source_id: $domainModel->getSourceId(),
+            target_id: $domainModel->getTargetId(),
+            type:      $domainModel->getType()->value,
+            metadata:  json_encode($domainModel->getMetadata()),
         );
     }
 }

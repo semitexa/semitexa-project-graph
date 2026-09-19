@@ -34,12 +34,12 @@ final class GraphFileIndexMapper implements ResourceModelMapperInterface
         assert($domainModel instanceof FileIndexEntry);
 
         return new GraphFileIndexResource(
-            path:         $domainModel->path,
-            content_hash: $domainModel->contentHash,
-            indexed_at:   $domainModel->indexedAt,
-            module:       $domainModel->module,
-            line_count:   $domainModel->lineCount,
-            is_dirty:     $domainModel->isDirty,
+            path:         $domainModel->getPath(),
+            content_hash: $domainModel->getContentHash(),
+            indexed_at:   $domainModel->getIndexedAt(),
+            module:       $domainModel->getModule(),
+            line_count:   $domainModel->getLineCount(),
+            is_dirty:     $domainModel->getIsDirty(),
         );
     }
 }

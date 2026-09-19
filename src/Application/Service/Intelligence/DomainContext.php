@@ -21,19 +21,19 @@ final readonly class DomainContext
 
     public static function fromNode(Node $node): ?self
     {
-        if ($node->type->value !== 'domain_context') {
+        if ($node->getType()->value !== 'domain_context') {
             return null;
         }
 
         return new self(
-            id: $node->id,
-            name: $node->metadata['name'] ?? $node->name(),
-            description: $node->metadata['description'] ?? '',
-            criticality: $node->metadata['criticality'] ?? 'medium',
-            relatedDomains: $node->metadata['related_domains'] ?? [],
-            keyEntities: $node->metadata['key_entities'] ?? [],
-            nodeIds: $node->metadata['node_ids'] ?? [],
-            inferredFrom: $node->metadata['inferred_from'] ?? 'namespace',
+            id: $node->getId(),
+            name: $node->getMetadata()['name'] ?? $node->name(),
+            description: $node->getMetadata()['description'] ?? '',
+            criticality: $node->getMetadata()['criticality'] ?? 'medium',
+            relatedDomains: $node->getMetadata()['related_domains'] ?? [],
+            keyEntities: $node->getMetadata()['key_entities'] ?? [],
+            nodeIds: $node->getMetadata()['node_ids'] ?? [],
+            inferredFrom: $node->getMetadata()['inferred_from'] ?? 'namespace',
         );
     }
 

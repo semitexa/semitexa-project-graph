@@ -91,8 +91,8 @@ final readonly class ClassInfo
         foreach ($stmt->stmts as $subStmt) {
             if ($subStmt instanceof Property) {
                 $typeFqcn = null;
-                if ($subStmt->type instanceof Name) {
-                    $typeFqcn = $subStmt->type->toString();
+                if ($subStmt->getType() instanceof Name) {
+                    $typeFqcn = $subStmt->getType()->toString();
                 }
                 $properties[] = new PropertyInfo(
                     name:       $subStmt->props[0]->name->toString(),

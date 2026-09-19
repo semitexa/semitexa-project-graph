@@ -54,8 +54,8 @@ final readonly class ImpactResult
     {
         $modules = [];
         foreach ($this->impacted as $node) {
-            if ($node->node->module !== '') {
-                $modules[$node->node->module] = ($modules[$node->node->module] ?? 0) + 1;
+            if ($node->node->getModule() !== '') {
+                $modules[$node->node->getModule()] = ($modules[$node->node->getModule()] ?? 0) + 1;
             }
         }
 

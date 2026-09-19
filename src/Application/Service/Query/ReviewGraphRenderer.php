@@ -66,20 +66,20 @@ final class ReviewGraphRenderer
     {
         return json_encode([
             'nodes'       => array_map(fn($n) => [
-                'id'       => $n->id,
-                'type'     => $n->type->value,
-                'fqcn'     => $n->fqcn,
-                'file'     => $n->file,
-                'line'     => $n->line,
-                'endLine'  => $n->endLine,
-                'module'   => $n->module,
-                'metadata' => $n->metadata,
+                'id'       => $n->getId(),
+                'type'     => $n->getType()->value,
+                'fqcn'     => $n->getFqcn(),
+                'file'     => $n->getFile(),
+                'line'     => $n->getLine(),
+                'endLine'  => $n->getEndLine(),
+                'module'   => $n->getModule(),
+                'metadata' => $n->getMetadata(),
             ], $view->nodes),
             'edges'       => array_map(fn($e) => [
-                'sourceId' => $e->sourceId,
-                'targetId' => $e->targetId,
-                'type'     => $e->type->value,
-                'metadata' => $e->metadata,
+                'sourceId' => $e->getSourceId(),
+                'targetId' => $e->getTargetId(),
+                'type'     => $e->getType()->value,
+                'metadata' => $e->getMetadata(),
             ], $view->edges),
             'node_types'  => $view->nodeTypeCounts,
             'edge_types'  => $view->edgeTypeCounts,
@@ -95,17 +95,17 @@ final class ReviewGraphRenderer
 
         foreach ($view->nodes as $node) {
             $label = $this->escapeDot($node->name());
-            $color = $this->nodeColor($node->type->value);
-            $lines[] = sprintf('  "%s" [label="%s", color="%s"];', $this->escapeDot($node->id), $label, $color);
+            $color = $this->nodeColor($node->getType()->value);
+            $lines[] = sprintf('  "%s" [label="%s", color="%s"];', $this->escapeDot($node->getId()), $label, $color);
         }
 
         $lines[] = '';
 
         foreach ($view->edges as $edge) {
             $lines[] = sprintf('  "%s" -> "%s" [label="%s"];',
-                $this->escapeDot($edge->sourceId),
-                $this->escapeDot($edge->targetId),
-                $this->escapeDot($edge->type->value),
+                $this->escapeDot($edge->getSourceId()),
+                $this->escapeDot($edge->getTargetId()),
+                $this->escapeDot($edge->getType()->value),
             );
         }
 

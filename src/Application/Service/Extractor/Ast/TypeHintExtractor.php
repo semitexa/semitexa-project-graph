@@ -40,8 +40,8 @@ final class TypeHintExtractor implements ExtractorInterface
 
                 if ($node instanceof AstNode\Stmt\ClassMethod && $this->currentClass !== '') {
                     foreach ($node->getParams() as $param) {
-                        if ($param->type instanceof AstNode\Name) {
-                            $typeFqcn = $param->type->toString();
+                        if ($param->getType() instanceof AstNode\Name) {
+                            $typeFqcn = $param->getType()->toString();
                             $this->result->addEdge(new Edge(
                                 sourceId: NodeId::forClass($this->currentClass),
                                 targetId: NodeId::forClass($typeFqcn),

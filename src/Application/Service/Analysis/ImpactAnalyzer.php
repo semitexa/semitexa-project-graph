@@ -33,20 +33,20 @@ final class ImpactAnalyzer
             foreach ($currentLevel as $nodeId) {
                 $edges = $this->storage->edges->findByTarget($nodeId);
                 foreach ($edges as $edge) {
-                    if (!isset($visited[$edge->sourceId])) {
-                        $visited[$edge->sourceId] = true;
-                        $nextLevel[] = $edge->sourceId;
-                        $targetNode = $this->storage->nodes->findById($edge->sourceId);
+                    if (!isset($visited[$edge->getSourceId()])) {
+                        $visited[$edge->getSourceId()] = true;
+                        $nextLevel[] = $edge->getSourceId();
+                        $targetNode = $this->storage->nodes->findById($edge->getSourceId());
                         if ($targetNode !== null) {
-                            if (!isset($impacted[$edge->sourceId])) {
-                                $impacted[$edge->sourceId] = new ImpactedNode(
+                            if (!isset($impacted[$edge->getSourceId()])) {
+                                $impacted[$edge->getSourceId()] = new ImpactedNode(
                                     node:     $targetNode,
                                     distance: $depth,
                                     paths:    [[$edge]],
                                 );
                             } else {
-                                $existing = $impacted[$edge->sourceId];
-                                $impacted[$edge->sourceId] = new ImpactedNode(
+                                $existing = $impacted[$edge->getSourceId()];
+                                $impacted[$edge->getSourceId()] = new ImpactedNode(
                                     node:     $existing->node,
                                     distance: min($existing->distance, $depth),
                                     paths:    [...$existing->paths, [$edge]],
@@ -88,9 +88,9 @@ final class ImpactAnalyzer
                 $edges = $this->storage->edges->findBySource($nodeId);
                 foreach ($edges as $edge) {
                     $allEdges[] = $edge;
-                    if (!isset($visited[$edge->targetId])) {
-                        $visited[$edge->targetId] = true;
-                        $nextLevel[] = $edge->targetId;
+                    if (!isset($visited[$edge->getTargetId()])) {
+                        $visited[$edge->getTargetId()] = true;
+                        $nextLevel[] = $edge->getTargetId();
                     }
                 }
             }
@@ -145,9 +145,9 @@ final class ImpactAnalyzer
         $children = [];
         foreach ($edges as $edge) {
             $neighborId = match ($direction) {
-                Direction::Outgoing => $edge->targetId,
-                Direction::Incoming => $edge->sourceId,
-                Direction::Both => $edge->sourceId === $nodeId ? $edge->targetId : $edge->sourceId,
+                Direction::Outgoing => $edge->getTargetId(),
+                Direction::Incoming => $edge->getSourceId(),
+                Direction::Both => $edge->getSourceId() === $nodeId ? $edge->getTargetId() : $edge->getSourceId(),
             };
             $children[] = [
                 'edge'   => $edge,

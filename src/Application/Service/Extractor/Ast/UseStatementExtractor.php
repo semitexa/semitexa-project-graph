@@ -48,8 +48,8 @@ final class UseStatementExtractor implements ExtractorInterface
 
                 if ($node instanceof AstNode\Stmt\Use_) {
                     foreach ($node->uses as $use) {
-                        if ($use->type !== AstNode\Stmt\Use_::TYPE_NORMAL
-                            && $use->type !== AstNode\Stmt\Use_::TYPE_UNKNOWN) {
+                        if ($use->getType() !== AstNode\Stmt\Use_::TYPE_NORMAL
+                            && $use->getType() !== AstNode\Stmt\Use_::TYPE_UNKNOWN) {
                             continue;
                         }
                         $this->importsByNamespace[$this->currentNamespace][] = [
@@ -62,7 +62,7 @@ final class UseStatementExtractor implements ExtractorInterface
                 if ($node instanceof AstNode\Stmt\GroupUse) {
                     $prefix = $node->prefix->toString();
                     foreach ($node->uses as $use) {
-                        $type = $use->type !== AstNode\Stmt\Use_::TYPE_UNKNOWN ? $use->type : $node->type;
+                        $type = $use->getType() !== AstNode\Stmt\Use_::TYPE_UNKNOWN ? $use->getType() : $node->getType();
                         if ($type !== AstNode\Stmt\Use_::TYPE_NORMAL) {
                             continue;
                         }

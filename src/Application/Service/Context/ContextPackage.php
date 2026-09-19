@@ -28,10 +28,10 @@ final readonly class ContextPackage
         $lines[] = '';
 
         foreach ($this->nodes as $ctxNode) {
-            $lines[] = '## ' . $ctxNode->node->fqcn;
-            $lines[] = '**Type:** ' . $ctxNode->node->type->value;
+            $lines[] = '## ' . $ctxNode->node->getFqcn();
+            $lines[] = '**Type:** ' . $ctxNode->node->getType()->value;
             $lines[] = '**Score:** ' . round($ctxNode->score, 2);
-            $lines[] = '**File:** ' . $ctxNode->node->file . ':' . $ctxNode->node->line;
+            $lines[] = '**File:** ' . $ctxNode->node->getFile() . ':' . $ctxNode->node->getLine();
             $lines[] = '';
             if ($ctxNode->snippet !== null) {
                 $lines[] = '```php';

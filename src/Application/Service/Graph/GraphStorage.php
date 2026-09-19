@@ -57,10 +57,10 @@ final class GraphStorage
 
     public function upsertNode(Node $node): void
     {
-        $existing = $this->nodes->findById($node->id);
-        if ($existing !== null && $existing->isPlaceholder && !$node->isPlaceholder) {
+        $existing = $this->nodes->findById($node->getId());
+        if ($existing !== null && $existing->getIsPlaceholder() && !$node->getIsPlaceholder()) {
             $this->nodes->upsert($node);
-        } elseif ($existing !== null && $existing->file !== $node->file && $existing->file !== '') {
+        } elseif ($existing !== null && $existing->getFile() !== $node->getFile() && $existing->getFile() !== '') {
             return;
         } else {
             $this->nodes->upsert($node);
@@ -69,8 +69,8 @@ final class GraphStorage
 
     public function upsertEdge(Edge $edge): void
     {
-        if ($this->nodes->findById($edge->targetId) === null) {
-            $this->nodes->insertPlaceholder($edge->targetId);
+        if ($this->nodes->findById($edge->getTargetId()) === null) {
+            $this->nodes->insertPlaceholder($edge->getTargetId());
         }
         $this->edges->upsert($edge);
     }

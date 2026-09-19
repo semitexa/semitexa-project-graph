@@ -27,10 +27,10 @@ final class GraphQueryService implements QueryInterface
         if ($namePattern !== null) {
             $results = $this->storage->nodes->searchFull($namePattern);
             if ($type !== null) {
-                $results = array_filter($results, fn(Node $n) => $n->type->value === $type);
+                $results = array_filter($results, fn(Node $n) => $n->getType()->value === $type);
             }
             if ($module !== null) {
-                $results = array_filter($results, fn(Node $n) => $n->module === $module);
+                $results = array_filter($results, fn(Node $n) => $n->getModule() === $module);
             }
             return array_values($results);
         }
@@ -77,12 +77,12 @@ final class GraphQueryService implements QueryInterface
             foreach ($currentLevel as $nodeId) {
                 $edges = $this->storage->edges->findByTarget($nodeId);
                 foreach ($edges as $edge) {
-                    if (!isset($visited[$edge->sourceId])) {
-                        $visited[$edge->sourceId] = true;
-                        $nextLevel[] = $edge->sourceId;
-                        $targetNode = $this->storage->nodes->findById($edge->sourceId);
+                    if (!isset($visited[$edge->getSourceId()])) {
+                        $visited[$edge->getSourceId()] = true;
+                        $nextLevel[] = $edge->getSourceId();
+                        $targetNode = $this->storage->nodes->findById($edge->getSourceId());
                         if ($targetNode !== null) {
-                            $impacted[$edge->sourceId] = new ImpactedNode(
+                            $impacted[$edge->getSourceId()] = new ImpactedNode(
                                 node:     $targetNode,
                                 distance: $depth,
                                 paths:    [[$edge]],
@@ -115,20 +115,20 @@ final class GraphQueryService implements QueryInterface
 
         $chain[] = $node;
 
-        if ($node->type === NodeType::Route) {
-            $payloadEdges = $this->storage->edges->findByTarget($node->id, EdgeType::ServesRoute);
+        if ($node->getType() === NodeType::Route) {
+            $payloadEdges = $this->storage->edges->findByTarget($node->getId(), EdgeType::ServesRoute);
             foreach ($payloadEdges as $edge) {
-                $payload = $this->storage->nodes->findById($edge->sourceId);
+                $payload = $this->storage->nodes->findById($edge->getSourceId());
                 if ($payload !== null) {
                     $chain[] = $payload;
-                    $handlerEdges = $this->storage->edges->findByTarget($payload->id, EdgeType::Handles);
+                    $handlerEdges = $this->storage->edges->findByTarget($payload->getId(), EdgeType::Handles);
                     foreach ($handlerEdges as $hEdge) {
-                        $handler = $this->storage->nodes->findById($hEdge->sourceId);
+                        $handler = $this->storage->nodes->findById($hEdge->getSourceId());
                         if ($handler !== null) {
                             $chain[] = $handler;
-                            $resourceEdges = $this->storage->edges->findBySource($handler->id, EdgeType::Produces);
+                            $resourceEdges = $this->storage->edges->findBySource($handler->getId(), EdgeType::Produces);
                             foreach ($resourceEdges as $rEdge) {
-                                $resource = $this->storage->nodes->findById($rEdge->targetId);
+                                $resource = $this->storage->nodes->findById($rEdge->getTargetId());
                                 if ($resource !== null) {
                                     $chain[] = $resource;
                                 }
@@ -137,10 +137,10 @@ final class GraphQueryService implements QueryInterface
                     }
                 }
             }
-        } elseif ($node->type === NodeType::Payload) {
-            $handlerEdges = $this->storage->edges->findByTarget($node->id, EdgeType::Handles);
+        } elseif ($node->getType() === NodeType::Payload) {
+            $handlerEdges = $this->storage->edges->findByTarget($node->getId(), EdgeType::Handles);
             foreach ($handlerEdges as $hEdge) {
-                $handler = $this->storage->nodes->findById($hEdge->sourceId);
+                $handler = $this->storage->nodes->findById($hEdge->getSourceId());
                 if ($handler !== null) {
                     $chain[] = $handler;
                 }
@@ -156,7 +156,7 @@ final class GraphQueryService implements QueryInterface
         $edges = $this->storage->edges->findByTarget($contractId, EdgeType::SatisfiesContract);
         $implementors = [];
         foreach ($edges as $edge) {
-            $impl = $this->storage->nodes->findById($edge->sourceId);
+            $impl = $this->storage->nodes->findById($edge->getSourceId());
             if ($impl !== null) {
                 $implementors[] = $impl;
             }
@@ -184,16 +184,16 @@ final class GraphQueryService implements QueryInterface
         foreach ($edgeTypes as $edgeType) {
             $edges = $this->storage->edges->findByType($edgeType, 100_000);
             foreach ($edges as $edge) {
-                $source = $this->storage->nodes->findById($edge->sourceId);
-                $target = $this->storage->nodes->findById($edge->targetId);
+                $source = $this->storage->nodes->findById($edge->getSourceId());
+                $target = $this->storage->nodes->findById($edge->getTargetId());
                 if ($source !== null && $target !== null
-                    && $source->module !== '' && $target->module !== ''
-                    && $source->module !== $target->module
+                    && $source->getModule() !== '' && $target->getModule() !== ''
+                    && $source->getModule() !== $target->getModule()
                 ) {
-                    if ($moduleA !== null && $source->module !== $moduleA) {
+                    if ($moduleA !== null && $source->getModule() !== $moduleA) {
                         continue;
                     }
-                    if ($moduleB !== null && $target->module !== $moduleB) {
+                    if ($moduleB !== null && $target->getModule() !== $moduleB) {
                         continue;
                     }
                     $crossModule[] = $edge;
@@ -217,9 +217,9 @@ final class GraphQueryService implements QueryInterface
         if ($focus !== null) {
             $focusNode = $this->getNode($focus);
             if ($focusNode !== null) {
-                $nodes[$focusNode->id] = $focusNode;
-                $visited = [$focusNode->id => true];
-                $currentLevel = [$focusNode->id];
+                $nodes[$focusNode->getId()] = $focusNode;
+                $visited = [$focusNode->getId() => true];
+                $currentLevel = [$focusNode->getId()];
 
                 for ($d = 0; $d < $depth; $d++) {
                     $nextLevel = [];
@@ -227,7 +227,7 @@ final class GraphQueryService implements QueryInterface
                         $nodeEdges = $this->storage->edges->findByNode($nodeId);
                         foreach ($nodeEdges as $edge) {
                             $edges[] = $edge;
-                            foreach ([$edge->sourceId, $edge->targetId] as $neighborId) {
+                            foreach ([$edge->getSourceId(), $edge->getTargetId()] as $neighborId) {
                                 if (!isset($visited[$neighborId])) {
                                     $visited[$neighborId] = true;
                                     $nextLevel[] = $neighborId;
@@ -247,18 +247,18 @@ final class GraphQueryService implements QueryInterface
                 foreach ($types as $type) {
                     $typeNodes = $this->storage->nodes->findByType($type, $module);
                     foreach ($typeNodes as $node) {
-                        $nodes[$node->id] = $node;
+                        $nodes[$node->getId()] = $node;
                     }
                 }
             } else {
                 foreach ($this->storage->nodes->findByModule($module) as $node) {
-                    $nodes[$node->id] = $node;
+                    $nodes[$node->getId()] = $node;
                 }
             }
         } else {
             $allNodes = $this->storage->nodes->findByType('class');
             foreach ($allNodes as $node) {
-                $nodes[$node->id] = $node;
+                $nodes[$node->getId()] = $node;
             }
         }
 
@@ -266,7 +266,7 @@ final class GraphQueryService implements QueryInterface
             foreach ($nodes as $nodeId => $node) {
                 $nodeEdges = $this->storage->edges->findByNode($nodeId);
                 foreach ($nodeEdges as $edge) {
-                    if (isset($nodes[$edge->sourceId]) && isset($nodes[$edge->targetId])) {
+                    if (isset($nodes[$edge->getSourceId()]) && isset($nodes[$edge->getTargetId()])) {
                         $edges[] = $edge;
                     }
                 }
@@ -276,9 +276,9 @@ final class GraphQueryService implements QueryInterface
         $nodeTypeCounts = [];
         $moduleCounts = [];
         foreach ($nodes as $node) {
-            $nodeTypeCounts[$node->type->value] = ($nodeTypeCounts[$node->type->value] ?? 0) + 1;
-            if ($node->module !== '') {
-                $moduleCounts[$node->module] = ($moduleCounts[$node->module] ?? 0) + 1;
+            $nodeTypeCounts[$node->getType()->value] = ($nodeTypeCounts[$node->getType()->value] ?? 0) + 1;
+            if ($node->getModule() !== '') {
+                $moduleCounts[$node->getModule()] = ($moduleCounts[$node->getModule()] ?? 0) + 1;
             }
         }
 
@@ -289,17 +289,17 @@ final class GraphQueryService implements QueryInterface
         $uniqueEdges = [];
         $edgeIdSet = [];
         foreach ($edges as $edge) {
-            $edgeTypeCounts[$edge->type->value] = ($edgeTypeCounts[$edge->type->value] ?? 0) + 1;
-            $edgeKey = $edge->sourceId . '|' . $edge->targetId . '|' . $edge->type->value;
+            $edgeTypeCounts[$edge->getType()->value] = ($edgeTypeCounts[$edge->getType()->value] ?? 0) + 1;
+            $edgeKey = $edge->getSourceId() . '|' . $edge->getTargetId() . '|' . $edge->getType()->value;
             if (!isset($edgeIdSet[$edgeKey])) {
                 $edgeIdSet[$edgeKey] = true;
                 $uniqueEdges[] = $edge;
             }
-            $source = $this->storage->nodes->findById($edge->sourceId);
-            $target = $this->storage->nodes->findById($edge->targetId);
+            $source = $this->storage->nodes->findById($edge->getSourceId());
+            $target = $this->storage->nodes->findById($edge->getTargetId());
             if ($source !== null && $target !== null
-                && $source->module !== '' && $target->module !== ''
-                && $source->module !== $target->module
+                && $source->getModule() !== '' && $target->getModule() !== ''
+                && $source->getModule() !== $target->getModule()
             ) {
                 $crossModule++;
             }
@@ -307,15 +307,15 @@ final class GraphQueryService implements QueryInterface
 
         $edgeIdLookup = [];
         foreach ($uniqueEdges as $edge) {
-            $edgeIdLookup[$edge->sourceId] = true;
-            $edgeIdLookup[$edge->targetId] = true;
+            $edgeIdLookup[$edge->getSourceId()] = true;
+            $edgeIdLookup[$edge->getTargetId()] = true;
         }
 
         foreach ($nodes as $node) {
-            if ($node->isPlaceholder) {
+            if ($node->getIsPlaceholder()) {
                 $placeholders++;
             }
-            if (!isset($edgeIdLookup[$node->id]) && $node->type !== NodeType::Route) {
+            if (!isset($edgeIdLookup[$node->getId()]) && $node->getType() !== NodeType::Route) {
                 $orphans++;
             }
         }
@@ -342,11 +342,11 @@ final class GraphQueryService implements QueryInterface
 
         $modules = [];
         foreach ($allNodes as $node) {
-            if ($node->module === '') {
+            if ($node->getModule() === '') {
                 continue;
             }
 
-            $modules[$node->module] = ($modules[$node->module] ?? 0) + 1;
+            $modules[$node->getModule()] = ($modules[$node->getModule()] ?? 0) + 1;
         }
 
         arsort($modules);
@@ -358,7 +358,7 @@ final class GraphQueryService implements QueryInterface
         $routes = $this->storage->nodes->findByType('route', $module);
         $summary = [];
         foreach ($routes as $route) {
-            $method = $route->metadata['method'] ?? 'GET';
+            $method = $route->getMetadata()['method'] ?? 'GET';
             $summary[$method] = ($summary[$method] ?? 0) + 1;
         }
         return $summary;
@@ -380,10 +380,10 @@ final class GraphQueryService implements QueryInterface
 
         $count = 0;
         foreach ($edges as $edge) {
-            $source = $this->storage->nodes->findById($edge->sourceId);
-            $target = $this->storage->nodes->findById($edge->targetId);
+            $source = $this->storage->nodes->findById($edge->getSourceId());
+            $target = $this->storage->nodes->findById($edge->getTargetId());
 
-            if (($source?->module === $module) || ($target?->module === $module)) {
+            if (($source?->getModule() === $module) || ($target?->getModule() === $module)) {
                 $count++;
             }
         }
@@ -397,14 +397,14 @@ final class GraphQueryService implements QueryInterface
         $contracts = [];
 
         foreach ($edges as $edge) {
-            $source = $this->storage->nodes->findById($edge->sourceId);
-            $target = $this->storage->nodes->findById($edge->targetId);
+            $source = $this->storage->nodes->findById($edge->getSourceId());
+            $target = $this->storage->nodes->findById($edge->getTargetId());
 
-            if ($module !== null && ($source?->module !== $module) && ($target?->module !== $module)) {
+            if ($module !== null && ($source?->getModule() !== $module) && ($target?->getModule() !== $module)) {
                 continue;
             }
 
-            $contracts[$edge->targetId] = true;
+            $contracts[$edge->getTargetId()] = true;
         }
 
         return count($contracts);
@@ -433,7 +433,7 @@ final class GraphQueryService implements QueryInterface
 
                 foreach ($edges as $edge) {
                     $allEdges[] = $edge;
-                    $neighborId = $direction === Direction::Outgoing ? $edge->targetId : $edge->sourceId;
+                    $neighborId = $direction === Direction::Outgoing ? $edge->getTargetId() : $edge->getSourceId();
                     if (!isset($visited[$neighborId])) {
                         $visited[$neighborId] = true;
                         $nextLevel[] = $neighborId;
