@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Console\Command;
 
-use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
 use Semitexa\ProjectGraph\Application\Service\Query\GraphQueryService;
 use Semitexa\Core\Attribute\AsCommand;

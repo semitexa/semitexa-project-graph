@@ -9,7 +9,6 @@ use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
 use Semitexa\ProjectGraph\Application\Service\Query\Direction;
 use Semitexa\ProjectGraph\Application\Service\Query\QueryInterface;
-use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Domain\Model\Node;
 
 final class IntelligenceLayer

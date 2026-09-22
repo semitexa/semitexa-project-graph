@@ -7,8 +7,6 @@ namespace Semitexa\ProjectGraph\Application\Service\Projection;
 use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\ProjectGraph\Attribute\CapabilityHint;
 use Semitexa\ProjectGraph\Domain\Model\Node;
-use Symfony\Component\Console\Input\InputArgument;
-use Symfony\Component\Console\Input\InputOption;
 
 /**
  * Enriches a command node with metadata that makes it agent-actionable.

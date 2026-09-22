@@ -7,7 +7,6 @@ namespace Semitexa\ProjectGraph\Application\Service\Index;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractorPipeline;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphBuilder;
-use Semitexa\ProjectGraph\Application\Service\Graph\GraphDiff;
 use Semitexa\ProjectGraph\Application\Service\Parser\PhpParserAdapter;
 use Semitexa\ProjectGraph\Application\Service\Scanner\FileScanner;
 use Semitexa\ProjectGraph\Application\Service\Scanner\FileStatus;

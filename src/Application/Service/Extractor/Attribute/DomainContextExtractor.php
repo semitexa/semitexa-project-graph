@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Service\Extractor\Attribute;
 
-use Semitexa\Ledger\Attribute\Propagated;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractionResult;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractorInterface;
 use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;

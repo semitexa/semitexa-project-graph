@@ -9,8 +9,6 @@ use Semitexa\Ssr\Attribute\AsDataProvider;
 use Semitexa\Ssr\Attribute\AsDeferred;
 use Semitexa\Ssr\Attribute\AsLayoutSlot;
 use Semitexa\Ssr\Attribute\AsSlotHandler;
-use Semitexa\Ssr\Attribute\AsSlotResource;
-use Semitexa\Ssr\Attribute\AsTwigExtension;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractionResult;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractorInterface;
 use Semitexa\ProjectGraph\Domain\Model\Edge;

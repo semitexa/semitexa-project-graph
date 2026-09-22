@@ -7,11 +7,8 @@ namespace Semitexa\ProjectGraph\Application\Service\Parser;
 use PhpParser\Node\Name;
 use PhpParser\Node\Stmt\Class_;
 use PhpParser\Node\Stmt\ClassLike;
-use PhpParser\Node\Stmt\ClassMethod;
-use PhpParser\Node\Stmt\Enum_;
 use PhpParser\Node\Stmt\Interface_;
 use PhpParser\Node\Stmt\Property;
-use PhpParser\Node\Stmt\Trait_;
 use PhpParser\Node\Stmt\TraitUse;
 
 final readonly class ClassInfo
