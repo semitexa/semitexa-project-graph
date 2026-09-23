@@ -15,7 +15,6 @@ use Semitexa\ProjectGraph\Application\Service\Context\PromptFormatter;
 use Semitexa\ProjectGraph\Application\Service\Context\RelevanceScorer;
 use Semitexa\ProjectGraph\Application\Service\Context\SourceSnippetLoader;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
-use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
 use Semitexa\ProjectGraph\Application\Service\Support\AutoRefreshesProjectGraph;
 use Semitexa\ProjectGraph\Application\Service\Support\UsesProjectGraphConnection;
 use Symfony\Component\Console\Input\InputArgument;

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Service\Extractor\Attribute;
 
 use Semitexa\Core\Attribute\AsPayloadHandler;
-use Semitexa\Core\Attribute\AsResourcePart;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractionResult;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractorInterface;
 use Semitexa\ProjectGraph\Application\Service\Extractor\SafeAttributeResolver;

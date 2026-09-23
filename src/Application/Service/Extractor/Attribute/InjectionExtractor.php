@@ -12,7 +12,6 @@ use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractionResult;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractorInterface;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
-use Semitexa\ProjectGraph\Domain\Model\Node;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
 use Semitexa\ProjectGraph\Application\Service\Parser\ClassInfo;
 use Semitexa\ProjectGraph\Application\Service\Parser\PropertyInfo;

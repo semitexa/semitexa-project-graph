@@ -10,7 +10,6 @@ use Semitexa\Orm\Application\Service\Hydration\ResourceModelRelationLoader;
 use Semitexa\Orm\Application\Service\Mapping\MapperRegistry;
 use Semitexa\Orm\Metadata\ResourceModelMetadataRegistry;
 use Semitexa\Orm\Application\Service\Persistence\AggregateWriteEngine;
-use Semitexa\ProjectGraph\Application\Db\SQLite\Model\GraphMetaResource;
 
 final class GraphMetaRepository
 {

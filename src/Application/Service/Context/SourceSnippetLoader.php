@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Service\Context;
 
-use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
-use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Domain\Model\Node;
 
 final class SourceSnippetLoader

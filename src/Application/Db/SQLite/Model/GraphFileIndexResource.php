@@ -7,7 +7,6 @@ namespace Semitexa\ProjectGraph\Application\Db\SQLite\Model;
 use Semitexa\Orm\Adapter\SqliteType;
 use Semitexa\Orm\Attribute\Column;
 use Semitexa\Orm\Attribute\Connection;
-use Semitexa\Orm\Attribute\Filterable;
 use Semitexa\Orm\Attribute\FromTable;
 use Semitexa\Orm\Attribute\Index;
 use Semitexa\Orm\Attribute\PrimaryKey;

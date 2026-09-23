@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Service\Graph;
 
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
-use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractionResult;
 
 final class GraphBuilder
 {

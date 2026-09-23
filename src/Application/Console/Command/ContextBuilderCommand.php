@@ -6,7 +6,6 @@ namespace Semitexa\ProjectGraph\Application\Console\Command;
 
 use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
-use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
 use Semitexa\ProjectGraph\Application\Service\Intelligence\IntelligenceLayer;
 use Semitexa\ProjectGraph\Application\Service\Query\Direction;
 use Semitexa\ProjectGraph\Application\Service\Query\GraphQueryService;

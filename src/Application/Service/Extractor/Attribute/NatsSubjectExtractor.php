@@ -4,9 +4,6 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Service\Extractor\Attribute;
 
-use Semitexa\Core\Attribute\AsEvent;
-use Semitexa\Core\Attribute\AsEventListener;
-use Semitexa\Core\Event\EventExecution;
 use Semitexa\Ledger\Attribute\Propagated;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractionResult;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractorInterface;

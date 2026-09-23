@@ -4,10 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Service\Parser;
 
-use PhpParser\Node\Stmt\ClassLike;
 use PhpParser\NodeTraverser;
 use PhpParser\NodeVisitor\NameResolver;
-use PhpParser\NodeVisitorAbstract;
 use PhpParser\Parser;
 use PhpParser\ParserFactory;
 

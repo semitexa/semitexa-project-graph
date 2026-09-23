@@ -9,7 +9,6 @@ use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
-use Semitexa\ProjectGraph\Application\Service\Query\Direction;
 use Semitexa\ProjectGraph\Application\Service\Query\GraphQueryService;
 use Semitexa\ProjectGraph\Application\Service\Support\AutoRefreshesProjectGraph;
 use Semitexa\ProjectGraph\Application\Service\Support\UsesProjectGraphConnection;

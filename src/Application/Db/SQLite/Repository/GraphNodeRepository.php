@@ -11,7 +11,6 @@ use Semitexa\Orm\Application\Service\Mapping\MapperRegistry;
 use Semitexa\Orm\Metadata\ColumnRef;
 use Semitexa\Orm\Metadata\ResourceModelMetadataRegistry;
 use Semitexa\Orm\Application\Service\Persistence\AggregateWriteEngine;
-use Semitexa\Orm\Query\Direction;
 use Semitexa\Orm\Query\Operator;
 use Semitexa\Orm\Query\ResourceModelQuery;
 use Semitexa\ProjectGraph\Application\Db\SQLite\Model\GraphNodeResource;
