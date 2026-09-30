@@ -15,9 +15,6 @@ use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Domain\Model\Node;
 use Semitexa\ProjectGraph\Tests\Support\GraphTestStore;
 
-// No Semitexa\ProjectGraph\Tests\ entry in the workspace autoload map; see GraphFixtureTest.
-require_once __DIR__ . '/../Support/GraphTestStore.php';
-
 /**
  * The layer that reads meaning off the graph.
  *

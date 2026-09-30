@@ -9,10 +9,6 @@ use PHPUnit\Framework\TestCase;
 use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
 use Semitexa\ProjectGraph\Tests\Support\GraphFixture;
 
-// No Semitexa\ProjectGraph\Tests\ entry in the workspace autoload map; see GraphFixtureTest.
-require_once __DIR__ . '/../Support/GraphTestStore.php';
-require_once __DIR__ . '/../Support/GraphFixture.php';
-
 /**
  * One extractor failing on one attribute must not erase the rest of the file.
  *

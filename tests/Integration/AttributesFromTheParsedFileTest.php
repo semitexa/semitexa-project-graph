@@ -10,10 +10,6 @@ use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
 use Semitexa\ProjectGraph\Tests\Support\GraphFixture;
 
-// No Semitexa\ProjectGraph\Tests\ entry in the workspace autoload map; see GraphFixtureTest.
-require_once __DIR__ . '/../Support/GraphTestStore.php';
-require_once __DIR__ . '/../Support/GraphFixture.php';
-
 /**
  * Attributes come from the file on disk, not from the class the process has
  * loaded.
@@ -46,12 +42,26 @@ final class AttributesFromTheParsedFileTest extends TestCase
     public function a_class_the_process_cannot_load_still_has_its_wiring(): void
     {
         $fixture = GraphFixture::built();
-        $listener = GraphFixture::NS . 'Mail\\SendReceiptListener';
+        // A namespace no autoloader maps: this class exists only in the copy.
+        $fixture->write('Unmapped/AuditListener.php', <<<'PHP'
+            <?php
 
-        self::assertFalse(class_exists($listener), 'precondition: the fixture classes are not autoloadable');
+            namespace Unmapped\Fixture;
+
+            use Semitexa\Core\Attribute\AsEventListener;
+            use Semitexa\ProjectGraph\Tests\Fixture\GraphProject\Orders\OrderPlaced;
+
+            #[AsEventListener(event: OrderPlaced::class, execution: 'sync')]
+            final class AuditListener
+            {
+            }
+            PHP);
+        $fixture->refresh();
+
+        self::assertFalse(class_exists('Unmapped\\Fixture\\AuditListener'), 'precondition: the class cannot be loaded');
         self::assertTrue($fixture->hasEdge(
             EdgeType::ListensTo,
-            NodeId::forClass($listener),
+            NodeId::forClass('Unmapped\\Fixture\\AuditListener'),
             GraphFixture::classId('Orders\\OrderPlaced'),
         ));
     }

@@ -13,6 +13,11 @@ final class IgnorePatternLoader
         '.git/',
         'tests/fixtures/',
         '*.generated.php',
+        // Documentation snippets (semitexa-demo's resources/examples): code in
+        // a fictional App\ namespace that nothing autoloads, reusing class
+        // names across examples. Scanned, they were 12 of the workspace's 13
+        // duplicate_class gaps and a class whose attributes could not be read.
+        '*.example.php',
     ];
 
     /** @var list<string> */

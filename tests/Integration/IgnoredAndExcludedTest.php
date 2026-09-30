@@ -10,10 +10,6 @@ use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageGapKind;
 use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
 use Semitexa\ProjectGraph\Tests\Support\GraphFixture;
 
-// No Semitexa\ProjectGraph\Tests\ entry in the workspace autoload map; see GraphFixtureTest.
-require_once __DIR__ . '/../Support/GraphTestStore.php';
-require_once __DIR__ . '/../Support/GraphFixture.php';
-
 /**
  * What the graph deliberately does not look at must be visible as such.
  * #[GraphIgnore] was declared and documented but read by nothing, and the
@@ -54,11 +50,13 @@ final class IgnoredAndExcludedTest extends TestCase
         $fixture->write('Generated/Deeper/Stub2.php', "<?php\n");
         $fixture->write('Orders/Legacy.skip.php', "<?php\n");
         $fixture->write('vendor/acme/Lib.php', "<?php\n");
+        $fixture->write('Docs/Checkout.example.php', "<?php\nnamespace App;\nfinal class Checkout\n{\n}\n");
         $fixture->build();
 
         $exclusions = json_decode((string) $fixture->storage->getMeta('coverage_exclusions'), true);
 
-        self::assertSame(['*.skip.php' => 1, 'Generated/' => 1, 'dir:vendor' => 1], $exclusions);
+        self::assertSame(['*.example.php' => 1, '*.skip.php' => 1, 'Generated/' => 1, 'dir:vendor' => 1], $exclusions);
+        self::assertFalse($fixture->storage->nodeExists('class:App\\Checkout'), 'documentation snippets are not project code');
         self::assertFalse($fixture->storage->nodeExists('class:Stub'));
     }
 }

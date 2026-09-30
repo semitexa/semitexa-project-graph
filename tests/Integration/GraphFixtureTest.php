@@ -10,12 +10,6 @@ use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
 use Semitexa\ProjectGraph\Tests\Support\GraphFixture;
 
-// The workspace autoload map carries no Semitexa\ProjectGraph\Tests\ entry
-// (it was dumped before this package had test support classes), so load them
-// by path, as core, ssr and dev tests already do.
-require_once __DIR__ . '/../Support/GraphTestStore.php';
-require_once __DIR__ . '/../Support/GraphFixture.php';
-
 /**
  * The fixture project produces the graph later tests will lean on.
  *

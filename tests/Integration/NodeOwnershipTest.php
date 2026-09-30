@@ -10,10 +10,6 @@ use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
 use Semitexa\ProjectGraph\Tests\Support\GraphFixture;
 
-// No Semitexa\ProjectGraph\Tests\ entry in the workspace autoload map; see GraphFixtureTest.
-require_once __DIR__ . '/../Support/GraphTestStore.php';
-require_once __DIR__ . '/../Support/GraphFixture.php';
-
 /**
  * A class node belongs to the file that declares it.
  *

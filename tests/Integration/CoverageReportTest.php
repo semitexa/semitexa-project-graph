@@ -10,10 +10,6 @@ use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageReport;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
 use Semitexa\ProjectGraph\Tests\Support\GraphFixture;
 
-// No Semitexa\ProjectGraph\Tests\ entry in the workspace autoload map; see GraphFixtureTest.
-require_once __DIR__ . '/../Support/GraphTestStore.php';
-require_once __DIR__ . '/../Support/GraphFixture.php';
-
 /**
  * An absence answer is proof only when nothing that could hide the missing
  * edge was left unread — and the report says which gaps those are.

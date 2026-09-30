@@ -12,9 +12,6 @@ use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Tests\Support\GraphTestStore;
 
-// No Semitexa\ProjectGraph\Tests\ entry in the workspace autoload map; see GraphFixtureTest.
-require_once __DIR__ . '/../Support/GraphTestStore.php';
-
 /**
  * A node known only because an edge points at it gets the type its id says.
  * Every placeholder used to be "class": on the workspace 104 tables, 60

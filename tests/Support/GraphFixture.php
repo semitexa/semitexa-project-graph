@@ -23,9 +23,9 @@ use Semitexa\ProjectGraph\Application\Service\Scanner\IgnorePatternLoader;
  * on a throwaway copy, so a test can edit or delete a file and refresh the
  * graph the way `ai:review-graph:watch` does.
  *
- * The fixture classes are deliberately NOT autoloadable: the parser reads
- * every attribute from the copied file itself, so nothing here may depend on
- * the process being able to load a fixture class.
+ * The parser reads every attribute from the copied file itself, so nothing
+ * here depends on the process being able to load a fixture class (the
+ * originals happen to be autoloadable; the copies never are).
  */
 final class GraphFixture
 {

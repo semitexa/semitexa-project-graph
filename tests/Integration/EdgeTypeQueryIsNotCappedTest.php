@@ -10,9 +10,6 @@ use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Tests\Support\GraphTestStore;
 
-// No Semitexa\ProjectGraph\Tests\ entry in the workspace autoload map; see GraphFixtureTest.
-require_once __DIR__ . '/../Support/GraphTestStore.php';
-
 /**
  * findByType() used to stop at 1000 rows unless told otherwise, and nothing
  * told the caller the answer was partial. The workspace graph has 1225
