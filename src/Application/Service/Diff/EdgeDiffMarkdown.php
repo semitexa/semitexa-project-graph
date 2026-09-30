@@ -22,10 +22,31 @@ final class EdgeDiffMarkdown
 {
     private const ROWS_PER_SECTION = 50;
 
-    /** @param array<string, mixed>|null $coverage CoverageReport::summary() of the head graph */
-    public static function render(EdgeSetDiff $diff, string $baseRef, string $scope, ?array $coverage = null): string
+    /**
+     * @param array<string, mixed>|null $coverage CoverageReport::summary() of the head graph
+     * @param list<array{kind: string, subject: string, removed: string, still_used_by: list<string>}> $orphans
+     * @param list<string> $unreadable files the head graph could not parse
+     */
+    public static function render(EdgeSetDiff $diff, string $baseRef, string $scope, ?array $coverage = null, array $orphans = [], array $unreadable = []): string
     {
         $lines = [sprintf('### Graph diff against `%s` — `%s`', $baseRef, $scope), ''];
+
+        if ($orphans !== [] || $unreadable !== []) {
+            $lines[] = '#### ⚠ Left pointing at nothing';
+            $lines[] = '';
+            foreach ($orphans as $orphan) {
+                $lines[] = sprintf(
+                    '- **%s** `%s` — still used by %s',
+                    str_replace('_', ' ', $orphan['kind']),
+                    self::label($orphan['subject']),
+                    implode(', ', array_map(static fn (string $id): string => '`' . self::label($id) . '`', $orphan['still_used_by'])),
+                );
+            }
+            foreach ($unreadable as $file) {
+                $lines[] = sprintf('- **unreadable** `%s` — the graph could not parse it, so nothing about it is checked', $file);
+            }
+            $lines[] = '';
+        }
 
         if ($diff->isEmpty()) {
             $lines[] = 'No structural change.';

@@ -6,6 +6,7 @@ namespace Semitexa\ProjectGraph\Application\Console\Command;
 
 use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageReport;
 use Semitexa\ProjectGraph\Application\Service\Diff\EdgeDiffMarkdown;
+use Semitexa\ProjectGraph\Application\Service\Diff\OrphanedRemovals;
 use Semitexa\ProjectGraph\Application\Service\Diff\RefGraphDiff;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
@@ -55,6 +56,7 @@ final class GraphDiffCommand extends BaseCommand
         $this->addOption('module', null, InputOption::VALUE_OPTIONAL, 'Limit to module (counts mode only)');
         $this->addOption('base', null, InputOption::VALUE_REQUIRED, 'Git ref to compare the working tree with, edge by edge (e.g. origin/develop)');
         $this->addOption('path', null, InputOption::VALUE_REQUIRED, 'With --base: directory to compare, inside a git repository (default: the project root)');
+        $this->addOption('fail-on', null, InputOption::VALUE_REQUIRED, 'With --base: "orphaned-removals" exits non-zero when a removal leaves something pointing at nothing, or when the head has files the graph could not parse');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -65,7 +67,13 @@ final class GraphDiffCommand extends BaseCommand
         $base = $input->getOption('base');
         if (is_string($base) && $base !== '') {
             $path = $input->getOption('path');
-            return $this->diffAgainstRef($output, $base, is_string($path) && $path !== '' ? $path : $this->getProjectRoot(), (string) $format);
+            $failOn = $input->getOption('fail-on');
+            if ($failOn !== null && $failOn !== 'orphaned-removals') {
+                $output->writeln('<error>--fail-on accepts only "orphaned-removals".</error>');
+                return Command::FAILURE;
+            }
+
+            return $this->diffAgainstRef($output, $base, is_string($path) && $path !== '' ? $path : $this->getProjectRoot(), (string) $format, $failOn !== null);
         }
 
         $previousStats = $this->loadPreviousStats();
@@ -167,7 +175,7 @@ final class GraphDiffCommand extends BaseCommand
      * The working tree against $baseRef: both graphs built fresh over the same
      * directory, compared edge by edge. The project graph is not touched.
      */
-    private function diffAgainstRef(OutputInterface $output, string $baseRef, string $path, string $format): int
+    private function diffAgainstRef(OutputInterface $output, string $baseRef, string $path, string $format, bool $gate): int
     {
         if (!str_starts_with($path, '/')) {
             $path = $this->getProjectRoot() . '/' . $path;
@@ -180,10 +188,14 @@ final class GraphDiffCommand extends BaseCommand
             return Command::FAILURE;
         }
         $diff = $result['diff'];
+        $orphans = OrphanedRemovals::find($diff, $result['base'], $result['head']);
+        $unreadable = OrphanedRemovals::unreadableFiles($result['head']);
+        // A gate that could not read part of the code must not pass it.
+        $exit = $gate && ($orphans !== [] || $unreadable !== []) ? Command::FAILURE : Command::SUCCESS;
 
         if ($format === 'markdown') {
-            $output->write(EdgeDiffMarkdown::render($diff, $baseRef, $result['scope'], (new CoverageReport($result['head']))->summary()));
-            return Command::SUCCESS;
+            $output->write(EdgeDiffMarkdown::render($diff, $baseRef, $result['scope'], (new CoverageReport($result['head']))->summary(), $orphans, $unreadable));
+            return $exit;
         }
 
         if ($format === 'json') {
@@ -199,15 +211,23 @@ final class GraphDiffCommand extends BaseCommand
                 'scope'      => $result['scope'],
                 'added'      => array_map($edge, $diff->added),
                 'removed'    => array_map($edge, $diff->removed),
+                'orphans'    => $orphans,
+                'unreadable' => $unreadable,
             ], JSON_UNESCAPED_SLASHES));
 
-            return Command::SUCCESS;
+            return $exit;
         }
 
         $output->writeln(sprintf('<comment>Graph diff: %s (%s) against %s</comment>', $result['scope'], $result['repository'], $baseRef));
+        foreach ($orphans as $orphan) {
+            $output->writeln(sprintf('<error>ORPHAN %s</error> %s — removed %s; still used by %s', $orphan['kind'], $orphan['subject'], $orphan['removed'], implode(', ', $orphan['still_used_by'])));
+        }
+        foreach ($unreadable as $file) {
+            $output->writeln('<error>UNREADABLE</error> ' . $file . ' — the graph could not parse it, so nothing about it is checked');
+        }
         if ($diff->isEmpty()) {
             $output->writeln('No structural change.');
-            return Command::SUCCESS;
+            return $exit;
         }
         $output->writeln(sprintf('+%d / -%d edges', count($diff->added), count($diff->removed)));
         foreach (['-' => $diff->removed, '+' => $diff->added] as $sign => $edges) {
@@ -216,7 +236,7 @@ final class GraphDiffCommand extends BaseCommand
             }
         }
 
-        return Command::SUCCESS;
+        return $exit;
     }
 
     /** The counts baseline lives in the graph itself, not in a temp file lost with the container. */
