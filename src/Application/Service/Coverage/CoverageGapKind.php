@@ -26,6 +26,14 @@ enum CoverageGapKind: string
      */
     case DynamicReference = 'dynamic_reference';
 
+    /**
+     * A class is referenced but no scanned file declares it, while other
+     * classes in its namespace are declared — likely a typo, a move or a
+     * deletion. Derived from the graph when asked (CoverageReport), never
+     * stored: it depends on every file, not on one.
+     */
+    case UnresolvedReference = 'unresolved_reference';
+
     /** The class is marked #[GraphIgnore]: deliberately not in the graph. The detail is its reason. */
     case Ignored = 'ignored';
 

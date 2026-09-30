@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Console\Command;
 
+use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageReport;
 use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Console\BaseCommand;
@@ -98,9 +99,10 @@ final class ReviewGraphImpactCommand extends BaseCommand
         }
 
         $impact = $analyzer->analyze([$nodeId], $depth);
+        $coverage = (new CoverageReport($storage))->forNodes([$nodeId]);
 
         if ($json) {
-            $payload = json_encode($this->buildJsonPayload($impact), JSON_UNESCAPED_SLASHES);
+            $payload = json_encode($this->buildJsonPayload($impact) + ['coverage' => $coverage], JSON_UNESCAPED_SLASHES);
             if ($payload === false) {
                 $io->error('Failed to encode JSON payload.');
                 return self::FAILURE;
@@ -111,15 +113,23 @@ final class ReviewGraphImpactCommand extends BaseCommand
         }
 
         if ($ndjson) {
-            return $this->emitNdjson($io, $output, $impact);
+            return $this->emitNdjson($io, $output, $impact, $coverage);
         }
 
         if ($impact->totalImpacted() === 0) {
-            $io->text('No downstream impact detected for ' . $target);
+            // "Nothing depends on this" is only proof when nothing that could
+            // hide a dependent was left unread.
+            $io->text($coverage['absence_is_proof']
+                ? 'No downstream impact detected for ' . $target
+                : 'No downstream impact found for ' . $target . ' — not proof: the graph did not see everything.');
+            $io->text(CoverageReport::describe($coverage, $this->getProjectRoot()));
             return self::SUCCESS;
         }
 
         $this->renderImpact($impact, $io);
+        if (!$coverage['absence_is_proof']) {
+            $io->text(CoverageReport::describe($coverage, $this->getProjectRoot()));
+        }
 
         if ($input->getOption('context')) {
             $scorer = new RelevanceScorer();
@@ -154,7 +164,8 @@ final class ReviewGraphImpactCommand extends BaseCommand
      * mostly flat to make downstream grep/filter workflows practical, though
      * the summary line includes a `modules` collection.
      */
-    private function emitNdjson(SymfonyStyle $io, OutputInterface $output, ImpactResult $impact): int
+    /** @param array<string, mixed> $coverage */
+    private function emitNdjson(SymfonyStyle $io, OutputInterface $output, ImpactResult $impact, array $coverage): int
     {
         $direct = 0;
         foreach ($impact->impacted as $impacted) {
@@ -173,6 +184,7 @@ final class ReviewGraphImpactCommand extends BaseCommand
             'total'     => $total,
             'max_depth' => $impact->maxDepth(),
             'modules'   => $modules,
+            'coverage'  => $coverage,
         ], JSON_UNESCAPED_SLASHES);
         if ($summary === false) {
             $io->error('Failed to encode NDJSON summary payload.');

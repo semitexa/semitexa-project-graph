@@ -137,6 +137,26 @@ final class GraphNodeRepository
         }
     }
 
+    /**
+     * fqcn, type and placeholder flag of every class-like node, without
+     * hydrating them.
+     *
+     * @return list<array{fqcn: string, type: string, placeholder: bool}>
+     */
+    public function classLikeFqcns(): array
+    {
+        $rows = $this->adapter->execute("SELECT fqcn, type, is_placeholder FROM graph_nodes WHERE id LIKE 'class:%'")->fetchAll();
+
+        return array_values(array_map(
+            static fn (array $row): array => [
+                'fqcn'        => (string) $row['fqcn'],
+                'type'        => (string) $row['type'],
+                'placeholder' => (int) $row['is_placeholder'] === 1,
+            ],
+            $rows,
+        ));
+    }
+
     public function exists(string $id): bool
     {
         return $this->adapter->execute('SELECT 1 FROM graph_nodes WHERE id = :id LIMIT 1', ['id' => $id])->fetchColumn() !== false;

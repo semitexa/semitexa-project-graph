@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Console\Command;
 
+use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageReport;
 use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Console\BaseCommand;
@@ -56,8 +57,10 @@ final class ReviewGraphGenerateCommand extends BaseCommand
             ? $engine->fullBuild($this->getProjectRoot())
             : $engine->update($this->getProjectRoot());
 
+        $coverage = (new CoverageReport($storage))->summary();
+
         if ($input->getOption('json')) {
-            $output->writeln(json_encode($result->toArray(), JSON_UNESCAPED_SLASHES));
+            $output->writeln(json_encode($result->toArray() + ['coverage' => $coverage], JSON_UNESCAPED_SLASHES));
             return self::SUCCESS;
         }
 
@@ -84,6 +87,8 @@ final class ReviewGraphGenerateCommand extends BaseCommand
                 $io->text('  ' . $err['file'] . ': ' . $err['message']);
             }
         }
+
+        $io->text(CoverageReport::describe($coverage, $this->getProjectRoot()));
 
         return self::SUCCESS;
     }

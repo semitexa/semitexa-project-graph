@@ -59,11 +59,11 @@ trait AutoRefreshesProjectGraph
             }
         } catch (\Throwable $e) {
             // A failed refresh must not block the query — answer from the
-            // existing snapshot, but SAY it may be stale (stderr-safe: notes
-            // are suppressed in machine-output modes anyway).
-            if (!$quiet) {
-                $io->warning('Graph auto-refresh failed (' . $e->getMessage() . ') — results may be stale.');
-            }
+            // existing snapshot, but SAY it may be stale. In machine-output
+            // modes the warning goes to stderr: stdout carries the payload, and
+            // staying silent there let a JSON reader trust a stale answer.
+            $message = 'Graph auto-refresh failed (' . $e->getMessage() . ') — results may be stale.';
+            $quiet ? $io->getErrorStyle()->warning($message) : $io->warning($message);
         }
     }
 }
