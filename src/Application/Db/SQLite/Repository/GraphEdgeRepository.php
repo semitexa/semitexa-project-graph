@@ -87,26 +87,36 @@ final class GraphEdgeRepository
         return $query->fetchAllAs(Edge::class, $this->mapperRegistry);
     }
 
+    /**
+     * Insert the edge, or refresh its metadata when (source, target, type)
+     * already exists. Plain SQL on purpose: this runs once per extracted edge
+     * — ~94k times on a workspace full build — and the ORM path (hydrate the
+     * existing row, then insert or update through the write engine) made the
+     * build spend ~90% of its time here.
+     */
     public function upsert(Edge $edge): void
     {
-        $existing = $this->newQuery()
-            ->where(ColumnRef::for(GraphEdgeResource::class, 'source_id'), Operator::Equals, $edge->getSourceId())
-            ->where(ColumnRef::for(GraphEdgeResource::class, 'target_id'), Operator::Equals, $edge->getTargetId())
-            ->where(ColumnRef::for(GraphEdgeResource::class, 'type'), Operator::Equals, $edge->getType()->value)
-            ->fetchOneAs(Edge::class, $this->mapperRegistry) ?: null;
+        $key = [
+            'source' => $edge->getSourceId(),
+            'target' => $edge->getTargetId(),
+            'type'   => $edge->getType()->value,
+        ];
+        $metadata = json_encode($edge->getMetadata()) ?: '{}';
 
-        if ($existing !== null) {
-            $updated = new Edge(
-                id:       $existing->getId(),
-                sourceId: $edge->getSourceId(),
-                targetId: $edge->getTargetId(),
-                type:     $edge->getType(),
-                metadata: $edge->getMetadata(),
-            );
-            $this->writeEngine->update($updated, GraphEdgeResource::class, $this->mapperRegistry);
-        } else {
-            $this->writeEngine->insert($edge, GraphEdgeResource::class, $this->mapperRegistry);
+        $existingId = $this->adapter->execute(
+            'SELECT id FROM graph_edges WHERE source_id = :source AND target_id = :target AND type = :type LIMIT 1',
+            $key,
+        )->fetchColumn();
+
+        if ($existingId !== false && $existingId !== null) {
+            $this->adapter->execute('UPDATE graph_edges SET metadata = :metadata WHERE id = :id', ['metadata' => $metadata, 'id' => $existingId]);
+            return;
         }
+
+        $this->adapter->execute(
+            'INSERT INTO graph_edges (source_id, target_id, type, metadata) VALUES (:source, :target, :type, :metadata)',
+            $key + ['metadata' => $metadata],
+        );
     }
 
     /**

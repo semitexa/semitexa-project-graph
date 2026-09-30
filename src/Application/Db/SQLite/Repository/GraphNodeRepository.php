@@ -137,24 +137,30 @@ final class GraphNodeRepository
         }
     }
 
+    public function exists(string $id): bool
+    {
+        return $this->adapter->execute('SELECT 1 FROM graph_nodes WHERE id = :id LIMIT 1', ['id' => $id])->fetchColumn() !== false;
+    }
+
+    /** A node known only because an edge points at it. Plain SQL: runs once per edge target. */
     public function insertPlaceholder(string $nodeId): void
     {
-        if ($this->findById($nodeId) !== null) {
+        if ($this->exists($nodeId)) {
             return;
         }
 
-        $placeholder = new Node(
-            id:            $nodeId,
-            type:          NodeType::forPlaceholderId($nodeId),
-            fqcn:          NodeId::extractFqcn($nodeId),
-            file:          '',
-            line:          0,
-            endLine:       0,
-            module:        '',
-            metadata:      [],
-            isPlaceholder: true,
+        $fqcn = NodeId::extractFqcn($nodeId);
+        $slash = strrpos($fqcn, '\\');
+        $this->adapter->execute(
+            'INSERT INTO graph_nodes (id, type, fqcn, name, file, line, end_line, module, metadata, is_placeholder)'
+            . " VALUES (:id, :type, :fqcn, :name, '', 0, 0, '', '[]', 1)",
+            [
+                'id'   => $nodeId,
+                'type' => NodeType::forPlaceholderId($nodeId)->value,
+                'fqcn' => $fqcn,
+                'name' => $slash === false ? $fqcn : substr($fqcn, $slash + 1),
+            ],
         );
-        $this->writeEngine->insert($placeholder, GraphNodeResource::class, $this->mapperRegistry);
     }
 
     /**

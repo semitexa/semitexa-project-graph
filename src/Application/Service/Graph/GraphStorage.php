@@ -154,15 +154,13 @@ final class GraphStorage
 
     public function upsertEdge(Edge $edge): void
     {
-        if ($this->nodes->findById($edge->getTargetId()) === null) {
-            $this->nodes->insertPlaceholder($edge->getTargetId());
-        }
+        $this->nodes->insertPlaceholder($edge->getTargetId());
         $this->edges->upsert($edge);
     }
 
     public function nodeExists(string $nodeId): bool
     {
-        return $this->nodes->findById($nodeId) !== null;
+        return $this->nodes->exists($nodeId);
     }
 
     public function getMeta(string $key): ?string
