@@ -122,6 +122,39 @@ final class GraphEdgeRepository
         return true;
     }
 
+    /**
+     * Every edge with what is known about its source node, page by page (the
+     * adapter buffers a whole result, and ~67k joined rows decoded at once do
+     * not fit in 128M). `via` is read out of the metadata by SQL.
+     *
+     * @return \Generator<int, array{type: string, source_id: string, target_id: string, via: ?string, source_file: string, source_declared: bool}>
+     */
+    public function withSources(int $pageSize = 5000): \Generator
+    {
+        $after = 0;
+        do {
+            $rows = $this->adapter->execute(
+                "SELECT e.id, e.type, e.source_id, e.target_id, json_extract(e.metadata, '$.via') AS via,"
+                . ' n.file AS source_file, n.is_placeholder AS source_placeholder'
+                . ' FROM graph_edges e LEFT JOIN graph_nodes n ON n.id = e.source_id'
+                . ' WHERE e.id > :after ORDER BY e.id LIMIT ' . $pageSize,
+                ['after' => $after],
+            )->fetchAll();
+
+            foreach ($rows as $row) {
+                $after = (int) $row['id'];
+                yield [
+                    'type'            => (string) $row['type'],
+                    'source_id'       => (string) $row['source_id'],
+                    'target_id'       => (string) $row['target_id'],
+                    'via'             => $row['via'] !== null ? (string) $row['via'] : null,
+                    'source_file'     => (string) ($row['source_file'] ?? ''),
+                    'source_declared' => $row['source_file'] !== null && (int) $row['source_placeholder'] === 0,
+                ];
+            }
+        } while (count($rows) === $pageSize);
+    }
+
     /** @return list<Edge> every edge, without the ORM */
     public function all(): array
     {
