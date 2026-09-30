@@ -1,0 +1,9 @@
+<?php
+
+// Deliberately unparseable. Kept as .php.txt so no linter, analyser or
+// autoloader ever sees it; GraphFixture copies it in as Broken.php on request.
+
+final class Broken
+{
+    public function oops(: void
+}
