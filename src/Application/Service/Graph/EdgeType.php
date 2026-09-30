@@ -66,4 +66,38 @@ enum EdgeType: string
     case HasExample         = 'has_example';
     case ReferencesADR      = 'references_adr';
     case Supersedes         = 'supersedes';
+
+    /**
+     * Deliberately a match with no default arm: a new case that is not
+     * classified here fails EdgeClassTest instead of silently falling into
+     * some bucket.
+     */
+    public function edgeClass(): EdgeClass
+    {
+        return match ($this) {
+            self::Handles, self::Produces, self::ServesRoute,
+            self::InjectsReadonly, self::InjectsMutable, self::InjectsFactory, self::InjectsConfig,
+            self::ListensTo, self::SatisfiesContract,
+            self::RequiresPermission, self::RequiresCapability, self::Authenticates, self::TenantIsolated,
+            self::PipelinePhase, self::RendersSlot, self::ProvidesData,
+            self::MapsToTable, self::HasRelation, self::ExposesApi, self::ScheduledAs, self::ExtendsModule,
+            self::PublishesTo, self::ConsumesFrom, self::StreamsTo, self::HasSchema, self::IsAggregateOf,
+            self::ReplaysVia, self::RoutesCommandTo, self::DeadLettersTo, self::RetriesVia
+                => EdgeClass::Wiring,
+
+            self::Extends, self::Implements, self::Uses, self::ComposedOf, self::Imports,
+            self::Calls, self::Instantiates, self::Returns, self::Accepts, self::Emits, self::Tests
+                => EdgeClass::CodeReference,
+
+            self::BelongsToDomain, self::ParticipatesInFlow, self::TriggersFlow, self::PrecedesInFlow,
+            self::CrossesBoundary, self::IsHotspot, self::CoupledTo, self::IntentFor
+                => EdgeClass::Inferred,
+
+            self::DocumentedBy, self::HasExample, self::ReferencesADR, self::Supersedes
+                => EdgeClass::Documentation,
+
+            self::DefinedIn, self::InFile, self::InModule, self::InNamespace
+                => EdgeClass::Structural,
+        };
+    }
 }
