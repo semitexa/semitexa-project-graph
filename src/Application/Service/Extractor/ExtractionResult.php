@@ -18,6 +18,14 @@ final class ExtractionResult
     /** @var array<string, int> nodeId => index in $nodes */
     private array $nodeIndex = [];
 
+    /**
+     * Extractors that threw on this file, with why. Their contribution is
+     * missing; everything else the file declared is still here.
+     *
+     * @var list<string>
+     */
+    public array $failures = [];
+
     public function addNode(Node $node): self
     {
         if (isset($this->nodeIndex[$node->getId()])) {
@@ -79,6 +87,8 @@ final class ExtractionResult
         foreach ($other->edges as $edge) {
             $result->addEdge($edge);
         }
+
+        $result->failures = [...$this->failures, ...$other->failures];
 
         return $result;
     }

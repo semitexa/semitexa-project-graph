@@ -23,14 +23,9 @@ use Semitexa\ProjectGraph\Application\Service\Scanner\IgnorePatternLoader;
  * on a throwaway copy, so a test can edit or delete a file and refresh the
  * graph the way `ai:review-graph:watch` does.
  *
- * The fixture classes are made autoloadable from their ORIGINAL location.
- * They have to be: the parser reads attributes only through reflection, and a
- * class it cannot load falls back to ClassInfo::fromAst with no attributes at
- * all — every handles / serves_route / listens_to / injects_* edge silently
- * disappears (measured 2026-09-30: without this autoloader the fixture built
- * with zero wiring edges). Consequence: an edit to a class's ATTRIBUTES in the
- * copy is not seen, because the original is what gets reflected; edits to its
- * code are seen. Both are the defect graph-integrity-ast-attributes removes.
+ * The fixture classes are deliberately NOT autoloadable: the parser reads
+ * every attribute from the copied file itself, so nothing here may depend on
+ * the process being able to load a fixture class.
  */
 final class GraphFixture
 {
@@ -45,8 +40,6 @@ final class GraphFixture
 
     private function __construct(bool $withBrokenFile)
     {
-        self::registerAutoloader();
-
         $this->root = sys_get_temp_dir() . '/semitexa-graph-fixture-' . bin2hex(random_bytes(6));
         self::copyTree(self::SOURCE, $this->root);
 
@@ -189,25 +182,6 @@ final class GraphFixture
     public function __destruct()
     {
         self::removeTree($this->root);
-    }
-
-    private static function registerAutoloader(): void
-    {
-        static $registered = false;
-        if ($registered) {
-            return;
-        }
-        $registered = true;
-
-        spl_autoload_register(static function (string $class): void {
-            if (!str_starts_with($class, self::NS)) {
-                return;
-            }
-            $file = self::SOURCE . '/' . str_replace('\\', '/', substr($class, strlen(self::NS))) . '.php';
-            if (is_file($file)) {
-                require_once $file;
-            }
-        });
     }
 
     private static function copyTree(string $from, string $to): void

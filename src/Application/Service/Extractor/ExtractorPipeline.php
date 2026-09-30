@@ -18,8 +18,15 @@ final class ExtractorPipeline
         $merged = new ExtractionResult();
 
         foreach ($this->extractors as $extractor) {
-            if ($extractor->supports($file)) {
-                $merged = $merged->merge($extractor->extract($file));
+            // One extractor throwing — typically on an attribute whose
+            // arguments name a class the process cannot load — costs only its
+            // own edges, not the whole file's.
+            try {
+                if ($extractor->supports($file)) {
+                    $merged = $merged->merge($extractor->extract($file));
+                }
+            } catch (\Throwable $e) {
+                $merged->failures[] = (new \ReflectionClass($extractor))->getShortName() . ': ' . $e->getMessage();
             }
         }
 

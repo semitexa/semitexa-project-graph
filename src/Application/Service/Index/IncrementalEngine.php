@@ -37,8 +37,6 @@ final class IncrementalEngine
      */
     public function fullBuild(string $projectRoot): UpdateResult
     {
-        self::raiseMemoryCeilingForFullBuild();
-
         return $this->storage->transaction(function () use ($projectRoot): UpdateResult {
             $this->storage->truncate();
 
@@ -69,8 +67,12 @@ final class IncrementalEngine
             } else {
                 try {
                     $parsed = $this->parser->parse($change->path, $this->resolveModule($projectRoot, $change->path));
-                    $batch[$change->path] = $this->extractors->process($parsed);
+                    $extracted = $this->extractors->process($parsed);
+                    $batch[$change->path] = $extracted;
                     $indexUpdates[$change->path] = $change->hash;
+                    if ($extracted->failures !== []) {
+                        $errors[] = ['file' => $change->path, 'message' => implode('; ', $extracted->failures)];
+                    }
                 } catch (\Throwable $e) {
                     $errors[] = ['file' => $change->path, 'message' => $e->getMessage()];
                 }
@@ -135,35 +137,6 @@ final class IncrementalEngine
         $totals['nodesRemoved'] += $diff->removedNodeCount();
         $totals['edgesAdded'] += $diff->addedEdgeCount();
         $totals['edgesRemoved'] += $diff->removedEdgeCount();
-    }
-
-    /**
-     * A full build needs more than PHP's default 128M: the parser reflects every
-     * class it reads, and a class once loaded stays loaded (measured 2026-09-30:
-     * ~110M for the workspace's 4899 classes, before the framework's own boot).
-     * Only a ceiling below 1G is raised; an explicit larger one or -1 is kept.
-     * Reading attributes from the AST instead (graph-integrity-ast-attributes)
-     * removes the cause.
-     */
-    private static function raiseMemoryCeilingForFullBuild(): void
-    {
-        $limit = (string) ini_get('memory_limit');
-        if ($limit === '-1') {
-            return;
-        }
-
-        $bytes = (int) $limit;
-        $unit = strtolower(substr($limit, -1));
-        $bytes *= match ($unit) {
-            'g' => 1024 ** 3,
-            'm' => 1024 ** 2,
-            'k' => 1024,
-            default => 1,
-        };
-
-        if ($bytes < 1024 ** 3) {
-            ini_set('memory_limit', '1G');
-        }
     }
 }
 

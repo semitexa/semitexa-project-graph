@@ -9,7 +9,7 @@ final readonly class PropertyInfo
     public function __construct(
         public string $name,
         public ?string $typeFqcn,
-        /** @var list<\ReflectionAttribute> */
+        /** @var list<ParsedAttribute> */
         public array $attributes,
     ) {}
 
@@ -23,7 +23,7 @@ final readonly class PropertyInfo
         return false;
     }
 
-    public function getAttribute(string $attributeClass): ?\ReflectionAttribute
+    public function getAttribute(string $attributeClass): ?ParsedAttribute
     {
         foreach ($this->attributes as $attr) {
             if ($attr->getName() === $attributeClass) {
