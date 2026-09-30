@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Service\Extractor;
 
 use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageGapKind;
+use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
 use Semitexa\ProjectGraph\Application\Service\Parser\ParsedFile;
+use Semitexa\ProjectGraph\Attribute\GraphIgnore;
 use Semitexa\ProjectGraph\Domain\Model\CoverageGap;
 
 final class ExtractorPipeline
@@ -36,7 +38,56 @@ final class ExtractorPipeline
 
         $merged->declaredClasses = array_map(static fn ($class): string => $class->fqcn, $file->getClasses());
 
-        return $merged;
+        return $this->withoutIgnoredClasses($file, $merged);
+    }
+
+    /**
+     * #[GraphIgnore] keeps a class out of the graph — its nodes and the edges
+     * leaving it — and leaves an "ignored" gap in its place, so a question
+     * about it is answered with "not looked at" rather than "nothing there".
+     * Edges other classes have INTO it stay: those references are real.
+     */
+    private function withoutIgnoredClasses(ParsedFile $file, ExtractionResult $result): ExtractionResult
+    {
+        $ignored = [];
+        foreach ($file->getClasses() as $class) {
+            $attribute = $class->getAttribute(GraphIgnore::class);
+            if ($attribute === null) {
+                continue;
+            }
+            $ignored[NodeId::forClass($class->fqcn)] = true;
+            $reason = $attribute->unreadableReason() === null ? (string) ($attribute->getArguments()['reason'] ?? $attribute->getArguments()[0] ?? '') : '';
+            $result->gaps[] = new CoverageGap(
+                CoverageGapKind::Ignored,
+                $file->path,
+                $reason !== '' ? $reason : 'Marked #[GraphIgnore]',
+                $class->fqcn,
+                $class->startLine,
+            );
+        }
+        if ($ignored === []) {
+            return $result;
+        }
+
+        $kept = new ExtractionResult();
+        foreach ($result->nodes as $node) {
+            if (!isset($ignored[$node->getId()])) {
+                $kept->addNode($node);
+            }
+        }
+        foreach ($result->edges as $edge) {
+            if (!isset($ignored[$edge->getSourceId()])) {
+                $kept->addEdge($edge);
+            }
+        }
+        $kept->failures = $result->failures;
+        $kept->gaps = $result->gaps;
+        $kept->declaredClasses = array_values(array_filter(
+            $result->declaredClasses,
+            static fn (string $fqcn): bool => !isset($ignored[NodeId::forClass($fqcn)]),
+        ));
+
+        return $kept;
     }
 
     /** @return list<ExtractorInterface> */

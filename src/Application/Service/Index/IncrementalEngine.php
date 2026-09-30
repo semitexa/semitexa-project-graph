@@ -52,6 +52,7 @@ final class IncrementalEngine
 
         $indexedFiles = $this->storage->fileIndex->getAll();
         $changes = $this->scanner->scan($projectRoot, $indexedFiles);
+        $this->storage->setMeta('coverage_exclusions', (string) json_encode($this->scanner->lastExclusions()));
 
         if (empty($changes)) {
             return UpdateResult::noChanges();

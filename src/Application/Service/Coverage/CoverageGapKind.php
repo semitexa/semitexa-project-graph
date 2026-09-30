@@ -26,6 +26,9 @@ enum CoverageGapKind: string
      */
     case DynamicReference = 'dynamic_reference';
 
+    /** The class is marked #[GraphIgnore]: deliberately not in the graph. The detail is its reason. */
+    case Ignored = 'ignored';
+
     /**
      * The file declares a class the graph already holds from another file —
      * a second declaration of the same name, or another file claimed it

@@ -35,21 +35,4 @@ final class IgnorePatternLoader
 
         return $this->patterns;
     }
-
-    public function shouldExclude(string $filePath, string $projectRoot): bool
-    {
-        $relative = str_replace($projectRoot . '/', '', $filePath);
-
-        foreach ($this->patterns as $pattern) {
-            if (str_ends_with($pattern, '/')) {
-                if (str_starts_with($relative, $pattern)) {
-                    return true;
-                }
-            } elseif (fnmatch($pattern, basename($relative))) {
-                return true;
-            }
-        }
-
-        return false;
-    }
 }
