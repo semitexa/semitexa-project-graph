@@ -125,7 +125,8 @@ final class GraphEdgeRepository
     /**
      * Every edge with what is known about its source node, page by page (the
      * adapter buffers a whole result, and ~67k joined rows decoded at once do
-     * not fit in 128M). `via` is read out of the metadata by SQL.
+     * not fit in 128M). `via` is read out of the metadata by SQL: how a
+     * reference was made, or where an attribute was applied.
      *
      * @return \Generator<int, array{type: string, source_id: string, target_id: string, via: ?string, source_file: string, source_declared: bool}>
      */
@@ -134,7 +135,7 @@ final class GraphEdgeRepository
         $after = 0;
         do {
             $rows = $this->adapter->execute(
-                "SELECT e.id, e.type, e.source_id, e.target_id, json_extract(e.metadata, '$.via') AS via,"
+                "SELECT e.id, e.type, e.source_id, e.target_id, COALESCE(json_extract(e.metadata, '$.via'), json_extract(e.metadata, '$.target')) AS via,"
                 . ' n.file AS source_file, n.is_placeholder AS source_placeholder'
                 . ' FROM graph_edges e LEFT JOIN graph_nodes n ON n.id = e.source_id'
                 . ' WHERE e.id > :after ORDER BY e.id LIMIT ' . $pageSize,

@@ -157,6 +157,30 @@ final class GraphNodeRepository
         ));
     }
 
+    /**
+     * Every declared (non-placeholder) class-like node, without hydrating.
+     *
+     * @return list<array{id: string, fqcn: string, type: string, file: string, line: int, module: string}>
+     */
+    public function declaredClasses(): array
+    {
+        $rows = $this->adapter->execute(
+            "SELECT id, fqcn, type, file, line, module FROM graph_nodes WHERE id LIKE 'class:%' AND is_placeholder = 0 ORDER BY id",
+        )->fetchAll();
+
+        return array_values(array_map(
+            static fn (array $row): array => [
+                'id'     => (string) $row['id'],
+                'fqcn'   => (string) $row['fqcn'],
+                'type'   => (string) $row['type'],
+                'file'   => (string) $row['file'],
+                'line'   => (int) $row['line'],
+                'module' => (string) $row['module'],
+            ],
+            $rows,
+        ));
+    }
+
     public function exists(string $id): bool
     {
         return $this->adapter->execute('SELECT 1 FROM graph_nodes WHERE id = :id LIMIT 1', ['id' => $id])->fetchColumn() !== false;

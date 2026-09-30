@@ -99,7 +99,7 @@ final class InboundIndex
         );
     }
 
-    /** @return list<array{type: EdgeType, target: string}> */
+    /** @return list<array{type: EdgeType, via: ?string, target: string}> */
     public function outOf(string $nodeId): array
     {
         $id = $this->idOf[$nodeId] ?? null;
@@ -108,7 +108,12 @@ final class InboundIndex
         }
 
         return array_map(
-            fn (int $packed): array => ['type' => $this->types[($packed >> 2) & 0x3F], 'target' => $this->ids[$packed >> 8]],
+            function (int $packed) use ($id): array {
+                $target = $packed >> 8;
+                $type = ($packed >> 2) & 0x3F;
+
+                return ['type' => $this->types[$type], 'via' => $this->via[$target . ':' . $id . ':' . $type] ?? null, 'target' => $this->ids[$target]];
+            },
             $this->outbound[$id] ?? [],
         );
     }
