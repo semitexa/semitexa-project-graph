@@ -66,6 +66,7 @@ final class ExtractorPipeline
             new Ast\InstantiationExtractor(),
             new Ast\TypeHintExtractor(),
             new Ast\UseStatementExtractor(),
+            new Ast\ReferenceExtractor(),
         ];
     }
 }

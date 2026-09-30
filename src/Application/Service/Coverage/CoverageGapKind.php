@@ -21,6 +21,12 @@ enum CoverageGapKind: string
     case ExtractionFailed = 'extraction_failed';
 
     /**
+     * The code refers to a class it only knows at runtime — new $class,
+     * $class::create(), $x instanceof $name. Whatever it refers to has no edge.
+     */
+    case DynamicReference = 'dynamic_reference';
+
+    /**
      * The file declares a class the graph already holds from another file —
      * a second declaration of the same name, or another file claimed it
      * first. Only one of them is in the graph; the detail names the other.

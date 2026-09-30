@@ -14,6 +14,8 @@ enum EdgeType: string
     case Instantiates       = 'instantiates';
     case Returns            = 'returns';
     case Accepts            = 'accepts';
+    /** Foo::class as a value, a static call, a class constant or enum case, instanceof, catch. */
+    case References         = 'references';
     case DefinedIn          = 'defined_in';
     case InFile             = 'in_file';
     case InModule           = 'in_module';
@@ -86,7 +88,7 @@ enum EdgeType: string
                 => EdgeClass::Wiring,
 
             self::Extends, self::Implements, self::Uses, self::ComposedOf, self::Imports,
-            self::Calls, self::Instantiates, self::Returns, self::Accepts, self::Emits, self::Tests
+            self::Calls, self::Instantiates, self::Returns, self::Accepts, self::References, self::Emits, self::Tests
                 => EdgeClass::CodeReference,
 
             self::BelongsToDomain, self::ParticipatesInFlow, self::TriggersFlow, self::PrecedesInFlow,

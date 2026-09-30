@@ -44,7 +44,7 @@ final class NodeOwnershipTest extends TestCase
         self::assertStringEndsWith('/Orders/OrderResource.php', $resource->getFile());
         self::assertSame(NodeType::Resource, $resource->getType(), 'the role the handler gave it survives');
         self::assertFalse($resource->getIsPlaceholder());
-        self::assertSame([], $fixture->storage->gaps->countByKind(), 'no duplicate_class gap: nothing was declared twice');
+        self::assertSame([], $fixture->storage->gaps->findAll(\Semitexa\ProjectGraph\Application\Service\Coverage\CoverageGapKind::DuplicateClass), 'no duplicate_class gap: nothing was declared twice');
         self::assertTrue($fixture->hasEdge(EdgeType::Produces, GraphFixture::classId('Orders\\PlaceOrderHandler'), GraphFixture::classId('Orders\\OrderResource')));
     }
 }

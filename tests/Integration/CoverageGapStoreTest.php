@@ -22,9 +22,14 @@ require_once __DIR__ . '/../Support/GraphFixture.php';
 final class CoverageGapStoreTest extends TestCase
 {
     #[Test]
-    public function a_clean_fixture_has_no_gaps(): void
+    public function the_fixtures_only_gap_is_its_planted_dynamic_instantiation(): void
     {
-        self::assertSame([], GraphFixture::built()->storage->gaps->countByKind());
+        $fixture = GraphFixture::built();
+
+        self::assertSame(['dynamic_reference' => 1], $fixture->storage->gaps->countByKind());
+        $gap = $fixture->storage->gaps->findByFile($fixture->path('Dynamic/PluginLoader.php'))[0];
+        self::assertSame(GraphFixture::NS . 'Dynamic\\PluginLoader', $gap->getSubject());
+        self::assertSame(12, $gap->getLine());
     }
 
     #[Test]
@@ -118,7 +123,7 @@ final class CoverageGapStoreTest extends TestCase
         $fixture->delete('Broken.php');
         $fixture->refresh();
 
-        self::assertSame([], $fixture->storage->gaps->countByKind());
+        self::assertSame([], $fixture->storage->gaps->findByFile($fixture->path('Broken.php')));
     }
 
     #[Test]
@@ -127,7 +132,7 @@ final class CoverageGapStoreTest extends TestCase
         $fixture = GraphFixture::create(withBrokenFile: true);
         $fixture->build();
 
-        self::assertSame(['parse_error' => 1], $fixture->storage->gaps->countByKind());
+        self::assertSame(['dynamic_reference' => 1, 'parse_error' => 1], $fixture->storage->gaps->countByKind());
         self::assertContainsOnlyInstancesOf(CoverageGap::class, $fixture->storage->gaps->findAll(CoverageGapKind::ParseError));
     }
 }
