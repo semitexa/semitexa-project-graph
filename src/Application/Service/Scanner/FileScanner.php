@@ -4,9 +4,10 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Service\Scanner;
 
+use Semitexa\ProjectGraph\Application\Service\Extractor\ConfigReferenceExtractor;
+
 final class FileScanner
 {
-    private const DEFAULT_EXTENSIONS = ['php'];
     private const EXCLUDED_DIRS = ['vendor', 'node_modules', '.git', 'var'];
 
     public function __construct(
@@ -68,7 +69,7 @@ final class FileScanner
                             ? str_starts_with(str_replace($root, '', $path), $pattern)
                             : fnmatch($pattern, basename($path));
                         if ($matches) {
-                            if ($file->getExtension() === 'php') {
+                            if ($file->getExtension() === 'php' || ConfigReferenceExtractor::handles($path)) {
                                 $this->exclude($pattern);
                             }
                             return false;
@@ -80,7 +81,8 @@ final class FileScanner
         );
 
         foreach ($iterator as $file) {
-            if ($file->getExtension() !== 'php') {
+            // PHP, and the configuration files that name classes.
+            if ($file->getExtension() !== 'php' && !ConfigReferenceExtractor::handles($file->getPathname())) {
                 continue;
             }
 

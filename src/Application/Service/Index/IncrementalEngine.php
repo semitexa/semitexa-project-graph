@@ -6,6 +6,7 @@ namespace Semitexa\ProjectGraph\Application\Service\Index;
 
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
 use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageGapKind;
+use Semitexa\ProjectGraph\Application\Service\Extractor\ConfigReferenceExtractor;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractionResult;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractorPipeline;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphBuilder;
@@ -69,6 +70,13 @@ final class IncrementalEngine
             if ($change->status === FileStatus::Deleted) {
                 $batch[$change->path] = ExtractionResult::empty();
                 $indexUpdates[$change->path] = null;
+            } elseif (ConfigReferenceExtractor::handles($change->path)) {
+                $batch[$change->path] = (new ConfigReferenceExtractor())->extract(
+                    $change->path,
+                    (string) file_get_contents($change->path),
+                    $this->resolveModule($projectRoot, $change->path),
+                );
+                $indexUpdates[$change->path] = $change->hash;
             } else {
                 try {
                     $parsed = $this->parser->parse($change->path, $this->resolveModule($projectRoot, $change->path));
