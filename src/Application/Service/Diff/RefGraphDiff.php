@@ -54,7 +54,8 @@ final class RefGraphDiff
             'diff'       => EdgeSetDiff::between($base, $head),
             'base'       => $base,
             'head'       => $head,
-            'scope'      => $scope === '' ? '.' : $scope,
+            // The repository's own name when the whole repository is compared.
+            'scope'      => $scope === '' ? basename($repository) : $scope,
             'repository' => $repository,
         ];
     }

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Console\Command;
 
+use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageReport;
+use Semitexa\ProjectGraph\Application\Service\Diff\EdgeDiffMarkdown;
 use Semitexa\ProjectGraph\Application\Service\Diff\RefGraphDiff;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
@@ -49,7 +51,7 @@ final class GraphDiffCommand extends BaseCommand
 
     protected function configure(): void
     {
-        $this->addOption('format', null, InputOption::VALUE_OPTIONAL, 'Output format: text, json', 'text');
+        $this->addOption('format', null, InputOption::VALUE_OPTIONAL, 'Output format: text, json, markdown (markdown: with --base, a pull-request comment)', 'text');
         $this->addOption('module', null, InputOption::VALUE_OPTIONAL, 'Limit to module (counts mode only)');
         $this->addOption('base', null, InputOption::VALUE_REQUIRED, 'Git ref to compare the working tree with, edge by edge (e.g. origin/develop)');
         $this->addOption('path', null, InputOption::VALUE_REQUIRED, 'With --base: directory to compare, inside a git repository (default: the project root)');
@@ -63,7 +65,7 @@ final class GraphDiffCommand extends BaseCommand
         $base = $input->getOption('base');
         if (is_string($base) && $base !== '') {
             $path = $input->getOption('path');
-            return $this->diffAgainstRef($output, $base, is_string($path) && $path !== '' ? $path : $this->getProjectRoot(), $format === 'json');
+            return $this->diffAgainstRef($output, $base, is_string($path) && $path !== '' ? $path : $this->getProjectRoot(), (string) $format);
         }
 
         $previousStats = $this->loadPreviousStats();
@@ -165,7 +167,7 @@ final class GraphDiffCommand extends BaseCommand
      * The working tree against $baseRef: both graphs built fresh over the same
      * directory, compared edge by edge. The project graph is not touched.
      */
-    private function diffAgainstRef(OutputInterface $output, string $baseRef, string $path, bool $json): int
+    private function diffAgainstRef(OutputInterface $output, string $baseRef, string $path, string $format): int
     {
         if (!str_starts_with($path, '/')) {
             $path = $this->getProjectRoot() . '/' . $path;
@@ -179,7 +181,12 @@ final class GraphDiffCommand extends BaseCommand
         }
         $diff = $result['diff'];
 
-        if ($json) {
+        if ($format === 'markdown') {
+            $output->write(EdgeDiffMarkdown::render($diff, $baseRef, $result['scope'], (new CoverageReport($result['head']))->summary()));
+            return Command::SUCCESS;
+        }
+
+        if ($format === 'json') {
             $edge = static fn (Edge $e): array => [
                 'type'   => $e->getType()->value,
                 'class'  => $e->getType()->edgeClass()->value,
