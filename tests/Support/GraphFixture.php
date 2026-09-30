@@ -85,6 +85,12 @@ final class GraphFixture
         return $this->engine->fullBuild($this->root);
     }
 
+    /** A full rebuild of some other root — lets a test make a rebuild fail midway. */
+    public function buildFrom(string $root): UpdateResult
+    {
+        return $this->engine->fullBuild($root);
+    }
+
     /** Re-index only what changed on disk since the last build or refresh. */
     public function refresh(): UpdateResult
     {
