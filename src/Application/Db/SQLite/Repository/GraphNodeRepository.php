@@ -145,7 +145,7 @@ final class GraphNodeRepository
 
         $placeholder = new Node(
             id:            $nodeId,
-            type:          NodeType::Class_,
+            type:          NodeType::forPlaceholderId($nodeId),
             fqcn:          NodeId::extractFqcn($nodeId),
             file:          '',
             line:          0,
