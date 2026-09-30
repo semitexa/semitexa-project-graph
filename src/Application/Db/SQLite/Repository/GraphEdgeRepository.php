@@ -122,6 +122,20 @@ final class GraphEdgeRepository
         return true;
     }
 
+    /** @return list<Edge> every edge, without the ORM */
+    public function all(): array
+    {
+        return array_values(array_map(
+            static fn (array $row): Edge => new Edge(
+                sourceId: (string) $row['source_id'],
+                targetId: (string) $row['target_id'],
+                type:     EdgeType::from((string) $row['type']),
+                metadata: json_decode((string) $row['metadata'], true) ?: [],
+            ),
+            $this->adapter->execute('SELECT source_id, target_id, type, metadata FROM graph_edges')->fetchAll(),
+        ));
+    }
+
     /**
      * Edges leaving any of the given nodes, without the ORM (runs once per
      * re-read file).

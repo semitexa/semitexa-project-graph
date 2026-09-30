@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Console\Command;
 
+use Semitexa\ProjectGraph\Application\Service\Diff\RefGraphDiff;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
+use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Application\Service\Query\GraphQueryService;
 use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Attribute\InjectAsReadonly;
@@ -48,13 +50,21 @@ final class GraphDiffCommand extends BaseCommand
     protected function configure(): void
     {
         $this->addOption('format', null, InputOption::VALUE_OPTIONAL, 'Output format: text, json', 'text');
-        $this->addOption('module', null, InputOption::VALUE_OPTIONAL, 'Limit to module');
+        $this->addOption('module', null, InputOption::VALUE_OPTIONAL, 'Limit to module (counts mode only)');
+        $this->addOption('base', null, InputOption::VALUE_REQUIRED, 'Git ref to compare the working tree with, edge by edge (e.g. origin/develop)');
+        $this->addOption('path', null, InputOption::VALUE_REQUIRED, 'With --base: directory to compare, inside a git repository (default: the project root)');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $format = $input->getOption('format') ?? 'text';
         $module = $input->getOption('module');
+
+        $base = $input->getOption('base');
+        if (is_string($base) && $base !== '') {
+            $path = $input->getOption('path');
+            return $this->diffAgainstRef($output, $base, is_string($path) && $path !== '' ? $path : $this->getProjectRoot(), $format === 'json');
+        }
 
         $previousStats = $this->loadPreviousStats();
         $currentStats = $this->getCurrentStats($module);
@@ -151,19 +161,68 @@ final class GraphDiffCommand extends BaseCommand
         return Command::SUCCESS;
     }
 
+    /**
+     * The working tree against $baseRef: both graphs built fresh over the same
+     * directory, compared edge by edge. The project graph is not touched.
+     */
+    private function diffAgainstRef(OutputInterface $output, string $baseRef, string $path, bool $json): int
+    {
+        if (!str_starts_with($path, '/')) {
+            $path = $this->getProjectRoot() . '/' . $path;
+        }
+
+        try {
+            $result = (new RefGraphDiff())->diff($path, $baseRef, $this->getProjectRoot() . '/var/tmp');
+        } catch (\InvalidArgumentException $e) {
+            $output->writeln('<error>' . $e->getMessage() . '</error>');
+            return Command::FAILURE;
+        }
+        $diff = $result['diff'];
+
+        if ($json) {
+            $edge = static fn (Edge $e): array => [
+                'type'   => $e->getType()->value,
+                'class'  => $e->getType()->edgeClass()->value,
+                'source' => $e->getSourceId(),
+                'target' => $e->getTargetId(),
+            ];
+            $output->writeln((string) json_encode([
+                'base'       => $baseRef,
+                'repository' => $result['repository'],
+                'scope'      => $result['scope'],
+                'added'      => array_map($edge, $diff->added),
+                'removed'    => array_map($edge, $diff->removed),
+            ], JSON_UNESCAPED_SLASHES));
+
+            return Command::SUCCESS;
+        }
+
+        $output->writeln(sprintf('<comment>Graph diff: %s (%s) against %s</comment>', $result['scope'], $result['repository'], $baseRef));
+        if ($diff->isEmpty()) {
+            $output->writeln('No structural change.');
+            return Command::SUCCESS;
+        }
+        $output->writeln(sprintf('+%d / -%d edges', count($diff->added), count($diff->removed)));
+        foreach (['-' => $diff->removed, '+' => $diff->added] as $sign => $edges) {
+            foreach ($edges as $e) {
+                $output->writeln(sprintf('  %s %s %s -> %s', $sign, $e->getType()->value, $e->getSourceId(), $e->getTargetId()));
+            }
+        }
+
+        return Command::SUCCESS;
+    }
+
+    /** The counts baseline lives in the graph itself, not in a temp file lost with the container. */
     private function loadPreviousStats(): array
     {
-        $metaFile = sys_get_temp_dir() . '/semitexa-graph-diff.json';
-        if (!file_exists($metaFile)) {
-            return [];
-        }
-        $content = file_get_contents($metaFile);
-        return $content !== false ? json_decode($content, true) : [];
+        $content = $this->storage()->getMeta(self::META_KEY);
+        $decoded = $content !== null ? json_decode($content, true) : null;
+
+        return is_array($decoded) ? $decoded : [];
     }
 
     private function saveCurrentStats(array $stats): void
     {
-        $metaFile = sys_get_temp_dir() . '/semitexa-graph-diff.json';
         $data = [
             'timestamp' => date('Y-m-d H:i:s'),
             'total_nodes' => $stats['total_nodes'],
@@ -171,7 +230,7 @@ final class GraphDiffCommand extends BaseCommand
             'by_type' => $stats['by_type'],
             'modules' => $stats['modules'],
         ];
-        file_put_contents($metaFile, json_encode($data));
+        $this->storage()->setMeta(self::META_KEY, (string) json_encode($data));
     }
 
     /**
