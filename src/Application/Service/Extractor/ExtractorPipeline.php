@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Service\Extractor;
 
+use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageGapKind;
 use Semitexa\ProjectGraph\Application\Service\Parser\ParsedFile;
+use Semitexa\ProjectGraph\Domain\Model\CoverageGap;
 
 final class ExtractorPipeline
 {
@@ -26,9 +28,13 @@ final class ExtractorPipeline
                     $merged = $merged->merge($extractor->extract($file));
                 }
             } catch (\Throwable $e) {
-                $merged->failures[] = (new \ReflectionClass($extractor))->getShortName() . ': ' . $e->getMessage();
+                $name = (new \ReflectionClass($extractor))->getShortName();
+                $merged->failures[] = $name . ': ' . $e->getMessage();
+                $merged->gaps[] = new CoverageGap(CoverageGapKind::ExtractionFailed, $file->path, $e->getMessage(), $name);
             }
         }
+
+        $merged->declaredClasses = array_map(static fn ($class): string => $class->fqcn, $file->getClasses());
 
         return $merged;
     }

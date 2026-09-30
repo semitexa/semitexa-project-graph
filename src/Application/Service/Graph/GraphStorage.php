@@ -11,6 +11,7 @@ use Semitexa\Orm\Application\Service\Mapping\MapperRegistry;
 use Semitexa\Orm\Metadata\ResourceModelMetadataRegistry;
 use Semitexa\Orm\Application\Service\Persistence\AggregateWriteEngine;
 use Semitexa\Orm\Application\Service\Transaction\TransactionManager;
+use Semitexa\ProjectGraph\Application\Db\SQLite\Repository\GraphCoverageGapRepository;
 use Semitexa\ProjectGraph\Application\Db\SQLite\Repository\GraphEdgeRepository;
 use Semitexa\ProjectGraph\Application\Db\SQLite\Repository\GraphFileIndexRepository;
 use Semitexa\ProjectGraph\Application\Db\SQLite\Repository\GraphMetaRepository;
@@ -24,6 +25,7 @@ final class GraphStorage
     public readonly GraphEdgeRepository $edges;
     public readonly GraphFileIndexRepository $fileIndex;
     public readonly GraphMetaRepository $meta;
+    public readonly GraphCoverageGapRepository $gaps;
 
     public function __construct(
         private readonly DatabaseAdapterInterface      $adapter,
@@ -38,6 +40,7 @@ final class GraphStorage
         $this->edges     = $this->createEdgeRepository();
         $this->fileIndex = $this->createFileIndexRepository();
         $this->meta      = $this->createMetaRepository();
+        $this->gaps      = new GraphCoverageGapRepository($this->adapter);
     }
 
     public function transaction(callable $callback): mixed
@@ -80,16 +83,23 @@ final class GraphStorage
         return $this->nodes->deleteUnreferencedPlaceholders();
     }
 
-    public function upsertNode(Node $node): void
+    /**
+     * @return ?string the file that already declares this node when a
+     *                 different file claims it too (the node is NOT stored
+     *                 again), null when it was stored
+     */
+    public function upsertNode(Node $node): ?string
     {
         $existing = $this->nodes->findById($node->getId());
         if ($existing !== null && $existing->getIsPlaceholder() && !$node->getIsPlaceholder()) {
             $this->nodes->upsert($node);
         } elseif ($existing !== null && $existing->getFile() !== $node->getFile() && $existing->getFile() !== '') {
-            return;
+            return $existing->getFile();
         } else {
             $this->nodes->upsert($node);
         }
+
+        return null;
     }
 
     public function upsertEdge(Edge $edge): void
@@ -122,6 +132,7 @@ final class GraphStorage
             $this->nodes->truncate();
             $this->fileIndex->truncateAll();
             $this->meta->truncate();
+            $this->gaps->truncate();
         });
     }
 

@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Service\Index;
 
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
+use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageGapKind;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractionResult;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractorPipeline;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphBuilder;
 use Semitexa\ProjectGraph\Application\Service\Parser\PhpParserAdapter;
 use Semitexa\ProjectGraph\Application\Service\Scanner\FileScanner;
 use Semitexa\ProjectGraph\Application\Service\Scanner\FileStatus;
+use Semitexa\ProjectGraph\Domain\Model\CoverageGap;
 
 final class IncrementalEngine
 {
@@ -74,7 +76,15 @@ final class IncrementalEngine
                         $errors[] = ['file' => $change->path, 'message' => implode('; ', $extracted->failures)];
                     }
                 } catch (\Throwable $e) {
+                    // The file stays in the index (so an unchanged broken file
+                    // is not re-parsed on every refresh) and what it used to
+                    // declare is removed: the graph shows what can be read now,
+                    // and the gap says why this file contributes nothing.
                     $errors[] = ['file' => $change->path, 'message' => $e->getMessage()];
+                    $broken = ExtractionResult::empty();
+                    $broken->gaps[] = new CoverageGap(CoverageGapKind::ParseError, $change->path, $e->getMessage());
+                    $batch[$change->path] = $broken;
+                    $indexUpdates[$change->path] = $change->hash;
                 }
             }
 

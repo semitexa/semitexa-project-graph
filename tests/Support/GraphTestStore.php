@@ -52,6 +52,12 @@ final class GraphTestStore
             )',
         );
         $db->execute('CREATE TABLE graph_meta (meta_key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+        $db->execute(
+            'CREATE TABLE graph_coverage_gaps (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, file TEXT NOT NULL, kind TEXT NOT NULL,
+                line INTEGER NOT NULL DEFAULT 0, subject TEXT NOT NULL DEFAULT \'\', detail TEXT NOT NULL
+            )',
+        );
 
         return new self($db, new GraphStorage(
             $orm->getAdapter(),
