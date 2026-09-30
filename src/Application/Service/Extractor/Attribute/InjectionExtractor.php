@@ -19,12 +19,20 @@ use Semitexa\ProjectGraph\Application\Service\Parser\ParsedFile;
 
 final class InjectionExtractor implements ExtractorInterface
 {
+    /**
+     * These attributes sit on PROPERTIES. ParsedFile::hasAttribute() reads
+     * class attributes only, and asking it here kept this extractor from ever
+     * running: the whole graph carried zero injects_* edges while 668 files
+     * declared an injection (measured 2026-09-30).
+     */
     public function supports(ParsedFile $file): bool
     {
-        return $file->hasAttribute(InjectAsReadonly::class)
-            || $file->hasAttribute(InjectAsMutable::class)
-            || $file->hasAttribute(InjectAsFactory::class)
-            || $file->hasAttribute(Config::class);
+        return $file->getClassesWithPropertyAttributes([
+            InjectAsReadonly::class,
+            InjectAsMutable::class,
+            InjectAsFactory::class,
+            Config::class,
+        ]) !== [];
     }
 
     public function extract(ParsedFile $file): ExtractionResult

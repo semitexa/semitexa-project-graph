@@ -44,8 +44,7 @@ final class GraphFixtureTest extends TestCase
 
         self::assertTrue($fixture->hasEdge(EdgeType::Handles, $handler, $payload));
         self::assertTrue($fixture->hasEdge(EdgeType::Produces, $handler, GraphFixture::classId('Orders\\OrderResource')));
-        // InjectsReadonly PlaceOrderHandler -> OrderRepository is not asserted
-        // yet: the injection extractor never runs (fixed in a following commit).
+        self::assertTrue($fixture->hasEdge(EdgeType::InjectsReadonly, $handler, GraphFixture::classId('Orders\\OrderRepository')));
         self::assertTrue($fixture->hasEdge(EdgeType::ServesRoute, $payload, NodeId::forRoute('POST', '/orders')));
         self::assertTrue($fixture->hasEdge(
             EdgeType::ListensTo,
