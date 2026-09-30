@@ -94,7 +94,8 @@ final class GraphEdgeRepository
      * existing row, then insert or update through the write engine) made the
      * build spend ~90% of its time here.
      */
-    public function upsert(Edge $edge): void
+    /** @return bool true when the edge was inserted, false when it existed and was refreshed */
+    public function upsert(Edge $edge): bool
     {
         $key = [
             'source' => $edge->getSourceId(),
@@ -110,13 +111,45 @@ final class GraphEdgeRepository
 
         if ($existingId !== false && $existingId !== null) {
             $this->adapter->execute('UPDATE graph_edges SET metadata = :metadata WHERE id = :id', ['metadata' => $metadata, 'id' => $existingId]);
-            return;
+            return false;
         }
 
         $this->adapter->execute(
             'INSERT INTO graph_edges (source_id, target_id, type, metadata) VALUES (:source, :target, :type, :metadata)',
             $key + ['metadata' => $metadata],
         );
+
+        return true;
+    }
+
+    /**
+     * Edges leaving any of the given nodes, without the ORM (runs once per
+     * re-read file).
+     *
+     * @param list<string> $sourceIds
+     * @return list<Edge>
+     */
+    public function findBySourceIds(array $sourceIds): array
+    {
+        if ($sourceIds === []) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($sourceIds), '?'));
+        $rows = $this->adapter->execute(
+            'SELECT source_id, target_id, type, metadata FROM graph_edges WHERE source_id IN (' . $placeholders . ')',
+            $sourceIds,
+        )->fetchAll();
+
+        return array_values(array_map(
+            static fn (array $row): Edge => new Edge(
+                sourceId: (string) $row['source_id'],
+                targetId: (string) $row['target_id'],
+                type:     EdgeType::from((string) $row['type']),
+                metadata: json_decode((string) $row['metadata'], true) ?: [],
+            ),
+            $rows,
+        ));
     }
 
     /**

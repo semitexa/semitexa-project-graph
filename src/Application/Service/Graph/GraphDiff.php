@@ -7,13 +7,21 @@ namespace Semitexa\ProjectGraph\Application\Service\Graph;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Domain\Model\Node;
 
+/**
+ * What one apply() actually changed.
+ *
+ * An edge is identified by (type, source, target): a re-read file whose code
+ * did not change adds and removes nothing, however many edges it re-emits.
+ * This used to count every edge of a re-read file as added and every removal
+ * as zero.
+ */
 final class GraphDiff
 {
     /** @var list<Node> */
     private array $addedNodes = [];
 
-    /** @var list<Node> */
-    private array $removedNodes = [];
+    /** @var list<string> */
+    private array $removedNodeIds = [];
 
     /** @var list<Edge> */
     private array $addedEdges = [];
@@ -21,12 +29,14 @@ final class GraphDiff
     /** @var list<Edge> */
     private array $removedEdges = [];
 
-    private int $removedNodeCount = 0;
-    private int $removedEdgeCount = 0;
-
     public function addNode(Node $node): void
     {
         $this->addedNodes[] = $node;
+    }
+
+    public function removeNode(string $nodeId): void
+    {
+        $this->removedNodeIds[] = $nodeId;
     }
 
     public function addEdge(Edge $edge): void
@@ -34,10 +44,9 @@ final class GraphDiff
         $this->addedEdges[] = $edge;
     }
 
-    public function recordRemoved(int $removedNodeCount, int $removedEdgeCount): void
+    public function removeEdge(Edge $edge): void
     {
-        $this->removedNodeCount += $removedNodeCount;
-        $this->removedEdgeCount += $removedEdgeCount;
+        $this->removedEdges[] = $edge;
     }
 
     public function addedNodeCount(): int
@@ -47,7 +56,7 @@ final class GraphDiff
 
     public function removedNodeCount(): int
     {
-        return $this->removedNodeCount;
+        return count($this->removedNodeIds);
     }
 
     public function addedEdgeCount(): int
@@ -57,7 +66,7 @@ final class GraphDiff
 
     public function removedEdgeCount(): int
     {
-        return $this->removedEdgeCount;
+        return count($this->removedEdges);
     }
 
     /** @return list<Node> */
@@ -66,9 +75,27 @@ final class GraphDiff
         return $this->addedNodes;
     }
 
+    /** @return list<string> */
+    public function removedNodeIds(): array
+    {
+        return $this->removedNodeIds;
+    }
+
     /** @return list<Edge> */
     public function addedEdges(): array
     {
         return $this->addedEdges;
+    }
+
+    /** @return list<Edge> */
+    public function removedEdges(): array
+    {
+        return $this->removedEdges;
+    }
+
+    /** The key an edge is identified by across builds. */
+    public static function edgeKey(Edge $edge): string
+    {
+        return $edge->getType()->value . "\0" . $edge->getSourceId() . "\0" . $edge->getTargetId();
     }
 }

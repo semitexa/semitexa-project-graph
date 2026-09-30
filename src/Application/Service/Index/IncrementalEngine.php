@@ -42,11 +42,13 @@ final class IncrementalEngine
         return $this->storage->transaction(function () use ($projectRoot): UpdateResult {
             $this->storage->truncate();
 
-            return $this->update($projectRoot);
+            // Every edge is "added" on a full build; keeping ~67k of them in
+            // the result would cost memory and say nothing.
+            return $this->update($projectRoot, keepEdgeLists: false);
         });
     }
 
-    public function update(string $projectRoot): UpdateResult
+    public function update(string $projectRoot, bool $keepEdgeLists = true): UpdateResult
     {
         $timer = microtime(true);
 
@@ -58,7 +60,7 @@ final class IncrementalEngine
             return UpdateResult::noChanges();
         }
 
-        $totals = ['nodesAdded' => 0, 'nodesRemoved' => 0, 'edgesAdded' => 0, 'edgesRemoved' => 0];
+        $totals = ['nodesAdded' => 0, 'nodesRemoved' => 0, 'edgesAdded' => 0, 'edgesRemoved' => 0, 'addedEdges' => [], 'removedEdges' => []];
         $errors = [];
         $batch = [];
         $indexUpdates = [];
@@ -90,13 +92,13 @@ final class IncrementalEngine
             }
 
             if (count($batch) >= self::BATCH_SIZE) {
-                $this->applyBatch($batch, $indexUpdates, $totals);
+                $this->applyBatch($batch, $indexUpdates, $totals, $keepEdgeLists);
                 $batch = [];
                 $indexUpdates = [];
             }
         }
 
-        $this->applyBatch($batch, $indexUpdates, $totals);
+        $this->applyBatch($batch, $indexUpdates, $totals, $keepEdgeLists);
 
         $this->storage->setMeta('last_update', (string)time());
         $this->storage->setMeta('total_nodes', (string)$this->storage->nodes->countAll());
@@ -111,6 +113,8 @@ final class IncrementalEngine
             edgesRemoved:   $totals['edgesRemoved'],
             duration:       (int)((microtime(true) - $timer) * 1000),
             errors:         $errors,
+            addedEdges:     $totals['addedEdges'],
+            removedEdges:   $totals['removedEdges'],
         );
     }
 
@@ -124,9 +128,9 @@ final class IncrementalEngine
      *
      * @param array<string, ExtractionResult> $batch
      * @param array<string, ?string> $indexUpdates path => content hash, or null for a deleted file
-     * @param array{nodesAdded: int, nodesRemoved: int, edgesAdded: int, edgesRemoved: int} $totals
+     * @param array{nodesAdded: int, nodesRemoved: int, edgesAdded: int, edgesRemoved: int, addedEdges: list<\Semitexa\ProjectGraph\Domain\Model\Edge>, removedEdges: list<\Semitexa\ProjectGraph\Domain\Model\Edge>} $totals
      */
-    private function applyBatch(array $batch, array $indexUpdates, array &$totals): void
+    private function applyBatch(array $batch, array $indexUpdates, array &$totals, bool $keepEdgeLists): void
     {
         if ($batch === []) {
             return;
@@ -148,6 +152,10 @@ final class IncrementalEngine
         $totals['nodesRemoved'] += $diff->removedNodeCount();
         $totals['edgesAdded'] += $diff->addedEdgeCount();
         $totals['edgesRemoved'] += $diff->removedEdgeCount();
+        if ($keepEdgeLists) {
+            $totals['addedEdges'] = [...$totals['addedEdges'], ...$diff->addedEdges()];
+            $totals['removedEdges'] = [...$totals['removedEdges'], ...$diff->removedEdges()];
+        }
     }
 }
 
@@ -163,6 +171,10 @@ final readonly class UpdateResult
         public int   $duration,
         /** @var list<array{file: string, message: string}> */
         public array $errors,
+        /** @var list<\Semitexa\ProjectGraph\Domain\Model\Edge> edges this update added (empty on a full build) */
+        public array $addedEdges = [],
+        /** @var list<\Semitexa\ProjectGraph\Domain\Model\Edge> edges this update removed */
+        public array $removedEdges = [],
     ) {}
 
     public function isNoChanges(): bool

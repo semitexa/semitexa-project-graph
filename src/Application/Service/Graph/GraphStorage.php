@@ -152,10 +152,11 @@ final class GraphStorage
         );
     }
 
-    public function upsertEdge(Edge $edge): void
+    /** @return bool true when the edge was not in the graph before */
+    public function upsertEdge(Edge $edge): bool
     {
         $this->nodes->insertPlaceholder($edge->getTargetId());
-        $this->edges->upsert($edge);
+        return $this->edges->upsert($edge);
     }
 
     public function nodeExists(string $nodeId): bool
