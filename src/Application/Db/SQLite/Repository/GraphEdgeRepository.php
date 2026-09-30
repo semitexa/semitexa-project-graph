@@ -99,26 +99,53 @@ final class GraphEdgeRepository
         }
     }
 
-    /** @return int count of deleted edges */
-    public function deleteByNodeIds(array $nodeIds): int
+    /**
+     * Delete the edges LEAVING the given nodes — the ones their own file's
+     * extraction emitted. Edges other files have into them are not touched:
+     * those files are not being re-read, so nothing would put the edges back.
+     *
+     * @param list<string> $sourceIds
+     * @return int count of deleted edges
+     */
+    public function deleteBySourceIds(array $sourceIds): int
     {
-        if (empty($nodeIds)) {
+        if ($sourceIds === []) {
             return 0;
         }
 
-        $placeholders = implode(',', array_fill(0, count($nodeIds), '?'));
-        $countResult = $this->adapter->execute(
-            'SELECT COUNT(*) FROM graph_edges WHERE source_id IN (' . $placeholders . ') OR target_id IN (' . $placeholders . ')',
-            [...$nodeIds, ...$nodeIds],
-        );
-        $count = (int) ($countResult->fetchColumn() ?? 0);
+        $placeholders = implode(',', array_fill(0, count($sourceIds), '?'));
+        $count = (int) ($this->adapter->execute(
+            'SELECT COUNT(*) FROM graph_edges WHERE source_id IN (' . $placeholders . ')',
+            $sourceIds,
+        )->fetchColumn() ?? 0);
 
         $this->adapter->execute(
-            'DELETE FROM graph_edges WHERE source_id IN (' . $placeholders . ') OR target_id IN (' . $placeholders . ')',
-            [...$nodeIds, ...$nodeIds],
+            'DELETE FROM graph_edges WHERE source_id IN (' . $placeholders . ')',
+            $sourceIds,
         );
 
         return $count;
+    }
+
+    /**
+     * Which of the given nodes some edge still points at.
+     *
+     * @param list<string> $nodeIds
+     * @return list<string>
+     */
+    public function referencedAmong(array $nodeIds): array
+    {
+        if ($nodeIds === []) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($nodeIds), '?'));
+        $rows = $this->adapter->execute(
+            'SELECT DISTINCT target_id FROM graph_edges WHERE target_id IN (' . $placeholders . ')',
+            $nodeIds,
+        )->fetchAll();
+
+        return array_values(array_map(static fn (array $row): string => (string) $row['target_id'], $rows));
     }
 
     /**

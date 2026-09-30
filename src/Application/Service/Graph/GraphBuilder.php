@@ -31,6 +31,8 @@ final class GraphBuilder
                     $diff->addEdge($edge);
                 }
             }
+
+            $this->storage->sweepPlaceholders();
         });
 
         return $diff;

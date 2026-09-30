@@ -45,14 +45,39 @@ final class GraphStorage
         return $this->txManager->run($callback);
     }
 
+    /**
+     * Forget what a file declared, before it is re-extracted (or because it
+     * was deleted).
+     *
+     * A file owns its nodes and the edges LEAVING them. Edges other files have
+     * into its nodes belong to those files, which this refresh does not
+     * re-read — so they stay. A node that disappears while such an edge still
+     * points at it becomes a placeholder: re-extraction turns it back into a
+     * real node if the file still declares it, and otherwise it remains as the
+     * visible target of a dangling reference.
+     *
+     * @return int count of nodes removed or demoted
+     */
     public function removeByFile(string $filePath): int
     {
         $nodeIds = $this->nodes->getNodeIdsByFile($filePath);
-        if (empty($nodeIds)) {
+        if ($nodeIds === []) {
             return 0;
         }
-        $this->edges->deleteByNodeIds($nodeIds);
-        return $this->nodes->deleteByFile($filePath);
+
+        $this->edges->deleteBySourceIds($nodeIds);
+
+        $stillReferenced = $this->edges->referencedAmong($nodeIds);
+        $this->nodes->demoteToPlaceholders($stillReferenced);
+        $this->nodes->deleteByIds(array_values(array_diff($nodeIds, $stillReferenced)));
+
+        return count($nodeIds);
+    }
+
+    /** Drop placeholders nothing points at any more. */
+    public function sweepPlaceholders(): int
+    {
+        return $this->nodes->deleteUnreferencedPlaceholders();
     }
 
     public function upsertNode(Node $node): void

@@ -157,19 +157,59 @@ final class GraphNodeRepository
         $this->writeEngine->insert($placeholder, GraphNodeResource::class, $this->mapperRegistry);
     }
 
-    /** @return int count of deleted nodes */
-    public function deleteByFile(string $filePath): int
+    /**
+     * @param list<string> $ids
+     * @return int count of deleted nodes
+     */
+    public function deleteByIds(array $ids): int
     {
-        $countResult = $this->adapter->execute(
-            'SELECT COUNT(*) as cnt FROM graph_nodes WHERE file = :file',
-            ['file' => $filePath],
-        );
-        $count = (int) ($countResult->fetchOne()['cnt'] ?? 0);
+        if ($ids === []) {
+            return 0;
+        }
 
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $count = (int) ($this->adapter->execute(
+            'SELECT COUNT(*) as cnt FROM graph_nodes WHERE id IN (' . $placeholders . ')',
+            $ids,
+        )->fetchOne()['cnt'] ?? 0);
+
+        $this->adapter->execute('DELETE FROM graph_nodes WHERE id IN (' . $placeholders . ')', $ids);
+
+        return $count;
+    }
+
+    /**
+     * Turn nodes whose file no longer declares them, but which edges still
+     * point at, into placeholders: the dangling reference stays visible
+     * instead of vanishing with its target. The type is kept — a dropped
+     * route stays a route.
+     *
+     * @param list<string> $ids
+     */
+    public function demoteToPlaceholders(array $ids): void
+    {
+        if ($ids === []) {
+            return;
+        }
+
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
         $this->adapter->execute(
-            'DELETE FROM graph_nodes WHERE file = :file',
-            ['file' => $filePath],
+            "UPDATE graph_nodes SET is_placeholder = 1, file = '', line = 0, end_line = 0, module = '', metadata = '{}'"
+            . ' WHERE id IN (' . $placeholders . ')',
+            $ids,
         );
+    }
+
+    /** @return int count of placeholders deleted because no edge points at them any more */
+    public function deleteUnreferencedPlaceholders(): int
+    {
+        $where = 'is_placeholder = 1 AND NOT EXISTS (SELECT 1 FROM graph_edges e WHERE e.target_id = graph_nodes.id)';
+        $count = (int) ($this->adapter->execute('SELECT COUNT(*) as cnt FROM graph_nodes WHERE ' . $where)
+            ->fetchOne()['cnt'] ?? 0);
+
+        if ($count > 0) {
+            $this->adapter->execute('DELETE FROM graph_nodes WHERE ' . $where);
+        }
 
         return $count;
     }
