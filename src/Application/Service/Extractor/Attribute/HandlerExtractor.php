@@ -64,15 +64,22 @@ final class HandlerExtractor implements ExtractorInterface
 
             $resourceClass = $asHandler->resource ?? null;
             if ($resourceClass !== null) {
+                // The resource class is usually declared in another file. This
+                // file only says what ROLE it plays, so the node is a
+                // placeholder: it must not claim the class for this file — that
+                // made re-indexing the handler remove the resource, and kept the
+                // resource's own declaration out of the graph.
+                $declaredHere = in_array($resourceClass, array_map(static fn ($c): string => $c->fqcn, $file->getClasses()), true);
                 $resourceNode = new Node(
-                    id:       NodeId::forClass($resourceClass),
-                    type:     NodeType::Resource,
-                    fqcn:     $resourceClass,
-                    file:     $file->path,
-                    line:     $classInfo->startLine,
-                    endLine:  $classInfo->endLine,
-                    module:   $file->module,
-                    metadata: [],
+                    id:            NodeId::forClass($resourceClass),
+                    type:          NodeType::Resource,
+                    fqcn:          $resourceClass,
+                    file:          $declaredHere ? $file->path : '',
+                    line:          $declaredHere ? $classInfo->startLine : 0,
+                    endLine:       $declaredHere ? $classInfo->endLine : 0,
+                    module:        $declaredHere ? $file->module : '',
+                    metadata:      [],
+                    isPlaceholder: !$declaredHere,
                 );
                 $result->addNode($resourceNode);
 

@@ -84,22 +84,72 @@ final class GraphStorage
     }
 
     /**
+     * Store a node, reconciling it with what the graph already holds.
+     *
+     * A placeholder is a MENTION (another file's edge points here, or an
+     * extractor records the role a class plays elsewhere); a real node is a
+     * DECLARATION. They merge in either order, and the more specific type wins
+     * — a class a handler names as its resource stays a resource whether the
+     * handler or the class's own file is indexed first.
+     *
      * @return ?string the file that already declares this node when a
-     *                 different file claims it too (the node is NOT stored
-     *                 again), null when it was stored
+     *                 different file declares it too (the node is NOT stored
+     *                 again), null when it was stored or merged
      */
     public function upsertNode(Node $node): ?string
     {
         $existing = $this->nodes->findById($node->getId());
-        if ($existing !== null && $existing->getIsPlaceholder() && !$node->getIsPlaceholder()) {
+
+        if ($existing === null) {
             $this->nodes->upsert($node);
-        } elseif ($existing !== null && $existing->getFile() !== $node->getFile() && $existing->getFile() !== '') {
-            return $existing->getFile();
-        } else {
-            $this->nodes->upsert($node);
+            return null;
         }
 
+        if ($node->getIsPlaceholder()) {
+            $type = self::moreSpecific($existing->getType(), $node->getType());
+            if ($type !== $existing->getType()) {
+                $this->nodes->upsert(self::withType($existing, $type));
+            }
+            return null;
+        }
+
+        if ($existing->getIsPlaceholder()) {
+            $this->nodes->upsert(self::withType($node, self::moreSpecific($node->getType(), $existing->getType())));
+            return null;
+        }
+
+        if ($existing->getFile() !== $node->getFile() && $existing->getFile() !== '') {
+            return $existing->getFile();
+        }
+
+        $this->nodes->upsert($node);
         return null;
+    }
+
+    private static function moreSpecific(NodeType $held, NodeType $incoming): NodeType
+    {
+        $generic = [NodeType::Class_, NodeType::Interface_, NodeType::Trait_, NodeType::Enum_];
+
+        return in_array($held, $generic, true) && !in_array($incoming, $generic, true) ? $incoming : $held;
+    }
+
+    private static function withType(Node $node, NodeType $type): Node
+    {
+        if ($node->getType() === $type) {
+            return $node;
+        }
+
+        return new Node(
+            id:            $node->getId(),
+            type:          $type,
+            fqcn:          $node->getFqcn(),
+            file:          $node->getFile(),
+            line:          $node->getLine(),
+            endLine:       $node->getEndLine(),
+            module:        $node->getModule(),
+            metadata:      $node->getMetadata(),
+            isPlaceholder: $node->getIsPlaceholder(),
+        );
     }
 
     public function upsertEdge(Edge $edge): void
