@@ -67,6 +67,25 @@ final class GraphFixtureTest extends TestCase
         self::assertTrue($fixture->hasEdge(EdgeType::Instantiates, GraphFixture::classId('Cycle\\Pong'), GraphFixture::classId('Cycle\\Ping')));
     }
 
+    /**
+     * One assertion per edge type the AST extractors emit. The php-parser 5
+     * upgrade silently turned two of them off for the whole graph — accepts
+     * (Param::getType() became the node kind) and imports (UseItem likewise)
+     * — and nothing noticed, because no test asked for either.
+     */
+    #[Test]
+    public function every_ast_edge_type_is_produced(): void
+    {
+        $fixture = GraphFixture::built();
+        $handler = GraphFixture::classId('Orders\\PlaceOrderHandler');
+
+        self::assertTrue($fixture->hasEdge(EdgeType::Accepts, $handler, GraphFixture::classId('Orders\\PlaceOrderPayload')), 'accepts');
+        self::assertTrue($fixture->hasEdge(EdgeType::Returns, $handler, GraphFixture::classId('Orders\\OrderResource')), 'returns');
+        self::assertTrue($fixture->hasEdge(EdgeType::Instantiates, $handler, GraphFixture::classId('Orders\\OrderPlaced')), 'instantiates');
+        self::assertTrue($fixture->hasEdge(EdgeType::Implements, GraphFixture::classId('Orders\\SqlOrderRepository'), GraphFixture::classId('Orders\\OrderRepository')), 'implements');
+        self::assertTrue($fixture->hasEdge(EdgeType::Imports, GraphFixture::classId('Mail\\SendReceiptListener'), GraphFixture::classId('Orders\\OrderPlaced')), 'imports');
+    }
+
     #[Test]
     public function nothing_points_at_the_planted_unused_class(): void
     {

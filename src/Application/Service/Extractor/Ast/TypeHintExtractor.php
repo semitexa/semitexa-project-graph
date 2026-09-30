@@ -26,6 +26,7 @@ final class TypeHintExtractor implements ExtractorInterface
 
         $visitor = new class($file, $result) extends NodeVisitorAbstract {
             private string $currentClass = '';
+            private ?string $parentClass = null;
 
             public function __construct(
                 private readonly ParsedFile $file,
@@ -36,12 +37,12 @@ final class TypeHintExtractor implements ExtractorInterface
             {
                 if ($node instanceof AstNode\Stmt\ClassLike && $node->namespacedName !== null) {
                     $this->currentClass = $node->namespacedName->toString();
+                    $this->parentClass = $node instanceof AstNode\Stmt\Class_ ? $node->extends?->toString() : null;
                 }
 
                 if ($node instanceof AstNode\Stmt\ClassMethod && $this->currentClass !== '') {
                     foreach ($node->getParams() as $param) {
-                        if ($param->getType() instanceof AstNode\Name) {
-                            $typeFqcn = $param->getType()->toString();
+                        foreach (ClassNames::inType($param->type, $this->parentClass) as $typeFqcn) {
                             $this->result->addEdge(new Edge(
                                 sourceId: NodeId::forClass($this->currentClass),
                                 targetId: NodeId::forClass($typeFqcn),
@@ -51,8 +52,7 @@ final class TypeHintExtractor implements ExtractorInterface
                         }
                     }
 
-                    if ($node->returnType instanceof AstNode\Name) {
-                        $returnFqcn = $node->returnType->toString();
+                    foreach (ClassNames::inType($node->returnType, $this->parentClass) as $returnFqcn) {
                         $this->result->addEdge(new Edge(
                             sourceId: NodeId::forClass($this->currentClass),
                             targetId: NodeId::forClass($returnFqcn),
