@@ -9,6 +9,7 @@ use Semitexa\ProjectGraph\Application\Service\Analysis\BlastRadiusScorer;
 use Semitexa\ProjectGraph\Application\Service\Analysis\ImpactedNode;
 use Semitexa\ProjectGraph\Application\Service\Analysis\ImpactResult;
 use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
+use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Domain\Model\Node;
@@ -91,5 +92,50 @@ final class BlastRadiusScorerTest extends TestCase
 
         $this->assertGreaterThanOrEqual(25, $score->score);
         $this->assertContains('Semitexa\\Orm\\Contracts\\EntityInterface', $score->hotspots);
+    }
+
+    /**
+     * Stored node ids carry a type prefix (class:Semitexa\Orm\...). The module
+     * key used to be read off the raw id, so every Semitexa class keyed as
+     * "class:Semitexa" and no path between two Semitexa packages ever counted
+     * as cross-module. The tests above passed because they used bare FQCNs.
+     */
+    public function testCrossPackagePathsBetweenRealNodeIdsWeighMore(): void
+    {
+        $scorer = new BlastRadiusScorer();
+
+        $crossPackage = $scorer->score($this->singlePathImpact(
+            NodeId::forClass('Semitexa\\Orm\\Query\\Builder'),
+            NodeId::forClass('Semitexa\\Graphql\\Resolver\\ListResolver'),
+        ));
+        $samePackage = $scorer->score($this->singlePathImpact(
+            NodeId::forClass('Semitexa\\Orm\\Query\\Builder'),
+            NodeId::forClass('Semitexa\\Orm\\Query\\Paginator'),
+        ));
+
+        $this->assertGreaterThan($samePackage->score, $crossPackage->score);
+    }
+
+    private function singlePathImpact(string $changedId, string $dependentId): ImpactResult
+    {
+        $node = new Node(
+            id: $dependentId,
+            type: NodeType::Class_,
+            fqcn: NodeId::extractFqcn($dependentId),
+            file: 'x.php',
+            line: 1,
+            endLine: 10,
+            module: 'SomeModule',
+            metadata: [],
+        );
+        $edges = [];
+        for ($i = 0; $i < 4; $i++) {
+            $edges[] = new Edge(sourceId: $dependentId, targetId: $changedId, type: EdgeType::Accepts);
+        }
+
+        return new ImpactResult(
+            changed: [$changedId],
+            impacted: [$dependentId => new ImpactedNode(node: $node, distance: 1, paths: [$edges])],
+        );
     }
 }

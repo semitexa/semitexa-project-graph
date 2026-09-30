@@ -166,7 +166,6 @@ final class GraphQueryService implements QueryInterface
 
     public function getCrossModuleEdges(?string $moduleA = null, ?string $moduleB = null): array
     {
-        $allEdges = $this->storage->edges->findByType(EdgeType::InjectsReadonly);
         $edgeTypes = [
             EdgeType::InjectsReadonly,
             EdgeType::InjectsMutable,
@@ -182,7 +181,7 @@ final class GraphQueryService implements QueryInterface
 
         $crossModule = [];
         foreach ($edgeTypes as $edgeType) {
-            $edges = $this->storage->edges->findByType($edgeType, 100_000);
+            $edges = $this->storage->edges->findByType($edgeType);
             foreach ($edges as $edge) {
                 $source = $this->storage->nodes->findById($edge->getSourceId());
                 $target = $this->storage->nodes->findById($edge->getTargetId());
@@ -372,7 +371,7 @@ final class GraphQueryService implements QueryInterface
     public function countEdges(string $type, ?string $module = null): int
     {
         $edgeType = EdgeType::tryFrom($type) ?? EdgeType::Calls;
-        $edges = $this->storage->edges->findByType($edgeType, 100_000);
+        $edges = $this->storage->edges->findByType($edgeType);
 
         if ($module === null) {
             return count($edges);
@@ -393,7 +392,7 @@ final class GraphQueryService implements QueryInterface
 
     public function countSatisfiedContracts(?string $module = null): int
     {
-        $edges = $this->storage->edges->findByType(EdgeType::SatisfiesContract, 100_000);
+        $edges = $this->storage->edges->findByType(EdgeType::SatisfiesContract);
         $contracts = [];
 
         foreach ($edges as $edge) {

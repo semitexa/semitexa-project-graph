@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Service\Analysis;
 
 use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
+use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
 
 final class BlastRadiusScorer
 {
@@ -128,11 +129,13 @@ final class BlastRadiusScorer
 
     /**
      * Derive a comparable module key from a node id's namespace, e.g.
-     * `Semitexa\Orm\Contracts\X` => `Orm`, `App\Services\Y` => `App`.
+     * `class:Semitexa\Orm\Contracts\X` => `Orm`, `App\Services\Y` => `App`.
      */
     private function moduleKeyForId(string $id): string
     {
-        $parts = explode('\\', $id);
+        // Node ids carry a type prefix (class:Semitexa\Orm\X); without
+        // stripping it every Semitexa class keyed as "class:Semitexa".
+        $parts = explode('\\', NodeId::extractFqcn($id));
 
         if ($parts[0] === 'Semitexa' && isset($parts[1]) && $parts[1] !== '') {
             return $parts[1];

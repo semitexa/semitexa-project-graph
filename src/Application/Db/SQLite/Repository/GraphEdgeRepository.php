@@ -68,13 +68,23 @@ final class GraphEdgeRepository
         return array_merge($outgoing, $incoming);
     }
 
-    /** @return list<Edge> */
-    public function findByType(EdgeType $type, int $limit = 1000): array
+    /**
+     * Every edge of a type. No default limit: a cap here used to truncate
+     * whole-graph answers with nothing telling the caller they were partial.
+     * A caller that wants a page asks for one.
+     *
+     * @return list<Edge>
+     */
+    public function findByType(EdgeType $type, ?int $limit = null): array
     {
-        return $this->newQuery()
-            ->where(ColumnRef::for(GraphEdgeResource::class, 'type'), Operator::Equals, $type->value)
-            ->limit($limit)
-            ->fetchAllAs(Edge::class, $this->mapperRegistry);
+        $query = $this->newQuery()
+            ->where(ColumnRef::for(GraphEdgeResource::class, 'type'), Operator::Equals, $type->value);
+
+        if ($limit !== null) {
+            $query = $query->limit($limit);
+        }
+
+        return $query->fetchAllAs(Edge::class, $this->mapperRegistry);
     }
 
     public function upsert(Edge $edge): void
