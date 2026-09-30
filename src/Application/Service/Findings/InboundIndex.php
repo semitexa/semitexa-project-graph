@@ -9,8 +9,8 @@ use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
 
 /**
  * Every edge in the graph, by target and by source, read in one paged pass —
- * a whole-graph question asked node by node is ~8k queries (CycleDetector and
- * GraphQueryService::buildView still work that way).
+ * a whole-graph question asked node by node is ~8k queries (the old
+ * CycleDetector worked that way; GraphQueryService::buildView still does).
  *
  * Each edge is packed into one integer (node ids interned, the type as an
  * index, the source's file reduced to "is it test code"), and `via` is kept
