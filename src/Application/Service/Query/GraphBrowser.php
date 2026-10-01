@@ -41,6 +41,12 @@ final class GraphBrowser
     /** Inbound edges walked as if outgoing: route ← payload ← handler. */
     private const ENTRY_REVERSED = ['serves_route', 'handles'];
 
+    /** The node kinds a tree is rooted at. */
+    public const ENTRY_TYPES = ['route', 'command', 'handler'];
+
+    private const PATH_MAX_DEPTH = 8;
+    private const PATH_MAX_VISITED = 5000;
+
     public const MAX_DEPTH = 4;
     public const MAX_NODES = 2500;
     private const SEARCH_LIMIT = 50;
@@ -199,6 +205,68 @@ final class GraphBrowser
             'edges' => $edges,
             'truncated' => $truncated,
         ];
+    }
+
+    /**
+     * The shortest walk from an entry point down to $id, entry first — what a
+     * tree has to expand to reveal a node found by search. Walks parents
+     * breadth-first: the reverse of {@see subgraph()}'s direction.
+     *
+     * @return list<string>|null null when no entry point reaches the node within the bounds
+     */
+    public function pathToEntry(string $id): ?array
+    {
+        $node = $this->storage->nodes->findById($id);
+        if ($node === null) {
+            return null;
+        }
+        if (in_array($node->getType()->value, self::ENTRY_TYPES, true)) {
+            return [$id];
+        }
+
+        /** @var array<string, string> $childOf parent id => the child it was reached from */
+        $childOf = [$id => ''];
+        $frontier = [$id];
+
+        for ($level = 0; $level < self::PATH_MAX_DEPTH && $frontier !== []; $level++) {
+            $parents = [];
+            foreach ($this->storage->edges->findByTargetIds($frontier) as $edge) {
+                $kind = $edge->getType()->value;
+                if (!in_array($kind, self::NOISE_EDGES, true) && !in_array($kind, self::ENTRY_REVERSED, true)) {
+                    $parents[] = [$edge->getSourceId(), $edge->getTargetId()];
+                }
+            }
+            foreach ($this->storage->edges->findBySourceIds($frontier) as $edge) {
+                if (in_array($edge->getType()->value, self::ENTRY_REVERSED, true)) {
+                    $parents[] = [$edge->getTargetId(), $edge->getSourceId()];
+                }
+            }
+
+            $fresh = [];
+            foreach ($parents as [$parent, $child]) {
+                if (!isset($childOf[$parent])) {
+                    $childOf[$parent] = $child;
+                    $fresh[] = $parent;
+                }
+            }
+            if ($fresh === [] || count($childOf) > self::PATH_MAX_VISITED) {
+                return null;
+            }
+
+            foreach ($this->storage->nodes->findByIds($fresh) as $parentId => $parentNode) {
+                if (!$parentNode->getIsPlaceholder() && in_array($parentNode->getType()->value, self::ENTRY_TYPES, true)) {
+                    $path = [$parentId];
+                    for ($at = $childOf[$parentId]; $at !== ''; $at = $childOf[$at]) {
+                        $path[] = $at;
+                    }
+
+                    return $path;
+                }
+            }
+            $frontier = $fresh;
+        }
+
+        return null;
     }
 
     /**

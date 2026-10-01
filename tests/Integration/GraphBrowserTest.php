@@ -93,6 +93,21 @@ final class GraphBrowserTest extends TestCase
     }
 
     #[Test]
+    public function the_path_to_a_dependency_starts_at_an_entry_point(): void
+    {
+        $fixture = GraphFixture::built();
+        $browser = new GraphBrowser($fixture->storage, $fixture->root);
+
+        $handler = GraphFixture::classId('Orders\\PlaceOrderHandler');
+        self::assertSame(
+            [$handler, GraphFixture::classId('Orders\\OrderRepository')],
+            $browser->pathToEntry(GraphFixture::classId('Orders\\OrderRepository')),
+        );
+        self::assertSame([$handler], $browser->pathToEntry($handler));
+        self::assertNull($browser->pathToEntry('class:Nope'));
+    }
+
+    #[Test]
     public function a_hostile_id_is_looked_up_never_autoloaded(): void
     {
         $fixture = GraphFixture::built();
@@ -107,6 +122,7 @@ final class GraphBrowserTest extends TestCase
             self::assertNull($browser->describe('class:Hostile\\Autoload\\Me'));
             self::assertNull($browser->subgraph('Hostile\\Autoload\\Me', 2));
             self::assertSame([], $browser->search('Hostile\\Autoload\\Me'));
+            self::assertNull($browser->pathToEntry('class:Hostile\\Autoload\\Me'));
         } finally {
             spl_autoload_unregister($spy);
         }
