@@ -175,7 +175,14 @@ final class GraphExport
         $enc = static fn (mixed $v): string => self::json($v);
 
         $title = htmlspecialchars($title, ENT_QUOTES);
-        fwrite($out, self::HEAD_START . $title . "</title>\n<style>\n" . self::PAGE_CSS . $css . "\n</style>\n</head>\n<body>\n<div id=\"graph\"></div>\n"
+        // The file carries its own policy: it runs its two inline scripts and
+        // its stylesheet, and loads nothing else from anywhere. A graph opened
+        // from a PR artifact has no business reaching the network.
+        $nonce = base64_encode(random_bytes(16));
+        $policy = "default-src 'none'; script-src 'nonce-{$nonce}'; style-src 'nonce-{$nonce}'; img-src data:";
+        fwrite($out, self::HEAD_START . $title . "</title>\n"
+            . '<meta http-equiv="Content-Security-Policy" content="' . $policy . "\">\n"
+            . '<style nonce="' . $nonce . "\">\n" . self::PAGE_CSS . $css . "\n</style>\n</head>\n<body>\n<div id=\"graph\"></div>\n"
             . '<script type="application/json" id="graph-data">');
         fwrite($out, '{"meta":' . $enc($data['meta']) . ',"summary":' . $enc($data['summary']) . ',"nodes":');
         self::writeList($out, $data['nodes']);
@@ -183,7 +190,8 @@ final class GraphExport
         self::writeList($out, $data['edges']);
         fwrite($out, ',"gaps":' . ($data['gaps'] === [] ? '{}' : $enc($data['gaps'])) . ',"findings":' . $enc($data['findings']) . '}');
         // A script body must not contain "</script"; the viewer has none, and this keeps it so.
-        fwrite($out, "</script>\n<script>\n" . str_ireplace('</script', '<\/script', $js) . "\n</script>\n<script>\n" . self::BOOT . "</script>\n</body>\n</html>\n");
+        fwrite($out, "</script>\n" . '<script nonce="' . $nonce . "\">\n" . str_ireplace('</script', '<\/script', $js) . "\n</script>\n"
+            . '<script nonce="' . $nonce . "\">\n" . self::BOOT . "</script>\n</body>\n</html>\n");
         fclose($out);
 
         return (int) filesize($path);

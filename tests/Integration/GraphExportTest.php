@@ -39,6 +39,9 @@ final class GraphExportTest extends TestCase
         self::assertStringContainsString('window.SemitexaGraphView', $html);
         self::assertStringContainsString('.gv{', $html);
         self::assertStringNotContainsString('src="http', $html, 'nothing is fetched');
+        self::assertMatchesRegularExpression('#<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'nonce-([^\']+)\'#', $html);
+        preg_match("#'nonce-([^']+)'#", $html, $nonce);
+        self::assertSame(2, substr_count($html, '<script nonce="' . $nonce[1] . '">'), 'both executable scripts carry the policy nonce');
         self::assertStringContainsString('<title>Fixture &lt;/script&gt;&lt;b&gt;</title>', $html);
 
         preg_match('#<script type="application/json" id="graph-data">(.*?)</script>#s', $html, $m);
