@@ -59,11 +59,34 @@ final class GraphExportTest extends TestCase
             ->data(GraphFixture::NS . 'Orders\\PlaceOrderHandler', 1);
 
         $ids = array_column($data['nodes'], 'id');
-        self::assertContains(GraphFixture::classId('Orders\\OrderRepository'), $ids);
-        self::assertNotContains(GraphFixture::classId('Cycle\\Ping'), $ids);
+        sort($ids);
+        self::assertSame([
+            GraphFixture::classId('Orders\\OrderPlaced'),
+            GraphFixture::classId('Orders\\OrderRepository'),
+            GraphFixture::classId('Orders\\OrderResource'),
+            GraphFixture::classId('Orders\\PlaceOrderHandler'),
+            GraphFixture::classId('Orders\\PlaceOrderPayload'),
+        ], $ids, 'exactly the depth-1 walk of PlaceOrderHandler');
+        self::assertNotSame([], $data['edges']);
         foreach ($data['edges'] as $edge) {
             self::assertContains($edge['s'], $ids);
             self::assertContains($edge['t'], $ids);
+        }
+    }
+
+    #[Test]
+    public function every_exported_loop_member_is_a_node_of_the_file(): void
+    {
+        $fixture = GraphFixture::built();
+        $data = (new GraphExport($fixture->storage, $fixture->root))->data(GraphFixture::NS . 'Cycle\\Ping', 1);
+
+        $ids = array_column($data['nodes'], 'id');
+        self::assertNotSame([], $data['findings']['cycles'], 'precondition: the Ping/Pong loop is in the slice');
+        foreach ($data['findings']['cycles'] as $cycle) {
+            self::assertNotSame([], $cycle['members']);
+            foreach ($cycle['members'] as $member) {
+                self::assertContains($member['id'], $ids);
+            }
         }
     }
 

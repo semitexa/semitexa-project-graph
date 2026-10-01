@@ -165,7 +165,7 @@ final class ReviewGraphFindingsCommand extends BaseCommand
             $lines[] = '| Confidence | Class | Where | Why |';
             $lines[] = '|---|---|---|---|';
             foreach ($unused as $f) {
-                $lines[] = sprintf('| %s | `%s` | %s:%d | %s |', $f['confidence'], self::shortName($f['id']), str_replace($root, '', $f['file']), $f['line'], $f['evidence']);
+                $lines[] = sprintf('| %s | `%s` | %s:%d | %s |', $f['confidence'], self::shortName($f['node']), str_replace($root, '', $f['file']), $f['line'], $f['evidence']);
             }
             $lines[] = '';
         }

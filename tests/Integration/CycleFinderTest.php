@@ -49,7 +49,13 @@ final class CycleFinderTest extends TestCase
         $fixture->write('Imports/Right.php', "<?php\nnamespace {$ns};\nuse {$ns}\\Left;\nfinal class Right\n{\n}\n");
         $fixture->refresh();
 
-        foreach ((new CycleFinder())->find($fixture->storage) as $cycle) {
+        $cycles = (new CycleFinder())->find($fixture->storage);
+        self::assertSame(
+            [[GraphFixture::classId('Cycle\\Ping'), GraphFixture::classId('Cycle\\Pong')]],
+            array_column($cycles, 'members'),
+            'precondition: the planted Ping/Pong loop is still found',
+        );
+        foreach ($cycles as $cycle) {
             self::assertNotContains("class:{$ns}\\Left", $cycle['members']);
         }
         self::assertTrue($fixture->hasEdge(\Semitexa\ProjectGraph\Application\Service\Graph\EdgeType::Imports, "class:{$ns}\\Left", "class:{$ns}\\Right"), 'precondition: the imports exist');

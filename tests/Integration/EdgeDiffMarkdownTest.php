@@ -39,6 +39,8 @@ final class EdgeDiffMarkdownTest extends TestCase
 
         if (getenv('SEMITEXA_UPDATE_GOLDEN') === '1') {
             file_put_contents(self::GOLDEN, $markdown);
+            // A rewrite is never a pass: the comparison below would hold for any output.
+            self::fail('Golden file rewritten; review the diff and re-run without SEMITEXA_UPDATE_GOLDEN.');
         }
         self::assertStringEqualsFile(self::GOLDEN, $markdown);
     }

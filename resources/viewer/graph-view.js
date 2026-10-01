@@ -289,7 +289,9 @@ function mount(root, source, options = {}) {
       S.children.set(id, source.subgraph(id, 1).then(g => {
         const byId = new Map(g.nodes.map(n => [n.id, n]));
         for (const n of g.nodes) S.nodes.set(n.id, n);
-        return g.edges.filter(e => e.s === id && byId.has(e.t))
+        // A ghost (runtime-only references) is drawn in the DAG, not listed as
+        // a child: it is not a node the graph can describe or expand.
+        return g.edges.filter(e => e.s === id && byId.has(e.t) && !byId.get(e.t).ghost)
           .map(e => ({node: byId.get(e.t), kind: e.k}))
           .sort((a, b) => kindRank(a.kind) - kindRank(b.kind) || a.node.name.localeCompare(b.node.name));
       }).catch(err => { S.children.delete(id); throw err; }));
@@ -490,7 +492,7 @@ function mount(root, source, options = {}) {
   const api = {
     S, source, root, select, reveal, showTab,
     parts: {bar, ctl, wrap, mainEmpty, mainTitle, findScroll, findBadge, detailBody},
-    helpers: {el, dot, moduleClass, fail, kindRank},
+    helpers: {el, dot, moduleClass, fail, kindRank, ENTRY_REVERSED},
     focusSearch: () => input.focus(),
   };
   (window.SemitexaGraphView.extensions || []).forEach(ext => ext(api));
@@ -522,7 +524,7 @@ window.SemitexaGraphView = Object.assign(window.SemitexaGraphView || {}, {mount,
 'use strict';
 const ext = api => {
   const {S, source, parts, helpers} = api;
-  const {el, moduleClass} = helpers;
+  const {el, moduleClass, ENTRY_REVERSED} = helpers;
   const NODE_H = 22, ROW_GAP = 8, COL_GAP = 90, PAD_X = 12;
   const D = {
     canvas: null, ctx: null, w: 0, h: 0, dpr: 1, view: {x: 0, y: 0, k: 1},
@@ -592,7 +594,14 @@ const ext = api => {
     for (const n of g.nodes) nodes.set(n.id, {...n, fanIn: n.fanIn || 0});
     const edges = g.edges.map(e => ({...e}));
     // Direct dependents, one column to the left: who reaches for the focus.
-    const up = (d.in || []).filter(e => !nodes.has(e.node.id) || e.node.id !== g.root);
+    // Direct dependents in the WALK's direction, which reverses two stored
+    // edges: a route is upstream of the payload that serves it, a payload of
+    // the handler that handles it. Taking every stored inbound edge instead
+    // drew route <-> payload as a loop (amber) that does not exist.
+    const up = [
+      ...(d.in || []).filter(e => !ENTRY_REVERSED.includes(e.kind)),
+      ...(d.out || []).filter(e => ENTRY_REVERSED.includes(e.kind)),
+    ].filter(e => e.node.id !== g.root);
     for (const e of up) {
       if (!nodes.has(e.node.id)) nodes.set(e.node.id, {...e.node, fanIn: 0, upstream: true});
       edges.push({s: e.node.id, t: g.root, k: e.kind, c: e.class});

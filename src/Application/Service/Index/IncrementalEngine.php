@@ -54,6 +54,8 @@ final class IncrementalEngine
         $timer = microtime(true);
 
         $indexedFiles = $this->storage->fileIndex->getAll();
+        // Findings judge "is this test code" relative to it (see TestCode).
+        $this->storage->setMeta('project_root', rtrim($projectRoot, '/'));
         $changes = $this->scanner->scan($projectRoot, $indexedFiles);
         $this->storage->setMeta('coverage_exclusions', (string) json_encode($this->scanner->lastExclusions()));
 

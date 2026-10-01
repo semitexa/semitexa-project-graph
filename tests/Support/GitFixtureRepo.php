@@ -66,7 +66,7 @@ final class GitFixtureRepo
 
     public function git(string ...$args): string
     {
-        $process = proc_open(['git', '-C', $this->root, ...$args], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        $process = proc_open(['git', '-C', $this->root, ...array_values($args)], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null, self::isolatedEnv());
         $out = (string) stream_get_contents($pipes[1]);
         $err = (string) stream_get_contents($pipes[2]);
         fclose($pipes[1]);
@@ -76,6 +76,23 @@ final class GitFixtureRepo
         }
 
         return $out;
+    }
+
+    /**
+     * The inherited environment minus the variables that would point git at
+     * another repository: run from a git hook or a worktree, GIT_DIR and its
+     * kin win over `-C` and the fixture commits land in the caller's repo.
+     *
+     * @return array<string, string>
+     */
+    private static function isolatedEnv(): array
+    {
+        $env = getenv();
+        foreach (['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_COMMON_DIR', 'GIT_CEILING_DIRECTORIES', 'GIT_NAMESPACE'] as $name) {
+            unset($env[$name]);
+        }
+
+        return $env;
     }
 
     public function __destruct()

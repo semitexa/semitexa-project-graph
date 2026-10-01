@@ -52,6 +52,7 @@ final class InboundIndex
     public static function of(GraphStorage $storage): self
     {
         $index = new self();
+        $tests = TestCode::of($storage);
         $typeOf = array_flip(array_map(static fn (EdgeType $t): string => $t->value, $index->types));
 
         foreach ($storage->edges->withSources() as $row) {
@@ -62,7 +63,7 @@ final class InboundIndex
             $source = $index->intern($row['source_id']);
             $target = $index->intern($row['target_id']);
             $flags = ($row['source_declared'] ? self::DECLARED : 0)
-                | (str_contains($row['source_file'], '/tests/') ? self::IN_TESTS : 0);
+                | ($tests->contains($row['source_file']) ? self::IN_TESTS : 0);
 
             $index->inbound[$target][] = ($source << 8) | ($type << 2) | $flags;
             $index->outbound[$source][] = ($target << 8) | ($type << 2);

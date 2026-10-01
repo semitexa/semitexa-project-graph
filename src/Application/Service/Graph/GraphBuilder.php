@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Service\Graph;
 
 use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageGapKind;
+use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractionResult;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
 use Semitexa\ProjectGraph\Domain\Model\CoverageGap;
 
@@ -14,6 +15,7 @@ final class GraphBuilder
         private readonly GraphStorage $storage,
     ) {}
 
+    /** @param array<string, ExtractionResult> $fileResults by file path */
     public function apply(array $fileResults): GraphDiff
     {
         $diff = new GraphDiff();
@@ -33,10 +35,15 @@ final class GraphBuilder
 
                 $gaps = $result->gaps;
                 $duplicates = [];
+                /** @var array<string, true> $heldElsewhere a class this file declares again, owned by another file */
+                $heldElsewhere = [];
                 foreach ($result->nodes as $node) {
                     $existed = in_array($node->getId(), $oldNodeIds, true) || $this->storage->nodes->exists($node->getId());
                     $heldBy = $this->storage->upsertNode($node);
                     // One gap per class, however many of its nodes the file emitted.
+                    if ($heldBy !== null && in_array($node->getFqcn(), $result->declaredClasses, true)) {
+                        $heldElsewhere[$node->getId()] = true;
+                    }
                     if ($heldBy !== null
                         && in_array($node->getFqcn(), $result->declaredClasses, true)
                         && !isset($duplicates[$node->getFqcn()])
@@ -69,6 +76,11 @@ final class GraphBuilder
 
                 $newKeys = [];
                 foreach ($result->edges as $edge) {
+                    // A second declaration's edges would hang off a node this file
+                    // does not own: nothing would remove them when the copy goes.
+                    if (isset($heldElsewhere[$edge->getSourceId()])) {
+                        continue;
+                    }
                     $key = GraphDiff::edgeKey($edge);
                     $inserted = $this->storage->upsertEdge($edge);
                     // New to the file, and not already in the graph from

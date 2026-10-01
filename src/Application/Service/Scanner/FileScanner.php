@@ -80,6 +80,7 @@ final class FileScanner
             )
         );
 
+        $seen = [];
         foreach ($iterator as $file) {
             // PHP, and the configuration files that name classes.
             if ($file->getExtension() !== 'php' && !ConfigReferenceExtractor::handles($file->getPathname())) {
@@ -91,6 +92,7 @@ final class FileScanner
                 continue;
             }
 
+            $seen[$path] = true;
             $hash = hash_file('xxh3', $path);
             if ($hash === false) {
                 throw new \RuntimeException(sprintf('Unable to hash scanned file: %s', $path));
@@ -103,8 +105,11 @@ final class FileScanner
             }
         }
 
+        // Gone from the scan is gone from the graph: deleted, or now excluded
+        // by a default or a .graphignore pattern. Checking only file_exists()
+        // left newly ignored files in the graph until the next --full build.
         foreach ($indexedFiles as $indexedPath => $indexedHash) {
-            if (!file_exists($indexedPath)) {
+            if (!isset($seen[$indexedPath])) {
                 $results[] = new FileScanResult($indexedPath, $indexedHash, FileStatus::Deleted);
             }
         }

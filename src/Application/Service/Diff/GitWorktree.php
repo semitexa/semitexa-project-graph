@@ -27,8 +27,9 @@ final class GitWorktree
      */
     public static function with(string $repositoryRoot, string $ref, string $parentDir, callable $callback): mixed
     {
-        [$code, , $err] = self::git($repositoryRoot, ['rev-parse', '--verify', '--quiet', $ref . '^{commit}']);
-        if ($code !== 0) {
+        [$code, $sha, $err] = self::git($repositoryRoot, ['rev-parse', '--verify', '--quiet', $ref . '^{commit}']);
+        $sha = trim($sha);
+        if ($code !== 0 || $sha === '') {
             throw new \InvalidArgumentException(sprintf('Not a commit in %s: %s %s', $repositoryRoot, $ref, trim($err)));
         }
 
@@ -37,7 +38,9 @@ final class GitWorktree
         }
         $checkout = rtrim($parentDir, '/') . '/graph-base-' . bin2hex(random_bytes(6));
 
-        [$code, , $err] = self::git($repositoryRoot, ['worktree', 'add', '--detach', '--quiet', $checkout, $ref]);
+        // The resolved SHA, not the user's ref: it cannot be read as an option,
+        // and the checkout is exactly the commit that was verified above.
+        [$code, , $err] = self::git($repositoryRoot, ['worktree', 'add', '--detach', '--quiet', $checkout, $sha]);
         if ($code !== 0) {
             throw new \RuntimeException(sprintf('git worktree add failed for %s: %s', $ref, trim($err)));
         }
@@ -51,12 +54,29 @@ final class GitWorktree
     }
 
     /**
+     * The caller's environment without the variables that redirect git to
+     * another repository. A git hook or CI wrapper exports GIT_DIR and friends;
+     * inherited, they would make `-C <repo>` operate on the outer checkout.
+     *
+     * @return array<string, string>
+     */
+    private static function environment(): array
+    {
+        $env = getenv();
+        foreach (['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_COMMON_DIR', 'GIT_NAMESPACE', 'GIT_CEILING_DIRECTORIES', 'GIT_PREFIX'] as $name) {
+            unset($env[$name]);
+        }
+
+        return $env;
+    }
+
+    /**
      * @param list<string> $args
      * @return array{0: int, 1: string, 2: string} exit code, stdout, stderr
      */
     private static function git(string $cwd, array $args): array
     {
-        $process = proc_open(['git', '-C', $cwd, ...$args], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        $process = proc_open(['git', '-C', $cwd, ...$args], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null, self::environment());
         if (!is_resource($process)) {
             return [127, '', 'git could not be started'];
         }

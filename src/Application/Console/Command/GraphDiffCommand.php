@@ -183,7 +183,8 @@ final class GraphDiffCommand extends BaseCommand
 
         try {
             $result = (new RefGraphDiff())->diff($path, $baseRef, $this->getProjectRoot() . '/var/tmp');
-        } catch (\InvalidArgumentException $e) {
+        } catch (\InvalidArgumentException | \RuntimeException $e) {
+            // A bad ref, a failed `git worktree add`, an unwritable var/: named, not a stack trace.
             $output->writeln('<error>' . $e->getMessage() . '</error>');
             return Command::FAILURE;
         }

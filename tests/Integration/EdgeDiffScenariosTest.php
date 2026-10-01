@@ -43,8 +43,23 @@ final class EdgeDiffScenariosTest extends TestCase
 
         $review = $this->review($repo);
 
-        self::assertContains('handles ' . GraphFixture::classId('Orders\\CancelOrderHandler') . ' ' . GraphFixture::classId('Orders\\CancelOrderPayload'), $review['added']);
-        self::assertContains('serves_route ' . GraphFixture::classId('Orders\\CancelOrderPayload') . ' route:POST:/orders/cancel', $review['added']);
+        $handler = GraphFixture::classId('Orders\\CancelOrderHandler');
+        $payload = GraphFixture::classId('Orders\\CancelOrderPayload');
+        $added = $review['added'];
+        sort($added);
+        self::assertSame([
+            "annotated_with {$handler} class:Semitexa\\Core\\Attribute\\AsPayloadHandler",
+            "annotated_with {$payload} class:Semitexa\\Core\\Attribute\\AsPublicPayload",
+            "handles {$handler} {$payload}",
+            "imports {$handler} class:Semitexa\\Core\\Attribute\\AsPayloadHandler",
+            "imports {$payload} class:Semitexa\\Core\\Attribute\\AsPublicPayload",
+            "intent_for {$handler} doc:{$handler}",
+            "intent_for {$payload} doc:{$payload}",
+            "participates_in_flow {$handler} flow:CancelOrderFlow",
+            "participates_in_flow {$payload} flow:CancelOrderFlow",
+            "produces {$handler} " . GraphFixture::classId('Orders\\OrderResource'),
+            "serves_route {$payload} route:POST:/orders/cancel",
+        ], $added);
         self::assertSame([], $review['removed']);
         self::assertSame([], $review['orphans']);
     }

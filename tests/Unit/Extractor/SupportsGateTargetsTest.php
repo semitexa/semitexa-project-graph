@@ -21,8 +21,11 @@ final class SupportsGateTargetsTest extends TestCase
     public function every_class_level_gate_names_an_attribute_that_can_sit_on_a_class(): void
     {
         $offenders = [];
+        $checked = 0;
+        $files = glob(__DIR__ . '/../../../src/Application/Service/Extractor/Attribute/*.php') ?: [];
+        self::assertNotSame([], $files, 'precondition: the attribute extractors are found');
 
-        foreach (glob(__DIR__ . '/../../../src/Application/Service/Extractor/Attribute/*.php') ?: [] as $file) {
+        foreach ($files as $file) {
             $source = (string) file_get_contents($file);
             if (!preg_match('/function supports\(.*?\n    }\n/s', $source, $gate)) {
                 continue;
@@ -36,12 +39,14 @@ final class SupportsGateTargetsTest extends TestCase
                 }
                 $attribute = (new \ReflectionClass($fqcn))->getAttributes(\Attribute::class)[0] ?? null;
                 $flags = $attribute?->newInstance()->flags ?? \Attribute::TARGET_ALL;
+                $checked++;
                 if (($flags & \Attribute::TARGET_CLASS) === 0) {
                     $offenders[] = basename($file) . ' gates on ' . $short . ', which cannot target a class';
                 }
             }
         }
 
+        self::assertGreaterThan(0, $checked, 'precondition: at least one gate was actually checked');
         self::assertSame([], $offenders);
     }
 

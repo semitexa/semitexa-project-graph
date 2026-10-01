@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageGapKind;
 use Semitexa\ProjectGraph\Domain\Model\CoverageGap;
+use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
 use Semitexa\ProjectGraph\Tests\Support\GraphFixture;
 
 /**
@@ -108,6 +109,28 @@ final class CoverageGapStoreTest extends TestCase
         self::assertSame(CoverageGapKind::DuplicateClass, $gaps[0]->getKind());
         self::assertSame(GraphFixture::NS . 'Cycle\\Ping', $gaps[0]->getSubject());
         self::assertStringContainsString('Cycle/Ping.php', $gaps[0]->getDetail());
+    }
+
+    #[Test]
+    public function a_second_declaration_adds_no_edges_nobody_owns(): void
+    {
+        $fixture = GraphFixture::built();
+        $ping = GraphFixture::classId('Cycle\\Ping');
+        $resource = GraphFixture::classId('Orders\\OrderResource');
+        self::assertFalse($fixture->hasEdge(EdgeType::Imports, $ping, $resource), 'precondition: the real Ping does not import it');
+
+        $fixture->write('Copies/Ping.php', str_replace(
+            'namespace Semitexa\\ProjectGraph\\Tests\\Fixture\\GraphProject\\Cycle;',
+            "namespace Semitexa\\ProjectGraph\\Tests\\Fixture\\GraphProject\\Cycle;\n\nuse Semitexa\\ProjectGraph\\Tests\\Fixture\\GraphProject\\Orders\\OrderResource;",
+            $fixture->read('Cycle/Ping.php'),
+        ));
+        $fixture->refresh();
+        self::assertCount(1, $fixture->storage->gaps->findByFile($fixture->path('Copies/Ping.php')), 'the copy is seen as a duplicate');
+        self::assertFalse($fixture->hasEdge(EdgeType::Imports, $ping, $resource));
+
+        $fixture->delete('Copies/Ping.php');
+        $fixture->refresh();
+        self::assertFalse($fixture->hasEdge(EdgeType::Imports, $ping, $resource));
     }
 
     #[Test]

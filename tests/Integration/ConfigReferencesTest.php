@@ -29,6 +29,7 @@ final class ConfigReferencesTest extends TestCase
         self::assertTrue($fixture->hasEdge(EdgeType::References, $file, GraphFixture::classId('Orphan\\NobodyUsesMe')));
 
         $unused = array_column((new UnusedClassFinder())->find($fixture->storage), 'fqcn');
+        self::assertContains(GraphFixture::NS . 'Orders\\SqlOrderRepository', $unused, 'precondition: the finder still reports unused classes');
         self::assertNotContains(GraphFixture::NS . 'Orphan\\NobodyUsesMe', $unused);
     }
 

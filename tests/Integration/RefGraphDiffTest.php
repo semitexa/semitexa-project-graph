@@ -33,7 +33,11 @@ final class RefGraphDiffTest extends TestCase
     #[Test]
     public function an_unchanged_tree_has_no_structural_difference(): void
     {
-        self::assertTrue($this->diff(GitFixtureRepo::create())['diff']->isEmpty());
+        $repo = GitFixtureRepo::create();
+        $result = $this->diff($repo);
+
+        self::assertGreaterThan(0, $result['head']->edges->countAll(), 'precondition: the head graph is not empty');
+        self::assertTrue($result['diff']->isEmpty());
     }
 
     #[Test]

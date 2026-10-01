@@ -22,7 +22,9 @@ use PhpParser\Node\VariadicPlaceholder;
  * literals and Foo::class; the rest name an enum case or class constant of
  * another class (1149 — Column's MySqlType, Attribute::TARGET_*), read a
  * property of one (34, Enum::Case->value), a constant of the class itself
- * (31, self::X), or construct an object (18, new X(...)).
+ * (31, self::X), or construct an object (18, new X(...)). Construction is
+ * recorded as a {@see ConstructedArgument}, never executed: scanning must not
+ * run the constructor of whatever class a scanned file names.
  *
  * Constants of the class being parsed come from its own AST. Constants and
  * enum cases of OTHER classes are read by loading those classes — framework
@@ -49,7 +51,10 @@ final class AttributeArgumentEvaluator
                     $arguments[$position++] = $value;
                 }
             }
-        } catch (ConstExprEvaluationException | \Error | \ValueError $e) {
+        } catch (\Throwable $e) {
+            // Anything a lookup throws — an autoloader, an enum's from(), a
+            // constant on a broken class — is one attribute this file could not
+            // be read for, never a failure of the whole file.
             return [[], $e->getMessage()];
         }
 
@@ -89,7 +94,8 @@ final class AttributeArgumentEvaluator
                 $arg->name !== null ? $args[$arg->name->toString()] = $value : $args[] = $value;
             }
 
-            return new $class(...$args);
+            // Recorded, never run: see ConstructedArgument.
+            return new ConstructedArgument($class, $args);
         }
 
         if ($expr instanceof Expr\ConstFetch) {

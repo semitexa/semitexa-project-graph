@@ -118,6 +118,15 @@ final class GraphBrowserTest extends TestCase
             [GraphFixture::classId('Cycle\\Ping'), GraphFixture::classId('Cycle\\Pong')],
             array_map(static function (array $ids): array { sort($ids); return $ids; }, $loops),
         );
+        $unusedIds = array_map(static fn (array $u): string => $u['node']['id'], $findings['unused']);
+        sort($unusedIds);
+        self::assertSame([
+            GraphFixture::classId('Dynamic\\PluginLoader'),
+            GraphFixture::classId('Mail\\SendReceiptListener'),
+            GraphFixture::classId('Orders\\PlaceOrderHandler'),
+            GraphFixture::classId('Orders\\SqlOrderRepository'),
+            GraphFixture::classId('Orphan\\NobodyUsesMe'),
+        ], $unusedIds, 'precondition: the fixture\'s unused classes are reported');
         foreach ($findings['unused'] as $u) {
             self::assertStringStartsWith('unused:', $u['finding']);
             self::assertNotSame('', $u['node']['id']);

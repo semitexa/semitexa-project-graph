@@ -108,15 +108,17 @@ final class GraphExport
 
         $findings = $browser->findings();
         $findings['unused'] = array_values(array_filter($findings['unused'], static fn (array $u): bool => isset($nodes[$u['node']['id']])));
-        $findings['cycles'] = array_values(array_filter($findings['cycles'], static function (array $c) use ($nodes): bool {
-            foreach ($c['members'] as $m) {
-                if (isset($nodes[$m['id']])) {
-                    return true;
-                }
+        // A loop that crosses the slice's edge keeps the members inside it —
+        // the viewer focuses members[0], and one outside the file cannot load.
+        // `cycle` still names the whole loop.
+        $cycles = [];
+        foreach ($findings['cycles'] as $c) {
+            $c['members'] = array_values(array_filter($c['members'], static fn (array $m): bool => isset($nodes[$m['id']])));
+            if ($c['members'] !== []) {
+                $cycles[] = $c;
             }
-
-            return false;
-        }));
+        }
+        $findings['cycles'] = $cycles;
 
         $byType = [];
         $modules = [];

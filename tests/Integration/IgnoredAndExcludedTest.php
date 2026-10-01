@@ -59,4 +59,19 @@ final class IgnoredAndExcludedTest extends TestCase
         self::assertFalse($fixture->storage->nodeExists('class:App\\Checkout'), 'documentation snippets are not project code');
         self::assertFalse($fixture->storage->nodeExists('class:Stub'));
     }
+
+    #[Test]
+    public function a_file_ignored_after_it_was_indexed_leaves_the_graph_on_refresh(): void
+    {
+        $fixture = GraphFixture::create();
+        $fixture->write('Legacy/OldThing.php', "<?php\nnamespace App\\Legacy;\nfinal class OldThing\n{\n}\n");
+        $fixture->build();
+        self::assertTrue($fixture->storage->nodeExists('class:App\\Legacy\\OldThing'), 'precondition: indexed');
+
+        $fixture->write('.graphignore', "Legacy/\n");
+        $fixture->refresh();
+
+        self::assertFalse($fixture->storage->nodeExists('class:App\\Legacy\\OldThing'));
+        self::assertNull($fixture->storage->fileIndex->findByPath($fixture->path('Legacy/OldThing.php')));
+    }
 }

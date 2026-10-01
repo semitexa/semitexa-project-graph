@@ -32,8 +32,9 @@ final class CycleFinder
         $index ??= InboundIndex::of($storage);
 
         $nodes = [];
+        $tests = TestCode::of($storage);
         foreach ($storage->nodes->declaredClasses() as $class) {
-            if (!str_contains($class['file'], '/tests/')) {
+            if (!$tests->contains($class['file'])) {
                 $nodes[$class['id']] = true;
             }
         }

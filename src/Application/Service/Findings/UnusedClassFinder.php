@@ -51,8 +51,9 @@ final class UnusedClassFinder
         }
 
         $findings = [];
+        $tests = TestCode::of($storage);
         foreach ($storage->nodes->declaredClasses() as $class) {
-            if (str_contains($class['file'], '/tests/') || isset($ignored[$class['fqcn']])) {
+            if ($tests->contains($class['file']) || isset($ignored[$class['fqcn']])) {
                 continue;
             }
 
