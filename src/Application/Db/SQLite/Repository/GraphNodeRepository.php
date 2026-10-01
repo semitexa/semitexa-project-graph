@@ -46,6 +46,43 @@ final class GraphNodeRepository
             ->fetchOneAs(Node::class, $this->mapperRegistry) ?: null;
     }
 
+    /**
+     * Many nodes in one round trip per 500 ids — a view that expands a node
+     * would otherwise pay one query per neighbour.
+     *
+     * @param list<string> $ids
+     * @return array<string, Node> keyed by id; ids the graph does not hold are absent
+     */
+    public function findByIds(array $ids): array
+    {
+        $found = [];
+        foreach (array_chunk(array_values(array_unique($ids)), 500) as $chunk) {
+            $nodes = $this->newQuery()
+                ->whereIn(ColumnRef::for(GraphNodeResource::class, 'id'), $chunk)
+                ->fetchAllAs(Node::class, $this->mapperRegistry);
+            foreach ($nodes as $node) {
+                if ($node instanceof Node) {
+                    $found[$node->getId()] = $node;
+                }
+            }
+        }
+
+        return $found;
+    }
+
+    /**
+     * Every node — for an export of the whole graph, not for a request path.
+     *
+     * @return list<Node>
+     */
+    public function all(): array
+    {
+        return array_values(array_filter(
+            $this->newQuery()->fetchAllAs(Node::class, $this->mapperRegistry),
+            static fn (object $node): bool => $node instanceof Node,
+        ));
+    }
+
     public function findByFqcn(string $fqcn): ?Node
     {
         $candidates = $this->newQuery()
@@ -107,6 +144,33 @@ final class GraphNodeRepository
             ->fetchAllAs(Node::class, $this->mapperRegistry);
     }
 
+    /**
+     * Name or FQCN containing $text LITERALLY (`%` and `_` are escaped), real
+     * nodes first and name-prefix matches next, ranked in SQL before the limit
+     * so placeholders cannot crowd real classes out of the page.
+     *
+     * @return list<Node>
+     */
+    public function searchText(string $text, int $limit = 50): array
+    {
+        $like = '%' . strtr($text, ['\\' => '\\\\', '%' => '\\%', '_' => '\\_']) . '%';
+        $prefix = substr($like, 1);
+        $rows = $this->adapter->execute(
+            "SELECT id FROM graph_nodes WHERE name LIKE :like ESCAPE '\\' OR fqcn LIKE :like ESCAPE '\\'"
+            . " ORDER BY is_placeholder, CASE WHEN name LIKE :prefix ESCAPE '\\' THEN 0 ELSE 1 END, name LIMIT " . max(1, $limit),
+            ['like' => $like, 'prefix' => $prefix],
+        )->fetchAll();
+        $ids = [];
+        foreach ($rows as $row) {
+            if (is_scalar($row['id'] ?? null)) {
+                $ids[] = (string) $row['id'];
+            }
+        }
+        $nodes = $this->findByIds($ids);
+
+        return array_values(array_filter(array_map(static fn (string $id): ?Node => $nodes[$id] ?? null, $ids)));
+    }
+
     /** @return list<Node> */
     public function searchFull(string $query, int $limit = 20): array
     {
@@ -137,39 +201,129 @@ final class GraphNodeRepository
         }
     }
 
+    /**
+     * fqcn, type and placeholder flag of every class-like node, without
+     * hydrating them.
+     *
+     * @return list<array{fqcn: string, type: string, placeholder: bool}>
+     */
+    public function classLikeFqcns(): array
+    {
+        $rows = $this->adapter->execute("SELECT fqcn, type, is_placeholder FROM graph_nodes WHERE id LIKE 'class:%'")->fetchAll();
+
+        return array_values(array_map(
+            static fn (array $row): array => [
+                'fqcn'        => (string) $row['fqcn'],
+                'type'        => (string) $row['type'],
+                'placeholder' => (int) $row['is_placeholder'] === 1,
+            ],
+            $rows,
+        ));
+    }
+
+    /**
+     * Every declared (non-placeholder) class-like node, without hydrating.
+     *
+     * @return list<array{id: string, fqcn: string, type: string, file: string, line: int, module: string}>
+     */
+    public function declaredClasses(): array
+    {
+        $rows = $this->adapter->execute(
+            "SELECT id, fqcn, type, file, line, module FROM graph_nodes WHERE id LIKE 'class:%' AND is_placeholder = 0 ORDER BY id",
+        )->fetchAll();
+
+        return array_values(array_map(
+            static fn (array $row): array => [
+                'id'     => (string) $row['id'],
+                'fqcn'   => (string) $row['fqcn'],
+                'type'   => (string) $row['type'],
+                'file'   => (string) $row['file'],
+                'line'   => (int) $row['line'],
+                'module' => (string) $row['module'],
+            ],
+            $rows,
+        ));
+    }
+
+    public function exists(string $id): bool
+    {
+        return $this->adapter->execute('SELECT 1 FROM graph_nodes WHERE id = :id LIMIT 1', ['id' => $id])->fetchColumn() !== false;
+    }
+
+    /** A node known only because an edge points at it. Plain SQL: runs once per edge target. */
     public function insertPlaceholder(string $nodeId): void
     {
-        if ($this->findById($nodeId) !== null) {
+        if ($this->exists($nodeId)) {
             return;
         }
 
-        $placeholder = new Node(
-            id:            $nodeId,
-            type:          NodeType::Class_,
-            fqcn:          NodeId::extractFqcn($nodeId),
-            file:          '',
-            line:          0,
-            endLine:       0,
-            module:        '',
-            metadata:      [],
-            isPlaceholder: true,
+        $fqcn = NodeId::extractFqcn($nodeId);
+        $slash = strrpos($fqcn, '\\');
+        $this->adapter->execute(
+            'INSERT INTO graph_nodes (id, type, fqcn, name, file, line, end_line, module, metadata, is_placeholder)'
+            . " VALUES (:id, :type, :fqcn, :name, '', 0, 0, '', '[]', 1)",
+            [
+                'id'   => $nodeId,
+                'type' => NodeType::forPlaceholderId($nodeId)->value,
+                'fqcn' => $fqcn,
+                'name' => $slash === false ? $fqcn : substr($fqcn, $slash + 1),
+            ],
         );
-        $this->writeEngine->insert($placeholder, GraphNodeResource::class, $this->mapperRegistry);
     }
 
-    /** @return int count of deleted nodes */
-    public function deleteByFile(string $filePath): int
+    /**
+     * @param list<string> $ids
+     * @return int count of deleted nodes
+     */
+    public function deleteByIds(array $ids): int
     {
-        $countResult = $this->adapter->execute(
-            'SELECT COUNT(*) as cnt FROM graph_nodes WHERE file = :file',
-            ['file' => $filePath],
-        );
-        $count = (int) ($countResult->fetchOne()['cnt'] ?? 0);
+        if ($ids === []) {
+            return 0;
+        }
 
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $count = (int) ($this->adapter->execute(
+            'SELECT COUNT(*) as cnt FROM graph_nodes WHERE id IN (' . $placeholders . ')',
+            $ids,
+        )->fetchOne()['cnt'] ?? 0);
+
+        $this->adapter->execute('DELETE FROM graph_nodes WHERE id IN (' . $placeholders . ')', $ids);
+
+        return $count;
+    }
+
+    /**
+     * Turn nodes whose file no longer declares them, but which edges still
+     * point at, into placeholders: the dangling reference stays visible
+     * instead of vanishing with its target. The type is kept — a dropped
+     * route stays a route.
+     *
+     * @param list<string> $ids
+     */
+    public function demoteToPlaceholders(array $ids): void
+    {
+        if ($ids === []) {
+            return;
+        }
+
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
         $this->adapter->execute(
-            'DELETE FROM graph_nodes WHERE file = :file',
-            ['file' => $filePath],
+            "UPDATE graph_nodes SET is_placeholder = 1, file = '', line = 0, end_line = 0, module = '', metadata = '{}'"
+            . ' WHERE id IN (' . $placeholders . ')',
+            $ids,
         );
+    }
+
+    /** @return int count of placeholders deleted because no edge points at them any more */
+    public function deleteUnreferencedPlaceholders(): int
+    {
+        $where = 'is_placeholder = 1 AND NOT EXISTS (SELECT 1 FROM graph_edges e WHERE e.target_id = graph_nodes.id)';
+        $count = (int) ($this->adapter->execute('SELECT COUNT(*) as cnt FROM graph_nodes WHERE ' . $where)
+            ->fetchOne()['cnt'] ?? 0);
+
+        if ($count > 0) {
+            $this->adapter->execute('DELETE FROM graph_nodes WHERE ' . $where);
+        }
 
         return $count;
     }

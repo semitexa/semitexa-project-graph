@@ -5,11 +5,15 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Service\Index;
 
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
+use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageGapKind;
+use Semitexa\ProjectGraph\Application\Service\Extractor\ConfigReferenceExtractor;
+use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractionResult;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractorPipeline;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphBuilder;
 use Semitexa\ProjectGraph\Application\Service\Parser\PhpParserAdapter;
 use Semitexa\ProjectGraph\Application\Service\Scanner\FileScanner;
 use Semitexa\ProjectGraph\Application\Service\Scanner\FileStatus;
+use Semitexa\ProjectGraph\Domain\Model\CoverageGap;
 
 final class IncrementalEngine
 {
@@ -23,44 +27,94 @@ final class IncrementalEngine
         private readonly GraphStorage $storage,
     ) {}
 
+    /** Files applied per transaction: bounds how many extraction results are held at once. */
+    private const BATCH_SIZE = 200;
+
+    /**
+     * Rebuild the graph from nothing — or not at all.
+     *
+     * The truncate and the whole rebuild run in one transaction, so a build
+     * that dies halfway (measured 2026-09-30: the workspace build exhausted
+     * PHP's default 128M) rolls back to the previous graph instead of
+     * committing an empty or partial one that later refreshes build on.
+     */
     public function fullBuild(string $projectRoot): UpdateResult
     {
-        $this->storage->truncate();
+        return $this->storage->transaction(function () use ($projectRoot): UpdateResult {
+            $this->storage->truncate();
 
-        return $this->update($projectRoot);
+            // Every edge is "added" on a full build; keeping ~67k of them in
+            // the result would cost memory and say nothing.
+            return $this->update($projectRoot, keepEdgeLists: false);
+        });
     }
 
-    public function update(string $projectRoot): UpdateResult
+    public function update(string $projectRoot, bool $keepEdgeLists = true): UpdateResult
     {
         $timer = microtime(true);
 
         $indexedFiles = $this->storage->fileIndex->getAll();
+        // Findings judge "is this test code" relative to it (see TestCode).
+        $this->storage->setMeta('project_root', rtrim($projectRoot, '/'));
         $changes = $this->scanner->scan($projectRoot, $indexedFiles);
+        $this->storage->setMeta('coverage_exclusions', (string) json_encode($this->scanner->lastExclusions()));
 
         if (empty($changes)) {
+            // A scan that found nothing to change still proves the graph current
+            // as of now. Without this, a file touched but not edited (a checkout,
+            // a reverted edit) stayed newer than last_update forever, and the
+            // viewer's "stale" could not be cleared by the command it names.
+            $this->storage->setMeta('last_update', (string) time());
+
             return UpdateResult::noChanges();
         }
 
-        $fileResults = [];
+        $totals = ['nodesAdded' => 0, 'nodesRemoved' => 0, 'edgesAdded' => 0, 'edgesRemoved' => 0, 'addedEdges' => [], 'removedEdges' => []];
         $errors = [];
+        $batch = [];
+        $indexUpdates = [];
 
         foreach ($changes as $change) {
             if ($change->status === FileStatus::Deleted) {
-                $fileResults[$change->path] = \Semitexa\ProjectGraph\Application\Service\Extractor\ExtractionResult::empty();
-                $this->storage->fileIndex->remove($change->path);
-                continue;
+                $batch[$change->path] = ExtractionResult::empty();
+                $indexUpdates[$change->path] = null;
+            } elseif (ConfigReferenceExtractor::handles($change->path)) {
+                $batch[$change->path] = (new ConfigReferenceExtractor())->extract(
+                    $change->path,
+                    (string) file_get_contents($change->path),
+                    $this->resolveModule($projectRoot, $change->path),
+                );
+                $indexUpdates[$change->path] = $change->hash;
+            } else {
+                try {
+                    $parsed = $this->parser->parse($change->path, $this->resolveModule($projectRoot, $change->path));
+                    $extracted = $this->extractors->process($parsed);
+                    $batch[$change->path] = $extracted;
+                    $indexUpdates[$change->path] = $change->hash;
+                    if ($extracted->failures !== []) {
+                        $errors[] = ['file' => $change->path, 'message' => implode('; ', $extracted->failures)];
+                    }
+                } catch (\Throwable $e) {
+                    // The file stays in the index (so an unchanged broken file
+                    // is not re-parsed on every refresh) and what it used to
+                    // declare is removed: the graph shows what can be read now,
+                    // and the gap says why this file contributes nothing.
+                    $errors[] = ['file' => $change->path, 'message' => $e->getMessage()];
+                    $broken = ExtractionResult::empty();
+                    $broken->gaps[] = new CoverageGap(CoverageGapKind::ParseError, $change->path, $e->getMessage());
+                    $batch[$change->path] = $broken;
+                    $indexUpdates[$change->path] = $change->hash;
+                }
             }
 
-            try {
-                $parsed = $this->parser->parse($change->path, $this->resolveModule($projectRoot, $change->path));
-                $fileResults[$change->path] = $this->extractors->process($parsed);
-                $this->storage->fileIndex->upsert($change->path, $change->hash);
-            } catch (\Throwable $e) {
-                $errors[] = ['file' => $change->path, 'message' => $e->getMessage()];
+            if (count($batch) >= self::BATCH_SIZE) {
+                $this->applyBatch($batch, $indexUpdates, $totals, $keepEdgeLists);
+                $batch = [];
+                $indexUpdates = [];
             }
         }
 
-        $diff = $this->builder->apply($fileResults);
+        $this->applyBatch($batch, $indexUpdates, $totals, $keepEdgeLists);
 
         $this->storage->setMeta('last_update', (string)time());
         $this->storage->setMeta('total_nodes', (string)$this->storage->nodes->countAll());
@@ -69,13 +123,55 @@ final class IncrementalEngine
         return new UpdateResult(
             filesScanned:   count($changes),
             filesErrored:   count($errors),
-            nodesAdded:     $diff->addedNodeCount(),
-            nodesRemoved:   $diff->removedNodeCount(),
-            edgesAdded:     $diff->addedEdgeCount(),
-            edgesRemoved:   $diff->removedEdgeCount(),
+            nodesAdded:     $totals['nodesAdded'],
+            nodesRemoved:   $totals['nodesRemoved'],
+            edgesAdded:     $totals['edgesAdded'],
+            edgesRemoved:   $totals['edgesRemoved'],
             duration:       (int)((microtime(true) - $timer) * 1000),
             errors:         $errors,
+            addedEdges:     $totals['addedEdges'],
+            removedEdges:   $totals['removedEdges'],
         );
+    }
+
+    /**
+     * Apply a batch and record its files as indexed in the SAME transaction.
+     *
+     * The file index used to be written as each file was extracted and the
+     * graph only at the very end, so a run that died in between left files
+     * marked indexed whose nodes were never stored — and no later refresh
+     * would look at them again.
+     *
+     * @param array<string, ExtractionResult> $batch
+     * @param array<string, ?string> $indexUpdates path => content hash, or null for a deleted file
+     * @param array{nodesAdded: int, nodesRemoved: int, edgesAdded: int, edgesRemoved: int, addedEdges: list<\Semitexa\ProjectGraph\Domain\Model\Edge>, removedEdges: list<\Semitexa\ProjectGraph\Domain\Model\Edge>} $totals
+     */
+    private function applyBatch(array $batch, array $indexUpdates, array &$totals, bool $keepEdgeLists): void
+    {
+        if ($batch === []) {
+            return;
+        }
+
+        $diff = $this->storage->transaction(function () use ($batch, $indexUpdates) {
+            $diff = $this->builder->apply($batch);
+
+            foreach ($indexUpdates as $path => $hash) {
+                $hash === null
+                    ? $this->storage->fileIndex->remove($path)
+                    : $this->storage->fileIndex->upsert($path, $hash);
+            }
+
+            return $diff;
+        });
+
+        $totals['nodesAdded'] += $diff->addedNodeCount();
+        $totals['nodesRemoved'] += $diff->removedNodeCount();
+        $totals['edgesAdded'] += $diff->addedEdgeCount();
+        $totals['edgesRemoved'] += $diff->removedEdgeCount();
+        if ($keepEdgeLists) {
+            $totals['addedEdges'] = [...$totals['addedEdges'], ...$diff->addedEdges()];
+            $totals['removedEdges'] = [...$totals['removedEdges'], ...$diff->removedEdges()];
+        }
     }
 }
 
@@ -91,6 +187,10 @@ final readonly class UpdateResult
         public int   $duration,
         /** @var list<array{file: string, message: string}> */
         public array $errors,
+        /** @var list<\Semitexa\ProjectGraph\Domain\Model\Edge> edges this update added (empty on a full build) */
+        public array $addedEdges = [],
+        /** @var list<\Semitexa\ProjectGraph\Domain\Model\Edge> edges this update removed */
+        public array $removedEdges = [],
     ) {}
 
     public function isNoChanges(): bool

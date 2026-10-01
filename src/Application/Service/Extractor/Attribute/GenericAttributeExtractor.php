@@ -4,41 +4,18 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Service\Extractor\Attribute;
 
-use Semitexa\Authorization\Attribute\AsProtectedPayload;
-use Semitexa\Authorization\Attribute\AsServicePayload;
 use Semitexa\Core\Attribute\AsCommand;
-use Semitexa\Core\Attribute\AsEventListener;
-use Semitexa\Core\Attribute\AsPayloadHandler;
-use Semitexa\Core\Attribute\AsPublicPayload;
-use Semitexa\Core\Attribute\AsResource;
-use Semitexa\Core\Attribute\AsService;
-use Semitexa\Core\Attribute\ExecutionScoped;
-use Semitexa\Core\Attribute\InjectAsFactory;
-use Semitexa\Core\Attribute\InjectAsMutable;
-use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractionResult;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractorInterface;
+use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
 use Semitexa\ProjectGraph\Application\Service\Parser\ParsedFile;
+use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Domain\Model\Node;
 
 final class GenericAttributeExtractor implements ExtractorInterface
 {
-    private const HANDLED = [
-        AsPublicPayload::class,
-        AsProtectedPayload::class,
-        AsServicePayload::class,
-        AsPayloadHandler::class,
-        AsResource::class,
-        AsService::class,
-        AsEventListener::class,
-        InjectAsReadonly::class,
-        InjectAsMutable::class,
-        InjectAsFactory::class,
-        ExecutionScoped::class,
-    ];
-
     public function supports(ParsedFile $file): bool
     {
         return true;
@@ -49,11 +26,27 @@ final class GenericAttributeExtractor implements ExtractorInterface
         $result = new ExtractionResult();
 
         foreach ($file->getClasses() as $classInfo) {
+            $classId = NodeId::forClass($classInfo->fqcn);
+
+            // Every attribute applied is a reference to the attribute class —
+            // without it, an attribute class used only as #[Foo] had no inbound
+            // edge and looked unused. The target says where it was applied;
+            // a framework attribute on the class itself is how the framework
+            // discovers the class.
+            foreach ($classInfo->attributes as $attr) {
+                $result->addEdge(self::annotatedWith($classId, $attr->getName(), 'class'));
+            }
+            foreach ($classInfo->properties as $property) {
+                foreach ($property->attributes as $attr) {
+                    $result->addEdge(self::annotatedWith($classId, $attr->getName(), 'property'));
+                }
+            }
+
             foreach ($classInfo->attributes as $attr) {
                 if ($attr->getName() === AsCommand::class) {
                     $instance = $attr->newInstance();
                     $result->addNode(new Node(
-                        id:       NodeId::forClass($classInfo->fqcn),
+                        id:       $classId,
                         type:     NodeType::Command,
                         fqcn:     $classInfo->fqcn,
                         file:     $file->path,
@@ -65,22 +58,20 @@ final class GenericAttributeExtractor implements ExtractorInterface
                             'description' => $instance->description ?? '',
                         ],
                     ));
-
-                    continue;
                 }
-
-                if (in_array($attr->getName(), self::HANDLED, true)) {
-                    continue;
-                }
-
-                $result->addNodeMetadata(NodeId::forClass($classInfo->fqcn), 'attributes', [
-                    'name'   => $attr->getName(),
-                    'args'   => $attr->getArguments(),
-                    'target' => $attr->getTarget(),
-                ]);
             }
         }
 
         return $result;
+    }
+
+    private static function annotatedWith(string $classId, string $attribute, string $target): Edge
+    {
+        return new Edge(
+            sourceId: $classId,
+            targetId: NodeId::forClass($attribute),
+            type:     EdgeType::AnnotatedWith,
+            metadata: ['target' => $target],
+        );
     }
 }

@@ -24,6 +24,34 @@ final class ProjectGraphConnection
         return $connections->manager(self::NAME);
     }
 
+    /**
+     * The SQLite file a fresh resolution would pick now, or null when a named
+     * connection is configured through the environment (nothing to follow).
+     */
+    public static function currentDefaultPath(string $projectRoot): ?string
+    {
+        return self::hasNamedConnectionEnvironment() ? null : self::resolveDefaultSqlitePath($projectRoot);
+    }
+
+    /**
+     * Replace the registered connection with one on the file resolution picks
+     * NOW. For a long-lived reader: a worker that started before the CLI wrote
+     * a newer graph somewhere else would otherwise read the old file until it
+     * restarts. The previous manager is shut down first.
+     */
+    public static function reopen(ConnectionRegistry $connections, string $projectRoot): OrmManager
+    {
+        if ($connections->has(self::NAME)) {
+            $connections->manager(self::NAME)->shutdown();
+        }
+        $connections->register(self::NAME, new OrmManager(
+            config: self::resolveConfig($projectRoot),
+            connectionName: self::NAME,
+        ));
+
+        return $connections->manager(self::NAME);
+    }
+
     private static function resolveConfig(string $projectRoot): ConnectionConfig
     {
         if (self::hasNamedConnectionEnvironment()) {
@@ -37,12 +65,31 @@ final class ProjectGraphConnection
         );
     }
 
-    private static function resolveDefaultSqlitePath(string $projectRoot): string
+    /**
+     * The first usable candidate is not enough: whether a directory is writable
+     * depends on who asks. The app worker runs as root and can write anywhere,
+     * a CLI run as the host user cannot write a root-owned `var/storage`, so the
+     * two used to resolve DIFFERENT files — the CLI rebuilt one graph while the
+     * worker kept reading another, frozen at whenever root last built it.
+     *
+     * Among the candidates this process can use, the graph that already exists
+     * and was written most recently wins; only when none exists does order decide.
+     *
+     * Resolution happens when a connection is opened. A long-lived reader must
+     * ask again ({@see currentDefaultPath()} / {@see reopen()}) to follow a graph
+     * written elsewhere later. A CLI that can write neither candidate falls back
+     * to the system temp dir, which a worker never looks at.
+     */
+    public static function resolveDefaultSqlitePath(string $projectRoot): string
     {
         $candidates = [
             $projectRoot . '/var/storage/project-graph.sqlite',
             $projectRoot . '/var/tmp/project-graph.sqlite',
         ];
+
+        $firstUsable = null;
+        $newest = null;
+        $newestMtime = -1;
 
         foreach ($candidates as $path) {
             $dir = dirname($path);
@@ -51,12 +98,20 @@ final class ProjectGraphConnection
                 continue;
             }
 
-            if (is_writable($dir)) {
-                return $path;
+            if (!is_writable($dir) || (is_file($path) && !is_writable($path))) {
+                continue;
+            }
+
+            $firstUsable ??= $path;
+
+            $mtime = is_file($path) ? (int) filemtime($path) : -1;
+            if ($mtime > $newestMtime) {
+                $newest = $path;
+                $newestMtime = $mtime;
             }
         }
 
-        return sys_get_temp_dir() . '/semitexa-project-graph.sqlite';
+        return $newest ?? $firstUsable ?? sys_get_temp_dir() . '/semitexa-project-graph.sqlite';
     }
 
     private static function hasNamedConnectionEnvironment(): bool

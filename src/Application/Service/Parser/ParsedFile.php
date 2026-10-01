@@ -56,19 +56,9 @@ final class ParsedFile
                 continue;
             }
 
-            $fqcn = $stmt->namespacedName->toString();
-
-            try {
-                $exists = @class_exists($fqcn) || @interface_exists($fqcn) || @trait_exists($fqcn) || @enum_exists($fqcn);
-                if ($exists) {
-                    $ref = new \ReflectionClass($fqcn);
-                    $this->classInfoCache[$fqcn] = ClassInfo::fromReflection($ref, $this->path);
-                    continue;
-                }
-            } catch (\Throwable) {
-            }
-
-            $this->classInfoCache[$fqcn] = ClassInfo::fromAst($stmt, $this->path);
+            // Read from the parsed file, never from the class the process has
+            // loaded: see ClassInfo::fromAst().
+            $this->classInfoCache[$stmt->namespacedName->toString()] = ClassInfo::fromAst($stmt, $this->path);
         }
 
         return array_values($this->classInfoCache);

@@ -11,6 +11,7 @@ use Semitexa\Orm\Application\Service\Mapping\MapperRegistry;
 use Semitexa\Orm\Metadata\ResourceModelMetadataRegistry;
 use Semitexa\Orm\Application\Service\Persistence\AggregateWriteEngine;
 use Semitexa\Orm\Application\Service\Transaction\TransactionManager;
+use Semitexa\ProjectGraph\Application\Db\SQLite\Repository\GraphCoverageGapRepository;
 use Semitexa\ProjectGraph\Application\Db\SQLite\Repository\GraphEdgeRepository;
 use Semitexa\ProjectGraph\Application\Db\SQLite\Repository\GraphFileIndexRepository;
 use Semitexa\ProjectGraph\Application\Db\SQLite\Repository\GraphMetaRepository;
@@ -24,6 +25,7 @@ final class GraphStorage
     public readonly GraphEdgeRepository $edges;
     public readonly GraphFileIndexRepository $fileIndex;
     public readonly GraphMetaRepository $meta;
+    public readonly GraphCoverageGapRepository $gaps;
 
     public function __construct(
         private readonly DatabaseAdapterInterface      $adapter,
@@ -38,6 +40,7 @@ final class GraphStorage
         $this->edges     = $this->createEdgeRepository();
         $this->fileIndex = $this->createFileIndexRepository();
         $this->meta      = $this->createMetaRepository();
+        $this->gaps      = new GraphCoverageGapRepository($this->adapter);
     }
 
     public function transaction(callable $callback): mixed
@@ -45,39 +48,120 @@ final class GraphStorage
         return $this->txManager->run($callback);
     }
 
+    /**
+     * Forget what a file declared, before it is re-extracted (or because it
+     * was deleted).
+     *
+     * A file owns its nodes and the edges LEAVING them. Edges other files have
+     * into its nodes belong to those files, which this refresh does not
+     * re-read — so they stay. A node that disappears while such an edge still
+     * points at it becomes a placeholder: re-extraction turns it back into a
+     * real node if the file still declares it, and otherwise it remains as the
+     * visible target of a dangling reference.
+     *
+     * @return int count of nodes removed or demoted
+     */
     public function removeByFile(string $filePath): int
     {
         $nodeIds = $this->nodes->getNodeIdsByFile($filePath);
-        if (empty($nodeIds)) {
+        if ($nodeIds === []) {
             return 0;
         }
-        $this->edges->deleteByNodeIds($nodeIds);
-        return $this->nodes->deleteByFile($filePath);
+
+        $this->edges->deleteBySourceIds($nodeIds);
+
+        $stillReferenced = $this->edges->referencedAmong($nodeIds);
+        $this->nodes->demoteToPlaceholders($stillReferenced);
+        $this->nodes->deleteByIds(array_values(array_diff($nodeIds, $stillReferenced)));
+
+        return count($nodeIds);
     }
 
-    public function upsertNode(Node $node): void
+    /** Drop placeholders nothing points at any more. */
+    public function sweepPlaceholders(): int
+    {
+        return $this->nodes->deleteUnreferencedPlaceholders();
+    }
+
+    /**
+     * Store a node, reconciling it with what the graph already holds.
+     *
+     * A placeholder is a MENTION (another file's edge points here, or an
+     * extractor records the role a class plays elsewhere); a real node is a
+     * DECLARATION. They merge in either order, and the more specific type wins
+     * — a class a handler names as its resource stays a resource whether the
+     * handler or the class's own file is indexed first.
+     *
+     * @return ?string the file that already declares this node when a
+     *                 different file declares it too (the node is NOT stored
+     *                 again), null when it was stored or merged
+     */
+    public function upsertNode(Node $node): ?string
     {
         $existing = $this->nodes->findById($node->getId());
-        if ($existing !== null && $existing->getIsPlaceholder() && !$node->getIsPlaceholder()) {
+
+        if ($existing === null) {
             $this->nodes->upsert($node);
-        } elseif ($existing !== null && $existing->getFile() !== $node->getFile() && $existing->getFile() !== '') {
-            return;
-        } else {
-            $this->nodes->upsert($node);
+            return null;
         }
+
+        if ($node->getIsPlaceholder()) {
+            $type = self::moreSpecific($existing->getType(), $node->getType());
+            if ($type !== $existing->getType()) {
+                $this->nodes->upsert(self::withType($existing, $type));
+            }
+            return null;
+        }
+
+        if ($existing->getIsPlaceholder()) {
+            $this->nodes->upsert(self::withType($node, self::moreSpecific($node->getType(), $existing->getType())));
+            return null;
+        }
+
+        if ($existing->getFile() !== $node->getFile() && $existing->getFile() !== '') {
+            return $existing->getFile();
+        }
+
+        $this->nodes->upsert($node);
+        return null;
     }
 
-    public function upsertEdge(Edge $edge): void
+    private static function moreSpecific(NodeType $held, NodeType $incoming): NodeType
     {
-        if ($this->nodes->findById($edge->getTargetId()) === null) {
-            $this->nodes->insertPlaceholder($edge->getTargetId());
+        $generic = [NodeType::Class_, NodeType::Interface_, NodeType::Trait_, NodeType::Enum_];
+
+        return in_array($held, $generic, true) && !in_array($incoming, $generic, true) ? $incoming : $held;
+    }
+
+    private static function withType(Node $node, NodeType $type): Node
+    {
+        if ($node->getType() === $type) {
+            return $node;
         }
-        $this->edges->upsert($edge);
+
+        return new Node(
+            id:            $node->getId(),
+            type:          $type,
+            fqcn:          $node->getFqcn(),
+            file:          $node->getFile(),
+            line:          $node->getLine(),
+            endLine:       $node->getEndLine(),
+            module:        $node->getModule(),
+            metadata:      $node->getMetadata(),
+            isPlaceholder: $node->getIsPlaceholder(),
+        );
+    }
+
+    /** @return bool true when the edge was not in the graph before */
+    public function upsertEdge(Edge $edge): bool
+    {
+        $this->nodes->insertPlaceholder($edge->getTargetId());
+        return $this->edges->upsert($edge);
     }
 
     public function nodeExists(string $nodeId): bool
     {
-        return $this->nodes->findById($nodeId) !== null;
+        return $this->nodes->exists($nodeId);
     }
 
     public function getMeta(string $key): ?string
@@ -97,6 +181,7 @@ final class GraphStorage
             $this->nodes->truncate();
             $this->fileIndex->truncateAll();
             $this->meta->truncate();
+            $this->gaps->truncate();
         });
     }
 

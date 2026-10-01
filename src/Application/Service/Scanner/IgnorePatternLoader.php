@@ -13,6 +13,11 @@ final class IgnorePatternLoader
         '.git/',
         'tests/fixtures/',
         '*.generated.php',
+        // Documentation snippets (semitexa-demo's resources/examples): code in
+        // a fictional App\ namespace that nothing autoloads, reusing class
+        // names across examples. Scanned, they were 12 of the workspace's 13
+        // duplicate_class gaps and a class whose attributes could not be read.
+        '*.example.php',
     ];
 
     /** @var list<string> */
@@ -34,22 +39,5 @@ final class IgnorePatternLoader
         }
 
         return $this->patterns;
-    }
-
-    public function shouldExclude(string $filePath, string $projectRoot): bool
-    {
-        $relative = str_replace($projectRoot . '/', '', $filePath);
-
-        foreach ($this->patterns as $pattern) {
-            if (str_ends_with($pattern, '/')) {
-                if (str_starts_with($relative, $pattern)) {
-                    return true;
-                }
-            } elseif (fnmatch($pattern, basename($relative))) {
-                return true;
-            }
-        }
-
-        return false;
     }
 }

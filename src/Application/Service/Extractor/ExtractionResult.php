@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Service\Extractor;
 
+use Semitexa\ProjectGraph\Domain\Model\CoverageGap;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Domain\Model\Node;
 
@@ -17,6 +18,29 @@ final class ExtractionResult
 
     /** @var array<string, int> nodeId => index in $nodes */
     private array $nodeIndex = [];
+
+    /**
+     * Extractors that threw on this file, with why. Their contribution is
+     * missing; everything else the file declared is still here.
+     *
+     * @var list<string>
+     */
+    public array $failures = [];
+
+    /**
+     * What this file's extraction knows it could not see.
+     *
+     * @var list<CoverageGap>
+     */
+    public array $gaps = [];
+
+    /**
+     * FQCNs of the classes the file itself declares — to tell a real second
+     * declaration from a node another extractor merely mentions.
+     *
+     * @var list<string>
+     */
+    public array $declaredClasses = [];
 
     public function addNode(Node $node): self
     {
@@ -79,6 +103,10 @@ final class ExtractionResult
         foreach ($other->edges as $edge) {
             $result->addEdge($edge);
         }
+
+        $result->failures = [...$this->failures, ...$other->failures];
+        $result->gaps = [...$this->gaps, ...$other->gaps];
+        $result->declaredClasses = array_values(array_unique([...$this->declaredClasses, ...$other->declaredClasses]));
 
         return $result;
     }

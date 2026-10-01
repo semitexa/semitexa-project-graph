@@ -4,7 +4,11 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Service\Extractor;
 
+use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageGapKind;
+use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
 use Semitexa\ProjectGraph\Application\Service\Parser\ParsedFile;
+use Semitexa\ProjectGraph\Attribute\GraphIgnore;
+use Semitexa\ProjectGraph\Domain\Model\CoverageGap;
 
 final class ExtractorPipeline
 {
@@ -18,12 +22,72 @@ final class ExtractorPipeline
         $merged = new ExtractionResult();
 
         foreach ($this->extractors as $extractor) {
-            if ($extractor->supports($file)) {
-                $merged = $merged->merge($extractor->extract($file));
+            // One extractor throwing — typically on an attribute whose
+            // arguments name a class the process cannot load — costs only its
+            // own edges, not the whole file's.
+            try {
+                if ($extractor->supports($file)) {
+                    $merged = $merged->merge($extractor->extract($file));
+                }
+            } catch (\Throwable $e) {
+                $name = (new \ReflectionClass($extractor))->getShortName();
+                $merged->failures[] = $name . ': ' . $e->getMessage();
+                $merged->gaps[] = new CoverageGap(CoverageGapKind::ExtractionFailed, $file->path, $e->getMessage(), $name);
             }
         }
 
-        return $merged;
+        $merged->declaredClasses = array_map(static fn ($class): string => $class->fqcn, $file->getClasses());
+
+        return $this->withoutIgnoredClasses($file, $merged);
+    }
+
+    /**
+     * #[GraphIgnore] keeps a class out of the graph — its nodes and the edges
+     * leaving it — and leaves an "ignored" gap in its place, so a question
+     * about it is answered with "not looked at" rather than "nothing there".
+     * Edges other classes have INTO it stay: those references are real.
+     */
+    private function withoutIgnoredClasses(ParsedFile $file, ExtractionResult $result): ExtractionResult
+    {
+        $ignored = [];
+        foreach ($file->getClasses() as $class) {
+            $attribute = $class->getAttribute(GraphIgnore::class);
+            if ($attribute === null) {
+                continue;
+            }
+            $ignored[NodeId::forClass($class->fqcn)] = true;
+            $reason = $attribute->unreadableReason() === null ? (string) ($attribute->getArguments()['reason'] ?? $attribute->getArguments()[0] ?? '') : '';
+            $result->gaps[] = new CoverageGap(
+                CoverageGapKind::Ignored,
+                $file->path,
+                $reason !== '' ? $reason : 'Marked #[GraphIgnore]',
+                $class->fqcn,
+                $class->startLine,
+            );
+        }
+        if ($ignored === []) {
+            return $result;
+        }
+
+        $kept = new ExtractionResult();
+        foreach ($result->nodes as $node) {
+            if (!isset($ignored[$node->getId()])) {
+                $kept->addNode($node);
+            }
+        }
+        foreach ($result->edges as $edge) {
+            if (!isset($ignored[$edge->getSourceId()])) {
+                $kept->addEdge($edge);
+            }
+        }
+        $kept->failures = $result->failures;
+        $kept->gaps = $result->gaps;
+        $kept->declaredClasses = array_values(array_filter(
+            $result->declaredClasses,
+            static fn (string $fqcn): bool => !isset($ignored[NodeId::forClass($fqcn)]),
+        ));
+
+        return $kept;
     }
 
     /** @return list<ExtractorInterface> */
@@ -53,6 +117,7 @@ final class ExtractorPipeline
             new Ast\InstantiationExtractor(),
             new Ast\TypeHintExtractor(),
             new Ast\UseStatementExtractor(),
+            new Ast\ReferenceExtractor(),
         ];
     }
 }

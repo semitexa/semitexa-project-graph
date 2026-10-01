@@ -48,8 +48,12 @@ final class UseStatementExtractor implements ExtractorInterface
 
                 if ($node instanceof AstNode\Stmt\Use_) {
                     foreach ($node->uses as $use) {
-                        if ($use->getType() !== AstNode\Stmt\Use_::TYPE_NORMAL
-                            && $use->getType() !== AstNode\Stmt\Use_::TYPE_UNKNOWN) {
+                        // ->type, not ->getType(): since php-parser 5 getType()
+                        // is the node's own kind ("UseItem"), which never equals
+                        // a Use_::TYPE_* constant — every import was skipped and
+                        // the graph carried no imports edges at all.
+                        $type = $use->type !== AstNode\Stmt\Use_::TYPE_UNKNOWN ? $use->type : $node->type;
+                        if ($type !== AstNode\Stmt\Use_::TYPE_NORMAL) {
                             continue;
                         }
                         $this->importsByNamespace[$this->currentNamespace][] = [
@@ -62,7 +66,7 @@ final class UseStatementExtractor implements ExtractorInterface
                 if ($node instanceof AstNode\Stmt\GroupUse) {
                     $prefix = $node->prefix->toString();
                     foreach ($node->uses as $use) {
-                        $type = $use->getType() !== AstNode\Stmt\Use_::TYPE_UNKNOWN ? $use->getType() : $node->getType();
+                        $type = $use->type !== AstNode\Stmt\Use_::TYPE_UNKNOWN ? $use->type : $node->type;
                         if ($type !== AstNode\Stmt\Use_::TYPE_NORMAL) {
                             continue;
                         }

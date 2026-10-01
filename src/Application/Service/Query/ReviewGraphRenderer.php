@@ -6,6 +6,13 @@ namespace Semitexa\ProjectGraph\Application\Service\Query;
 
 final class ReviewGraphRenderer
 {
+    /** The text formats this renderer writes; `html` is {@see GraphExport}'s. */
+    public const FORMATS = ['summary', 'json', 'dot', 'markdown'];
+
+    /**
+     * An unknown format is an error. It used to fall back to the summary with
+     * exit 0, so `--format=html` printed a summary and looked like it worked.
+     */
     public function render(GraphView $view, string $format, ?string $lastUpdate = null, ?string $schemaVersion = null): string
     {
         return match ($format) {
@@ -13,7 +20,7 @@ final class ReviewGraphRenderer
             'json'     => $this->renderJson($view),
             'dot'      => $this->renderDot($view),
             'markdown' => $this->renderMarkdown($view),
-            default    => $this->renderSummary($view, $lastUpdate, $schemaVersion),
+            default    => throw new \InvalidArgumentException(sprintf('Unknown format "%s"; expected one of: %s.', $format, implode(', ', self::FORMATS))),
         };
     }
 

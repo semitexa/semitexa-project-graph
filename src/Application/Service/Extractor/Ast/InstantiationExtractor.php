@@ -6,8 +6,10 @@ namespace Semitexa\ProjectGraph\Application\Service\Extractor\Ast;
 
 use PhpParser\Node as AstNode;
 use PhpParser\NodeVisitorAbstract;
+use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageGapKind;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractionResult;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractorInterface;
+use Semitexa\ProjectGraph\Domain\Model\CoverageGap;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
@@ -26,6 +28,7 @@ final class InstantiationExtractor implements ExtractorInterface
 
         $visitor = new class($file, $result) extends NodeVisitorAbstract {
             private string $currentClass = '';
+            private ?string $parentClass = null;
 
             public function __construct(
                 private readonly ParsedFile $file,
@@ -36,12 +39,21 @@ final class InstantiationExtractor implements ExtractorInterface
             {
                 if ($node instanceof AstNode\Stmt\ClassLike && $node->namespacedName !== null) {
                     $this->currentClass = $node->namespacedName->toString();
+                    $this->parentClass = $node instanceof AstNode\Stmt\Class_ ? $node->extends?->toString() : null;
                 }
 
                 if ($node instanceof AstNode\Expr\New_ && $this->currentClass !== '') {
                     $class = $node->class;
-                    if ($class instanceof AstNode\Name) {
-                        $targetFqcn = $class->toString();
+                    if ($class instanceof AstNode\Expr) {
+                        $this->result->gaps[] = new CoverageGap(
+                            CoverageGapKind::DynamicReference,
+                            $this->file->path,
+                            'An instantiation of a class known only at runtime',
+                            $this->currentClass,
+                            $node->getStartLine(),
+                        );
+                    }
+                    if ($class instanceof AstNode\Name && ($targetFqcn = ClassNames::of($class, $this->parentClass)) !== null) {
                         $this->result->addEdge(new Edge(
                             sourceId: NodeId::forClass($this->currentClass),
                             targetId: NodeId::forClass($targetFqcn),

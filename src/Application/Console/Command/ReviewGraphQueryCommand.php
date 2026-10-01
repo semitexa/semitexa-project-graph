@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Console\Command;
 
+use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageReport;
 use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Console\BaseCommand;
@@ -86,9 +87,10 @@ final class ReviewGraphQueryCommand extends BaseCommand
                 return self::FAILURE;
             }
             $edges = $query->getUsages($nodeId, max(1, (int) $input->getOption('depth')));
+            $coverage = (new CoverageReport($storage))->forNodes([$nodeId]);
             return $compact
-                ? $this->renderCompact($io, $edges, $query, $nodeId, $json)
-                : $this->renderEdges($io, $edges, $query, $json, $ndjson);
+                ? $this->renderCompact($io, $edges, $query, $nodeId, $json, $coverage)
+                : $this->renderEdges($io, $edges, $query, $json, $ndjson, $coverage);
         } elseif (is_string($deps) && $deps !== '') {
             $nodeId = $this->resolveNodeId($storage, $deps);
             if ($nodeId === null) {
@@ -96,9 +98,10 @@ final class ReviewGraphQueryCommand extends BaseCommand
                 return self::FAILURE;
             }
             $edges = $query->getDependencies($nodeId, max(1, (int) $input->getOption('depth')));
+            $coverage = (new CoverageReport($storage))->forNodes([$nodeId]);
             return $compact
-                ? $this->renderCompact($io, $edges, $query, $nodeId, $json)
-                : $this->renderEdges($io, $edges, $query, $json, $ndjson);
+                ? $this->renderCompact($io, $edges, $query, $nodeId, $json, $coverage)
+                : $this->renderEdges($io, $edges, $query, $json, $ndjson, $coverage);
         } elseif ($crossModule) {
             $from = $input->getOption('from');
             $to = $input->getOption('to');
@@ -137,7 +140,8 @@ final class ReviewGraphQueryCommand extends BaseCommand
      *
      * @param list<\Semitexa\ProjectGraph\Domain\Model\Edge> $edges
      */
-    private function renderCompact(SymfonyStyle $io, array $edges, GraphQueryService $query, string $anchorId, bool $json): int
+    /** @param ?array<string, mixed> $coverage */
+    private function renderCompact(SymfonyStyle $io, array $edges, GraphQueryService $query, string $anchorId, bool $json, ?array $coverage = null): int
     {
         $groups = [];
         foreach ($edges as $e) {
@@ -154,13 +158,17 @@ final class ReviewGraphQueryCommand extends BaseCommand
             foreach ($groups as $fqcn => $g) {
                 $out[] = ['class' => $fqcn, 'kinds' => array_keys($g['kinds']), 'edges' => $g['count']];
             }
-            $io->writeln((string) json_encode(['anchor' => $anchorId, 'classes' => count($out), 'related' => $out], JSON_UNESCAPED_SLASHES));
+            $payload = ['anchor' => $anchorId, 'classes' => count($out), 'related' => $out];
+            if ($coverage !== null) {
+                $payload['coverage'] = $coverage;
+            }
+            $io->writeln((string) json_encode($payload, JSON_UNESCAPED_SLASHES));
 
             return self::SUCCESS;
         }
 
         if ($groups === []) {
-            $io->text('No edges found.');
+            $this->renderNoEdges($io, $coverage);
 
             return self::SUCCESS;
         }
@@ -169,12 +177,20 @@ final class ReviewGraphQueryCommand extends BaseCommand
             $io->text($fqcn . '  [' . implode(', ', array_keys($g['kinds'])) . '] ×' . $g['count']);
         }
         $io->text(count($groups) . ' related class(es).');
+        $this->renderCoverageFooter($io, $coverage);
 
         return self::SUCCESS;
     }
 
     /** @param list<\Semitexa\ProjectGraph\Domain\Model\Edge> $edges */
-    private function renderEdges(SymfonyStyle $io, array $edges, GraphQueryService $query, bool $json, bool $ndjson): int
+    /**
+     * --json keeps its bare list of edges (existing consumers parse it as
+     * such); the coverage block reaches machine readers through --ndjson (a
+     * trailing kind:coverage line) and --compact --json.
+     *
+     * @param ?array<string, mixed> $coverage
+     */
+    private function renderEdges(SymfonyStyle $io, array $edges, GraphQueryService $query, bool $json, bool $ndjson, ?array $coverage = null): int
     {
         if ($json) {
             $data = array_map(fn($e) => [
@@ -209,12 +225,15 @@ final class ReviewGraphQueryCommand extends BaseCommand
 
                 $io->writeln($line);
             }
+            if ($coverage !== null) {
+                $io->writeln((string) json_encode(['kind' => 'coverage'] + $coverage, JSON_UNESCAPED_SLASHES));
+            }
 
             return self::SUCCESS;
         }
 
         if (empty($edges)) {
-            $io->text('No edges found.');
+            $this->renderNoEdges($io, $coverage);
             return self::SUCCESS;
         }
 
@@ -225,8 +244,29 @@ final class ReviewGraphQueryCommand extends BaseCommand
             $tgtLabel = $target ? $target->getFqcn() : $edge->getTargetId();
             $io->text($srcLabel . ' --[' . $edge->getType()->value . ']--> ' . $tgtLabel);
         }
+        $this->renderCoverageFooter($io, $coverage);
 
         return self::SUCCESS;
+    }
+
+    /** @param ?array<string, mixed> $coverage */
+    private function renderNoEdges(SymfonyStyle $io, ?array $coverage): void
+    {
+        if ($coverage === null || $coverage['absence_is_proof']) {
+            $io->text('No edges found.');
+            return;
+        }
+
+        $io->text('No edges found — not proof: the graph did not see everything.');
+        $io->text(CoverageReport::describe($coverage, $this->getProjectRoot()));
+    }
+
+    /** @param ?array<string, mixed> $coverage */
+    private function renderCoverageFooter(SymfonyStyle $io, ?array $coverage): void
+    {
+        if ($coverage !== null && !$coverage['absence_is_proof']) {
+            $io->text(CoverageReport::describe($coverage, $this->getProjectRoot()));
+        }
     }
 
     /** @param list<\Semitexa\ProjectGraph\Domain\Model\Node> $nodes */

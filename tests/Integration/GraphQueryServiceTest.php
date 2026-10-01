@@ -6,8 +6,6 @@ namespace Semitexa\ProjectGraph\Tests\Integration;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
-use Semitexa\Orm\Domain\Model\ConnectionConfig;
-use Semitexa\Orm\OrmManager;
 use Semitexa\ProjectGraph\Application\Service\Query\Direction;
 use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
@@ -15,6 +13,7 @@ use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
 use Semitexa\ProjectGraph\Application\Service\Query\GraphQueryService;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Domain\Model\Node;
+use Semitexa\ProjectGraph\Tests\Support\GraphTestStore;
 
 /**
  * The query surface, against a real store.
@@ -37,51 +36,12 @@ use Semitexa\ProjectGraph\Domain\Model\Node;
  */
 final class GraphQueryServiceTest extends TestCase
 {
-    private OrmManager $orm;
     private GraphStorage $storage;
     private GraphQueryService $query;
 
     protected function setUp(): void
     {
-        $this->orm = new OrmManager(config: new ConnectionConfig(driver: 'sqlite', sqliteMemory: true));
-
-        // The tables are written out rather than collected. The schema
-        // collector reads EVERY resource model in the workspace, not this
-        // package's four, and one of them asks SQLite for an AUTOINCREMENT on a
-        // non-integer key — so collecting here fails for a reason that has
-        // nothing to do with the graph.
-        $db = $this->orm->getAdapter();
-        $db->execute(
-            'CREATE TABLE graph_nodes (
-                id TEXT PRIMARY KEY, type TEXT NOT NULL, fqcn TEXT NOT NULL, name TEXT NOT NULL,
-                file TEXT NOT NULL, line INTEGER NOT NULL, end_line INTEGER NOT NULL DEFAULT 0,
-                module TEXT NOT NULL DEFAULT \'\', metadata TEXT NOT NULL DEFAULT \'{}\',
-                is_placeholder INTEGER NOT NULL DEFAULT 0
-            )',
-        );
-        $db->execute(
-            'CREATE TABLE graph_edges (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, source_id TEXT NOT NULL, target_id TEXT NOT NULL,
-                type TEXT NOT NULL, metadata TEXT NOT NULL DEFAULT \'{}\'
-            )',
-        );
-        $db->execute(
-            'CREATE TABLE graph_file_index (
-                path TEXT PRIMARY KEY, content_hash TEXT NOT NULL, indexed_at INTEGER NOT NULL,
-                module TEXT NOT NULL, line_count INTEGER NOT NULL, is_dirty INTEGER NOT NULL DEFAULT 0
-            )',
-        );
-        $db->execute('CREATE TABLE graph_meta (meta_key TEXT PRIMARY KEY, value TEXT NOT NULL)');
-
-        $this->storage = new GraphStorage(
-            $this->orm->getAdapter(),
-            $this->orm->getTransactionManager(),
-            $this->orm->getMapperRegistry(),
-            $this->orm->getResourceModelHydrator(),
-            $this->orm->getResourceModelMetadataRegistry(),
-            $this->orm->getResourceModelRelationLoader(),
-            $this->orm->getAggregateWriteEngine(),
-        );
+        $this->storage = GraphTestStore::create()->storage;
 
         $this->query = new GraphQueryService($this->storage);
         $this->seed();

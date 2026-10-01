@@ -68,57 +68,265 @@ final class GraphEdgeRepository
         return array_merge($outgoing, $incoming);
     }
 
-    /** @return list<Edge> */
-    public function findByType(EdgeType $type, int $limit = 1000): array
+    /**
+     * Every edge of a type. No default limit: a cap here used to truncate
+     * whole-graph answers with nothing telling the caller they were partial.
+     * A caller that wants a page asks for one.
+     *
+     * @return list<Edge>
+     */
+    public function findByType(EdgeType $type, ?int $limit = null): array
     {
-        return $this->newQuery()
-            ->where(ColumnRef::for(GraphEdgeResource::class, 'type'), Operator::Equals, $type->value)
-            ->limit($limit)
-            ->fetchAllAs(Edge::class, $this->mapperRegistry);
-    }
+        $query = $this->newQuery()
+            ->where(ColumnRef::for(GraphEdgeResource::class, 'type'), Operator::Equals, $type->value);
 
-    public function upsert(Edge $edge): void
-    {
-        $existing = $this->newQuery()
-            ->where(ColumnRef::for(GraphEdgeResource::class, 'source_id'), Operator::Equals, $edge->getSourceId())
-            ->where(ColumnRef::for(GraphEdgeResource::class, 'target_id'), Operator::Equals, $edge->getTargetId())
-            ->where(ColumnRef::for(GraphEdgeResource::class, 'type'), Operator::Equals, $edge->getType()->value)
-            ->fetchOneAs(Edge::class, $this->mapperRegistry) ?: null;
-
-        if ($existing !== null) {
-            $updated = new Edge(
-                id:       $existing->getId(),
-                sourceId: $edge->getSourceId(),
-                targetId: $edge->getTargetId(),
-                type:     $edge->getType(),
-                metadata: $edge->getMetadata(),
-            );
-            $this->writeEngine->update($updated, GraphEdgeResource::class, $this->mapperRegistry);
-        } else {
-            $this->writeEngine->insert($edge, GraphEdgeResource::class, $this->mapperRegistry);
+        if ($limit !== null) {
+            $query = $query->limit($limit);
         }
+
+        return $query->fetchAllAs(Edge::class, $this->mapperRegistry);
     }
 
-    /** @return int count of deleted edges */
-    public function deleteByNodeIds(array $nodeIds): int
+    /**
+     * Insert the edge, or refresh its metadata when (source, target, type)
+     * already exists. Plain SQL on purpose: this runs once per extracted edge
+     * — ~94k times on a workspace full build — and the ORM path (hydrate the
+     * existing row, then insert or update through the write engine) made the
+     * build spend ~90% of its time here.
+     */
+    /** @return bool true when the edge was inserted, false when it existed and was refreshed */
+    public function upsert(Edge $edge): bool
     {
-        if (empty($nodeIds)) {
+        $key = [
+            'source' => $edge->getSourceId(),
+            'target' => $edge->getTargetId(),
+            'type'   => $edge->getType()->value,
+        ];
+        $metadata = json_encode($edge->getMetadata()) ?: '{}';
+
+        $existingId = $this->adapter->execute(
+            'SELECT id FROM graph_edges WHERE source_id = :source AND target_id = :target AND type = :type LIMIT 1',
+            $key,
+        )->fetchColumn();
+
+        if ($existingId !== false && $existingId !== null) {
+            $this->adapter->execute('UPDATE graph_edges SET metadata = :metadata WHERE id = :id', ['metadata' => $metadata, 'id' => $existingId]);
+            return false;
+        }
+
+        $this->adapter->execute(
+            'INSERT INTO graph_edges (source_id, target_id, type, metadata) VALUES (:source, :target, :type, :metadata)',
+            $key + ['metadata' => $metadata],
+        );
+
+        return true;
+    }
+
+    /**
+     * Every edge with what is known about its source node, page by page (the
+     * adapter buffers a whole result, and ~67k joined rows decoded at once do
+     * not fit in 128M). `via` is read out of the metadata by SQL: how a
+     * reference was made, or where an attribute was applied.
+     *
+     * @return \Generator<int, array{type: string, source_id: string, target_id: string, via: ?string, source_file: string, source_declared: bool}>
+     */
+    public function withSources(int $pageSize = 5000): \Generator
+    {
+        $after = 0;
+        do {
+            $rows = $this->adapter->execute(
+                "SELECT e.id, e.type, e.source_id, e.target_id, COALESCE(json_extract(e.metadata, '$.via'), json_extract(e.metadata, '$.target')) AS via,"
+                . ' n.file AS source_file, n.is_placeholder AS source_placeholder'
+                . ' FROM graph_edges e LEFT JOIN graph_nodes n ON n.id = e.source_id'
+                . ' WHERE e.id > :after ORDER BY e.id LIMIT ' . $pageSize,
+                ['after' => $after],
+            )->fetchAll();
+
+            foreach ($rows as $row) {
+                $after = (int) $row['id'];
+                yield [
+                    'type'            => (string) $row['type'],
+                    'source_id'       => (string) $row['source_id'],
+                    'target_id'       => (string) $row['target_id'],
+                    'via'             => $row['via'] !== null ? (string) $row['via'] : null,
+                    'source_file'     => (string) ($row['source_file'] ?? ''),
+                    'source_declared' => $row['source_file'] !== null && (int) $row['source_placeholder'] === 0,
+                ];
+            }
+        } while (count($rows) === $pageSize);
+    }
+
+    /** @return list<Edge> every edge, without the ORM */
+    public function all(): array
+    {
+        return array_values(array_map(
+            static fn (array $row): Edge => new Edge(
+                sourceId: (string) $row['source_id'],
+                targetId: (string) $row['target_id'],
+                type:     EdgeType::from((string) $row['type']),
+                metadata: json_decode((string) $row['metadata'], true) ?: [],
+            ),
+            $this->adapter->execute('SELECT source_id, target_id, type, metadata FROM graph_edges')->fetchAll(),
+        ));
+    }
+
+    /**
+     * Edges leaving any of the given nodes, without the ORM (runs once per
+     * re-read file).
+     *
+     * @param list<string> $sourceIds
+     * @return list<Edge>
+     */
+    public function findBySourceIds(array $sourceIds): array
+    {
+        if ($sourceIds === []) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($sourceIds), '?'));
+        $rows = $this->adapter->execute(
+            'SELECT source_id, target_id, type, metadata FROM graph_edges WHERE source_id IN (' . $placeholders . ')',
+            $sourceIds,
+        )->fetchAll();
+
+        return array_values(array_map(
+            static fn (array $row): Edge => new Edge(
+                sourceId: (string) $row['source_id'],
+                targetId: (string) $row['target_id'],
+                type:     EdgeType::from((string) $row['type']),
+                metadata: json_decode((string) $row['metadata'], true) ?: [],
+            ),
+            $rows,
+        ));
+    }
+
+    /**
+     * The edges ARRIVING at the given nodes — the reverse of findBySourceIds().
+     *
+     * @param list<string> $targetIds
+     * @return list<Edge>
+     */
+    public function findByTargetIds(array $targetIds): array
+    {
+        $edges = [];
+        foreach (array_chunk(array_values(array_unique($targetIds)), 500) as $chunk) {
+            [$in, $params] = self::named('t', $chunk);
+            $rows = $this->adapter->execute(
+                'SELECT source_id, target_id, type, metadata FROM graph_edges WHERE target_id IN (' . $in . ')',
+                $params,
+            )->fetchAll();
+            foreach ($rows as $row) {
+                $type = EdgeType::tryFrom(self::text($row['type'] ?? null));
+                if ($type === null) {
+                    continue;
+                }
+                $metadata = json_decode(self::text($row['metadata'] ?? null), true);
+                $edges[] = new Edge(
+                    sourceId: self::text($row['source_id'] ?? null),
+                    targetId: self::text($row['target_id'] ?? null),
+                    type:     $type,
+                    metadata: is_array($metadata) ? $metadata : [],
+                );
+            }
+        }
+
+        return $edges;
+    }
+
+    /**
+     * How many edges arrive at each node, leaving out the given kinds — a node's
+     * fan-in across the whole graph, not just the part a view has loaded.
+     *
+     * @param list<string> $targetIds
+     * @param list<string> $excludeTypes edge type values not to count
+     * @return array<string, int> keyed by target id; nodes nothing reaches are absent
+     */
+    public function countInboundByTarget(array $targetIds, array $excludeTypes = []): array
+    {
+        [$notIn, $excluded] = self::named('x', $excludeTypes);
+        $counts = [];
+        foreach (array_chunk(array_values(array_unique($targetIds)), 500) as $chunk) {
+            [$in, $params] = self::named('t', $chunk);
+            $sql = 'SELECT target_id, COUNT(*) AS c FROM graph_edges WHERE target_id IN (' . $in . ')'
+                . ($excluded !== [] ? ' AND type NOT IN (' . $notIn . ')' : '')
+                . ' GROUP BY target_id';
+            foreach ($this->adapter->execute($sql, $params + $excluded)->fetchAll() as $row) {
+                $c = $row['c'] ?? 0;
+                $counts[self::text($row['target_id'] ?? null)] = is_numeric($c) ? (int) $c : 0;
+            }
+        }
+
+        return $counts;
+    }
+
+    /**
+     * Named placeholders for an IN list: `:t0,:t1` and the matching params.
+     *
+     * @param list<string> $values
+     * @return array{0: string, 1: array<string, string>}
+     */
+    private static function named(string $prefix, array $values): array
+    {
+        $params = [];
+        foreach ($values as $i => $value) {
+            $params[$prefix . $i] = $value;
+        }
+
+        return [implode(',', array_map(static fn (string $k): string => ':' . $k, array_keys($params))), $params];
+    }
+
+    private static function text(mixed $value): string
+    {
+        return is_scalar($value) ? (string) $value : '';
+    }
+
+    /**
+     * Delete the edges LEAVING the given nodes — the ones their own file's
+     * extraction emitted. Edges other files have into them are not touched:
+     * those files are not being re-read, so nothing would put the edges back.
+     *
+     * @param list<string> $sourceIds
+     * @return int count of deleted edges
+     */
+    public function deleteBySourceIds(array $sourceIds): int
+    {
+        if ($sourceIds === []) {
             return 0;
         }
 
-        $placeholders = implode(',', array_fill(0, count($nodeIds), '?'));
-        $countResult = $this->adapter->execute(
-            'SELECT COUNT(*) FROM graph_edges WHERE source_id IN (' . $placeholders . ') OR target_id IN (' . $placeholders . ')',
-            [...$nodeIds, ...$nodeIds],
-        );
-        $count = (int) ($countResult->fetchColumn() ?? 0);
+        $placeholders = implode(',', array_fill(0, count($sourceIds), '?'));
+        $count = (int) ($this->adapter->execute(
+            'SELECT COUNT(*) FROM graph_edges WHERE source_id IN (' . $placeholders . ')',
+            $sourceIds,
+        )->fetchColumn() ?? 0);
 
         $this->adapter->execute(
-            'DELETE FROM graph_edges WHERE source_id IN (' . $placeholders . ') OR target_id IN (' . $placeholders . ')',
-            [...$nodeIds, ...$nodeIds],
+            'DELETE FROM graph_edges WHERE source_id IN (' . $placeholders . ')',
+            $sourceIds,
         );
 
         return $count;
+    }
+
+    /**
+     * Which of the given nodes some edge still points at.
+     *
+     * @param list<string> $nodeIds
+     * @return list<string>
+     */
+    public function referencedAmong(array $nodeIds): array
+    {
+        if ($nodeIds === []) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($nodeIds), '?'));
+        $rows = $this->adapter->execute(
+            'SELECT DISTINCT target_id FROM graph_edges WHERE target_id IN (' . $placeholders . ')',
+            $nodeIds,
+        )->fetchAll();
+
+        return array_values(array_map(static fn (array $row): string => (string) $row['target_id'], $rows));
     }
 
     /**
