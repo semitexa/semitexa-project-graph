@@ -201,6 +201,86 @@ final class GraphEdgeRepository
     }
 
     /**
+     * The edges ARRIVING at the given nodes — the reverse of findBySourceIds().
+     *
+     * @param list<string> $targetIds
+     * @return list<Edge>
+     */
+    public function findByTargetIds(array $targetIds): array
+    {
+        $edges = [];
+        foreach (array_chunk(array_values(array_unique($targetIds)), 500) as $chunk) {
+            [$in, $params] = self::named('t', $chunk);
+            $rows = $this->adapter->execute(
+                'SELECT source_id, target_id, type, metadata FROM graph_edges WHERE target_id IN (' . $in . ')',
+                $params,
+            )->fetchAll();
+            foreach ($rows as $row) {
+                $type = EdgeType::tryFrom(self::text($row['type'] ?? null));
+                if ($type === null) {
+                    continue;
+                }
+                $metadata = json_decode(self::text($row['metadata'] ?? null), true);
+                $edges[] = new Edge(
+                    sourceId: self::text($row['source_id'] ?? null),
+                    targetId: self::text($row['target_id'] ?? null),
+                    type:     $type,
+                    metadata: is_array($metadata) ? $metadata : [],
+                );
+            }
+        }
+
+        return $edges;
+    }
+
+    /**
+     * How many edges arrive at each node, leaving out the given kinds — a node's
+     * fan-in across the whole graph, not just the part a view has loaded.
+     *
+     * @param list<string> $targetIds
+     * @param list<string> $excludeTypes edge type values not to count
+     * @return array<string, int> keyed by target id; nodes nothing reaches are absent
+     */
+    public function countInboundByTarget(array $targetIds, array $excludeTypes = []): array
+    {
+        [$notIn, $excluded] = self::named('x', $excludeTypes);
+        $counts = [];
+        foreach (array_chunk(array_values(array_unique($targetIds)), 500) as $chunk) {
+            [$in, $params] = self::named('t', $chunk);
+            $sql = 'SELECT target_id, COUNT(*) AS c FROM graph_edges WHERE target_id IN (' . $in . ')'
+                . ($excluded !== [] ? ' AND type NOT IN (' . $notIn . ')' : '')
+                . ' GROUP BY target_id';
+            foreach ($this->adapter->execute($sql, $params + $excluded)->fetchAll() as $row) {
+                $c = $row['c'] ?? 0;
+                $counts[self::text($row['target_id'] ?? null)] = is_numeric($c) ? (int) $c : 0;
+            }
+        }
+
+        return $counts;
+    }
+
+    /**
+     * Named placeholders for an IN list: `:t0,:t1` and the matching params.
+     *
+     * @param list<string> $values
+     * @return array{0: string, 1: array<string, string>}
+     */
+    private static function named(string $prefix, array $values): array
+    {
+        $params = [];
+        foreach ($values as $i => $value) {
+            $params[$prefix . $i] = $value;
+        }
+
+        return [implode(',', array_map(static fn (string $k): string => ':' . $k, array_keys($params))), $params];
+    }
+
+    private static function text(mixed $value): string
+    {
+        return is_scalar($value) ? (string) $value : '';
+    }
+
+    /**
      * Delete the edges LEAVING the given nodes — the ones their own file's
      * extraction emitted. Edges other files have into them are not touched:
      * those files are not being re-read, so nothing would put the edges back.

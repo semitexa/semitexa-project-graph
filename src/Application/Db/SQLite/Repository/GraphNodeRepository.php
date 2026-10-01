@@ -46,6 +46,30 @@ final class GraphNodeRepository
             ->fetchOneAs(Node::class, $this->mapperRegistry) ?: null;
     }
 
+    /**
+     * Many nodes in one round trip per 500 ids — a view that expands a node
+     * would otherwise pay one query per neighbour.
+     *
+     * @param list<string> $ids
+     * @return array<string, Node> keyed by id; ids the graph does not hold are absent
+     */
+    public function findByIds(array $ids): array
+    {
+        $found = [];
+        foreach (array_chunk(array_values(array_unique($ids)), 500) as $chunk) {
+            $nodes = $this->newQuery()
+                ->whereIn(ColumnRef::for(GraphNodeResource::class, 'id'), $chunk)
+                ->fetchAllAs(Node::class, $this->mapperRegistry);
+            foreach ($nodes as $node) {
+                if ($node instanceof Node) {
+                    $found[$node->getId()] = $node;
+                }
+            }
+        }
+
+        return $found;
+    }
+
     public function findByFqcn(string $fqcn): ?Node
     {
         $candidates = $this->newQuery()

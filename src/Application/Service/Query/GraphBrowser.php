@@ -1,0 +1,316 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Semitexa\ProjectGraph\Application\Service\Query;
+
+use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
+use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
+use Semitexa\ProjectGraph\Domain\Model\Edge;
+use Semitexa\ProjectGraph\Domain\Model\Node;
+
+/**
+ * The graph as a browser wants it: small JSON-ready slices, fetched in bulk.
+ *
+ * One reader serves both places the graph is browsed — the Observatory's Graph
+ * view, which asks for one slice at a time over HTTP, and the self-contained
+ * HTML export, which embeds the same slices in the file. Keeping a single
+ * source for both is what makes the export the same view rather than a second
+ * viewer that drifts.
+ *
+ * Direction follows dependency, the way a reader walks from an entry point:
+ * outgoing edges, plus the two edges the indexer records the "wrong" way round
+ * for that walk — a payload serves a route, a handler handles a payload — so a
+ * route expands to its payload and the payload to its handler.
+ *
+ * Every id that arrives here comes from a request. It is only ever bound into
+ * SQL: never handed to class_exists() or reflection, which would autoload it.
+ */
+final class GraphBrowser
+{
+    /**
+     * Edge kinds left out of every view. `imports` alone is ~20k edges of `use`
+     * statements; the others point at documentation and grouping nodes rather
+     * than at code a class depends on.
+     */
+    public const NOISE_EDGES = ['imports', 'belongs_to_domain', 'intent_for', 'participates_in_flow', 'annotated_with'];
+
+    /** Node kinds that describe the code rather than being part of it. */
+    public const HIDDEN_NODES = ['doc_node', 'domain_context', 'execution_flow'];
+
+    /** Inbound edges walked as if outgoing: route ← payload ← handler. */
+    private const ENTRY_REVERSED = ['serves_route', 'handles'];
+
+    public const MAX_DEPTH = 4;
+    public const MAX_NODES = 2500;
+    private const SEARCH_LIMIT = 50;
+    private const MAX_EDGES_PER_SIDE = 400;
+
+    public function __construct(
+        private readonly GraphStorage $storage,
+        private readonly string $projectRoot,
+    ) {
+    }
+
+    /**
+     * What the view opens on: counts, modules and the entry points the tree is
+     * rooted at.
+     *
+     * @return array<string, mixed>
+     */
+    public function summary(): array
+    {
+        $entries = [];
+        foreach (['route' => NodeType::Route, 'command' => NodeType::Command, 'handler' => NodeType::Handler] as $key => $type) {
+            $list = [];
+            foreach ($this->storage->nodes->findByType($type->value) as $node) {
+                if ($node->getIsPlaceholder()) {
+                    continue;
+                }
+                $list[] = $this->node($node);
+            }
+            usort($list, static fn (array $a, array $b): int => strcmp($a['name'], $b['name']));
+            $entries[$key] = $list;
+        }
+
+        $byType = $this->storage->nodes->countByType();
+        foreach (self::HIDDEN_NODES as $hidden) {
+            unset($byType[$hidden]);
+        }
+
+        $lastUpdate = $this->storage->getMeta('last_update');
+        $exclusions = json_decode((string) ($this->storage->getMeta('coverage_exclusions') ?? ''), true);
+
+        return [
+            'builtAt' => $lastUpdate !== null && $lastUpdate !== '' ? (int) $lastUpdate : null,
+            'counts' => [
+                'nodes' => $this->storage->nodes->countAll(),
+                'edges' => $this->storage->edges->countAll(),
+                'byType' => $byType,
+            ],
+            'modules' => $this->storage->nodes->distinctModules(),
+            'entries' => $entries,
+            'coverage' => [
+                'gaps' => $this->storage->gaps->countByKind(),
+                'excluded' => is_array($exclusions) ? $exclusions : [],
+            ],
+        ];
+    }
+
+    /**
+     * One node and every edge touching it, neighbours resolved in bulk.
+     *
+     * @return array<string, mixed>|null null when the graph has no such node
+     */
+    public function describe(string $id): ?array
+    {
+        $node = $this->storage->nodes->findById($id);
+        if ($node === null) {
+            return null;
+        }
+
+        $out = $this->withoutNoise($this->storage->edges->findBySourceIds([$id]));
+        $in = $this->withoutNoise($this->storage->edges->findByTargetIds([$id]));
+        $truncated = count($out) > self::MAX_EDGES_PER_SIDE || count($in) > self::MAX_EDGES_PER_SIDE;
+        $out = array_slice($out, 0, self::MAX_EDGES_PER_SIDE);
+        $in = array_slice($in, 0, self::MAX_EDGES_PER_SIDE);
+
+        $ids = [];
+        foreach ($out as $edge) {
+            $ids[] = $edge->getTargetId();
+        }
+        foreach ($in as $edge) {
+            $ids[] = $edge->getSourceId();
+        }
+        $neighbours = $this->storage->nodes->findByIds($ids);
+
+        return [
+            'node' => $this->node($node),
+            'fanIn' => count($in),
+            'out' => $this->sides($out, $neighbours, outgoing: true),
+            'in' => $this->sides($in, $neighbours, outgoing: false),
+            'truncated' => $truncated,
+        ];
+    }
+
+    /**
+     * Everything reachable from $rootId within $depth steps, in the dependency
+     * direction. Depth 1 is one level of a lazily expanded tree; a deeper walk
+     * is the focus of the DAG view.
+     *
+     * @return array<string, mixed>|null null when the graph has no such node
+     */
+    public function subgraph(string $rootId, int $depth): ?array
+    {
+        $root = $this->storage->nodes->findById($rootId);
+        if ($root === null) {
+            return null;
+        }
+
+        $depth = max(1, min(self::MAX_DEPTH, $depth));
+        $nodes = [$rootId => $root];
+        $edges = [];
+        $frontier = [$rootId];
+        $truncated = false;
+
+        for ($level = 0; $level < $depth && $frontier !== []; $level++) {
+            $step = $this->step($frontier);
+            $next = [];
+            $missing = [];
+            foreach ($step as $edge) {
+                [$from, $to] = $edge;
+                $edges[$from . '>' . $to[0] . '>' . $to[1]] = ['s' => $from, 't' => $to[0], 'k' => $to[1], 'c' => $to[2]];
+                if (!isset($nodes[$to[0]])) {
+                    $missing[$to[0]] = true;
+                }
+            }
+
+            foreach ($this->storage->nodes->findByIds(array_keys($missing)) as $id => $node) {
+                if (in_array($node->getType()->value, self::HIDDEN_NODES, true)) {
+                    continue;
+                }
+                if (count($nodes) >= self::MAX_NODES) {
+                    $truncated = true;
+                    break;
+                }
+                $nodes[$id] = $node;
+                $next[] = $id;
+            }
+            $frontier = $next;
+        }
+
+        // An edge is only kept when both of its ends made it into the slice.
+        $edges = array_values(array_filter(
+            $edges,
+            static fn (array $e): bool => isset($nodes[$e['s']], $nodes[$e['t']]),
+        ));
+
+        $fanIn = $this->storage->edges->countInboundByTarget(array_keys($nodes), self::NOISE_EDGES);
+
+        $rendered = [];
+        foreach ($nodes as $id => $node) {
+            $rendered[] = $this->node($node) + ['fanIn' => $fanIn[$id] ?? 0];
+        }
+
+        return [
+            'root' => $rootId,
+            'depth' => $depth,
+            'nodes' => $rendered,
+            'edges' => $edges,
+            'truncated' => $truncated,
+        ];
+    }
+
+    /**
+     * Name or FQCN containing $query, real nodes before placeholders.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function search(string $query): array
+    {
+        $query = trim($query);
+        if (mb_strlen($query) < 2) {
+            return [];
+        }
+
+        $hits = [];
+        foreach ($this->storage->nodes->searchFull($query, self::SEARCH_LIMIT) as $node) {
+            if (in_array($node->getType()->value, self::HIDDEN_NODES, true)) {
+                continue;
+            }
+            $hits[] = $this->node($node);
+        }
+
+        usort($hits, static function (array $a, array $b) use ($query): int {
+            return [$a['placeholder'], !str_starts_with(strtolower($a['name']), strtolower($query)), $a['name']]
+                <=> [$b['placeholder'], !str_starts_with(strtolower($b['name']), strtolower($query)), $b['name']];
+        });
+
+        return $hits;
+    }
+
+    /**
+     * The JSON shape of one node. Paths are made relative to the project, since
+     * the indexer stored whatever absolute path its container saw.
+     *
+     * @return array{id: string, name: string, fqcn: string, type: string, module: string, file: string, line: int, placeholder: bool}
+     */
+    public function node(Node $node): array
+    {
+        $file = $node->getFile();
+        if (str_starts_with($file, $this->projectRoot . '/')) {
+            $file = substr($file, strlen($this->projectRoot) + 1);
+        }
+
+        return [
+            'id' => $node->getId(),
+            'name' => $node->name(),
+            'fqcn' => $node->getFqcn(),
+            'type' => $node->getType()->value,
+            'module' => $node->getModule(),
+            'file' => $file,
+            'line' => $node->getLine(),
+            'placeholder' => $node->getIsPlaceholder(),
+        ];
+    }
+
+    /**
+     * One step outward from every node in $frontier.
+     *
+     * @param list<string> $frontier
+     * @return list<array{0: string, 1: array{0: string, 1: string, 2: string}}> [from, [to, kind, class]]
+     */
+    private function step(array $frontier): array
+    {
+        $steps = [];
+        foreach ($this->withoutNoise($this->storage->edges->findBySourceIds($frontier)) as $edge) {
+            if (in_array($edge->getType()->value, self::ENTRY_REVERSED, true)) {
+                continue;
+            }
+            $steps[] = [$edge->getSourceId(), [$edge->getTargetId(), $edge->getType()->value, $edge->getType()->edgeClass()->value]];
+        }
+        foreach ($this->storage->edges->findByTargetIds($frontier) as $edge) {
+            if (!in_array($edge->getType()->value, self::ENTRY_REVERSED, true)) {
+                continue;
+            }
+            $steps[] = [$edge->getTargetId(), [$edge->getSourceId(), $edge->getType()->value, $edge->getType()->edgeClass()->value]];
+        }
+
+        return $steps;
+    }
+
+    /**
+     * @param list<Edge> $edges
+     * @return list<Edge>
+     */
+    private function withoutNoise(array $edges): array
+    {
+        return array_values(array_filter(
+            $edges,
+            static fn (Edge $edge): bool => !in_array($edge->getType()->value, self::NOISE_EDGES, true),
+        ));
+    }
+
+    /**
+     * @param list<Edge> $edges
+     * @param array<string, Node> $neighbours
+     * @return list<array{kind: string, class: string, node: array<string, mixed>}>
+     */
+    private function sides(array $edges, array $neighbours, bool $outgoing): array
+    {
+        $rows = [];
+        foreach ($edges as $edge) {
+            $other = $neighbours[$outgoing ? $edge->getTargetId() : $edge->getSourceId()] ?? null;
+            if ($other === null || in_array($other->getType()->value, self::HIDDEN_NODES, true)) {
+                continue;
+            }
+            $rows[] = [
+                'kind' => $edge->getType()->value,
+                'class' => $edge->getType()->edgeClass()->value,
+                'node' => $this->node($other),
+            ];
+        }
+
+        return $rows;
+    }
+}
