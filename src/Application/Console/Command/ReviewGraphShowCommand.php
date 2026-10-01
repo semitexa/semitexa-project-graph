@@ -9,6 +9,7 @@ use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
+use Semitexa\ProjectGraph\Application\Service\Query\GraphExport;
 use Semitexa\ProjectGraph\Application\Service\Query\GraphQueryService;
 use Semitexa\ProjectGraph\Application\Service\Query\ReviewGraphRenderer;
 use Semitexa\ProjectGraph\Application\Service\Support\UsesProjectGraphConnection;
@@ -37,7 +38,8 @@ final class ReviewGraphShowCommand extends BaseCommand
 
     protected function configure(): void
     {
-        $this->addOption('format', 'f', InputOption::VALUE_REQUIRED, 'Output format: summary, json, dot, markdown', 'summary');
+        $this->addOption('format', 'f', InputOption::VALUE_REQUIRED, 'Output format: summary, json, dot, markdown, html', 'summary');
+        $this->addOption('output', 'o', InputOption::VALUE_REQUIRED, 'File to write (required for html: a self-contained viewer that opens from file://)');
         $this->addOption('module', 'm', InputOption::VALUE_REQUIRED, 'Filter by module');
         $this->addOption('type', 't', InputOption::VALUE_REQUIRED, 'Filter by node type (comma-separated)');
         $this->addOption('depth', 'd', InputOption::VALUE_REQUIRED, 'Traversal depth from focus node', '3');
@@ -53,7 +55,17 @@ final class ReviewGraphShowCommand extends BaseCommand
         $focus  = $input->getArgument('focus');
         $depth  = (int) $input->getOption('depth');
 
+        if (!in_array($format, [...ReviewGraphRenderer::FORMATS, 'html'], true)) {
+            $io->error(sprintf('Unknown --format "%s". Expected one of: %s, html.', is_string($format) ? $format : '', implode(', ', ReviewGraphRenderer::FORMATS)));
+
+            return self::FAILURE;
+        }
+
         $storage = $this->createStorage();
+        if ($format === 'html') {
+            return $this->exportHtml($io, $storage, $input, is_string($focus) ? $focus : null, $depth, is_string($module) ? $module : null, $types);
+        }
+
         $query   = new GraphQueryService($storage);
         $renderer = new ReviewGraphRenderer();
 
@@ -70,6 +82,61 @@ final class ReviewGraphShowCommand extends BaseCommand
         $output->writeln($renderer->render($view, $format, $lastUpdate, $schemaVersion));
 
         return self::SUCCESS;
+    }
+
+    /**
+     * The graph view as one file. The slice is whatever the filters say — a
+     * focus with --depth, a --module, --type — or the whole graph; the size is
+     * printed because the whole graph of a large project is several megabytes.
+     *
+     * @param list<string>|null $types
+     */
+    private function exportHtml(SymfonyStyle $io, GraphStorage $storage, InputInterface $input, ?string $focus, int $depth, ?string $module, ?array $types): int
+    {
+        $path = $input->getOption('output');
+        if (!is_string($path) || $path === '') {
+            $io->error('--format=html writes a file: pass --output=<path>.');
+
+            return self::FAILURE;
+        }
+        if ((int) ($storage->getMeta('total_nodes') ?: 0) === 0) {
+            $io->warning('Graph is empty. Run ai:review-graph:generate first.');
+
+            return self::FAILURE;
+        }
+
+        $export = new GraphExport($storage, rtrim($this->getProjectRoot(), '/'));
+        try {
+            $data = $export->data($focus, $depth, $module, $types);
+        } catch (\InvalidArgumentException $e) {
+            $io->error($e->getMessage());
+
+            return self::FAILURE;
+        }
+
+        $title = 'Project graph' . ($focus !== null ? ' · ' . $focus : ($module !== null ? ' · ' . $module : ''));
+        try {
+            $bytes = $export->write($path, $data, $title);
+        } catch (\RuntimeException $e) {
+            $io->error($e->getMessage());
+
+            return self::FAILURE;
+        }
+
+        $io->success(sprintf(
+            'Wrote %s — %d nodes, %d edges, %s. Open it in a browser; it needs no server.',
+            $path,
+            count($data['nodes']),
+            count($data['edges']),
+            self::bytes($bytes),
+        ));
+
+        return self::SUCCESS;
+    }
+
+    private static function bytes(int $n): string
+    {
+        return $n >= 1048576 ? round($n / 1048576, 1) . ' MB' : round($n / 1024) . ' KB';
     }
 
     private function createStorage(): GraphStorage

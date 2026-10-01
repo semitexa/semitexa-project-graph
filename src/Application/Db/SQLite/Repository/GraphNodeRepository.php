@@ -70,6 +70,19 @@ final class GraphNodeRepository
         return $found;
     }
 
+    /**
+     * Every node — for an export of the whole graph, not for a request path.
+     *
+     * @return list<Node>
+     */
+    public function all(): array
+    {
+        return array_values(array_filter(
+            $this->newQuery()->fetchAllAs(Node::class, $this->mapperRegistry),
+            static fn (object $node): bool => $node instanceof Node,
+        ));
+    }
+
     public function findByFqcn(string $fqcn): ?Node
     {
         $candidates = $this->newQuery()

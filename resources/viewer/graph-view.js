@@ -62,6 +62,92 @@ function fetchSource(endpoint) {
   };
 }
 
+/**
+ * The export: the same questions answered from a JSON document embedded in
+ * the file — the walk rules mirror GraphBrowser's, so a slice looks the same
+ * offline as it does in the Observatory. Noise edges and documentation nodes
+ * were already left out when the file was written.
+ */
+const ENTRY_REVERSED = ['serves_route', 'handles'];
+const ENTRY_TYPES = ['route', 'command', 'handler'];
+function embeddedSource(data) {
+  const byId = new Map(data.nodes.map(n => [n.id, n]));
+  const out = new Map(), inn = new Map();
+  for (const e of data.edges) {
+    if (!out.has(e.s)) out.set(e.s, []); out.get(e.s).push(e);
+    if (!inn.has(e.t)) inn.set(e.t, []); inn.get(e.t).push(e);
+  }
+  const ok = v => Promise.resolve(v);
+  const missing = id => Promise.reject({error: 'no-node', id});
+  const step = id => [
+    ...(out.get(id) || []).filter(e => !ENTRY_REVERSED.includes(e.k)).map(e => ({s: id, t: e.t, k: e.k, c: e.c})),
+    ...(inn.get(id) || []).filter(e => ENTRY_REVERSED.includes(e.k)).map(e => ({s: id, t: e.s, k: e.k, c: e.c})),
+  ];
+  return {
+    live: false,
+    summary: () => ok(data.summary),
+    node(id) {
+      const node = byId.get(id); if (!node) return missing(id);
+      const side = (list, end) => list.map(e => ({kind: e.k, class: e.c, node: byId.get(e[end])})).filter(r => r.node);
+      const ins = inn.get(id) || [];
+      return ok({node, gaps: data.gaps[id] || [], fanIn: node.fanIn, out: side((out.get(id) || []).slice(0, 400), 't'), in: side(ins.slice(0, 400), 's'), truncated: ins.length > 400});
+    },
+    subgraph(id, depth) {
+      if (!byId.has(id)) return missing(id);
+      const seen = new Map([[id, byId.get(id)]]); const edges = []; let frontier = [id]; let truncated = false;
+      for (let level = 0; level < Math.max(1, Math.min(4, depth)) && frontier.length; level++) {
+        const next = [];
+        for (const f of frontier) for (const e of step(f)) {
+          const n = byId.get(e.t); if (!n) continue;
+          edges.push(e);
+          if (!seen.has(e.t)) { if (seen.size >= 2500) { truncated = true; continue; } seen.set(e.t, n); next.push(e.t); }
+        }
+        frontier = next;
+      }
+      const nodes = [...seen.values()];
+      const kept = edges.filter(e => seen.has(e.s) && seen.has(e.t));
+      for (const n of [...nodes]) {
+        const dyn = (data.gaps[n.id] || []).filter(g => g.kind === 'dynamic_reference');
+        if (!dyn.length) continue;
+        const ghost = 'ghost:' + n.id;
+        nodes.push({id: ghost, name: '? ' + dyn.length + ' runtime ' + (dyn.length === 1 ? 'class' : 'classes'), fqcn: 'Resolved only at runtime — lines ' + dyn.map(g => g.line).join(', '), type: 'unresolved', module: '', file: '', line: 0, placeholder: true, ghost: true, gaps: 0, fanIn: 0});
+        kept.push({s: n.id, t: ghost, k: 'dynamic_reference', c: 'inferred'});
+      }
+      return ok({root: id, depth, nodes, edges: kept, truncated});
+    },
+    path(id) {
+      const node = byId.get(id); if (!node) return ok(null);
+      if (ENTRY_TYPES.includes(node.type)) return ok([id]);
+      const childOf = new Map([[id, '']]); let frontier = [id];
+      for (let level = 0; level < 8 && frontier.length; level++) {
+        const fresh = [];
+        for (const f of frontier) {
+          const parents = [
+            ...(inn.get(f) || []).filter(e => !ENTRY_REVERSED.includes(e.k)).map(e => e.s),
+            ...(out.get(f) || []).filter(e => ENTRY_REVERSED.includes(e.k)).map(e => e.t),
+          ];
+          for (const p of parents) if (!childOf.has(p) && byId.has(p)) { childOf.set(p, f); fresh.push(p); }
+        }
+        for (const p of fresh) {
+          const n = byId.get(p);
+          if (!n.placeholder && ENTRY_TYPES.includes(n.type)) { const path = [p]; for (let at = childOf.get(p); at; at = childOf.get(at)) path.push(at); return ok(path); }
+        }
+        frontier = fresh;
+      }
+      return ok(null);
+    },
+    search(q) {
+      const needle = q.trim().toLowerCase(); if (needle.length < 2) return ok([]);
+      const hits = [];
+      for (const n of data.nodes) { if (n.name.toLowerCase().includes(needle) || n.fqcn.toLowerCase().includes(needle)) { hits.push(n); if (hits.length >= 200) break; } }
+      const rank = n => [n.placeholder ? 1 : 0, n.name.toLowerCase().startsWith(needle) ? 0 : 1];
+      hits.sort((a, b) => { const ra = rank(a), rb = rank(b); return ra[0] - rb[0] || ra[1] - rb[1] || a.name.localeCompare(b.name); });
+      return ok(hits.slice(0, 50));
+    },
+    findings: () => ok(data.findings),
+  };
+}
+
 /* ------------------------------------------------------------ the view */
 function mount(root, source, options = {}) {
   const S = {
@@ -411,7 +497,7 @@ function mount(root, source, options = {}) {
   return api;
 }
 
-window.SemitexaGraphView = Object.assign(window.SemitexaGraphView || {}, {mount, fetchSource, extensions: (window.SemitexaGraphView && window.SemitexaGraphView.extensions) || []});
+window.SemitexaGraphView = Object.assign(window.SemitexaGraphView || {}, {mount, fetchSource, embeddedSource, extensions: (window.SemitexaGraphView && window.SemitexaGraphView.extensions) || []});
 })();
 
 /* ======================================================================

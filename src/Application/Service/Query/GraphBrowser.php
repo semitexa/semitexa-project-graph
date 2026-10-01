@@ -150,7 +150,7 @@ final class GraphBrowser
      * direction. Depth 1 is one level of a lazily expanded tree; a deeper walk
      * is the focus of the DAG view.
      *
-     * @return array<string, mixed>|null null when the graph has no such node
+     * @return array{root: string, depth: int, nodes: list<array<string, mixed>>, edges: list<array{s: string, t: string, k: string, c: string}>, truncated: bool}|null null when the graph has no such node
      */
     public function subgraph(string $rootId, int $depth): ?array
     {
@@ -349,7 +349,11 @@ final class GraphBrowser
      * with their nodes resolved, plus the coverage summary that says how far
      * an absence of findings can be trusted.
      *
-     * @return array<string, mixed>
+     * @return array{
+     *     unused: list<array{finding: string, confidence: string, evidence: string, node: array{id: string, name: string, fqcn: string, type: string, module: string, file: string, line: int, placeholder: bool, gaps: int}}>,
+     *     cycles: list<array{finding: string, members: list<array{id: string, name: string, fqcn: string, type: string, module: string, file: string, line: int, placeholder: bool, gaps: int}>, cycle: list<string>}>,
+     *     coverage: array{complete: bool, gaps: array<string, int>, unresolved_references: int, exclusions: array<string, int>}
+     * }
      */
     public function findings(): array
     {
@@ -388,7 +392,7 @@ final class GraphBrowser
      *
      * @return list<array{kind: string, line: int, subject: string, detail: string}>
      */
-    private function gapsOf(string $file): array
+    public function gapsOf(string $file): array
     {
         if ($this->gapsByFile === null) {
             $this->gapsByFile = [];
