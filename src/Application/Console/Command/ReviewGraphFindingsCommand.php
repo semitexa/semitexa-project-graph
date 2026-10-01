@@ -9,8 +9,7 @@ use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
 use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageReport;
-use Semitexa\ProjectGraph\Application\Service\Findings\CycleFinder;
-use Semitexa\ProjectGraph\Application\Service\Findings\InboundIndex;
+use Semitexa\ProjectGraph\Application\Service\Findings\FindingsReport;
 use Semitexa\ProjectGraph\Application\Service\Findings\UnusedClassFinder;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
 use Semitexa\ProjectGraph\Application\Service\Support\AutoRefreshesProjectGraph;
@@ -38,7 +37,7 @@ final class ReviewGraphFindingsCommand extends BaseCommand
     use AutoRefreshesProjectGraph;
     use UsesProjectGraphConnection;
 
-    private const CONFIDENCE_RANK = [UnusedClassFinder::LOW => 0, UnusedClassFinder::MEDIUM => 1, UnusedClassFinder::HIGH => 2];
+    private const CONFIDENCE_RANK = FindingsReport::CONFIDENCE_RANK;
 
     #[InjectAsReadonly]
     protected ConnectionRegistry $connections;
@@ -80,39 +79,10 @@ final class ReviewGraphFindingsCommand extends BaseCommand
             return self::FAILURE;
         }
 
-        $index = InboundIndex::of($storage);
-        $unused = [];
-        $cycles = [];
-
-        if ($kind !== 'cycles') {
-            foreach ((new UnusedClassFinder())->find($storage, $index) as $finding) {
-                if (self::CONFIDENCE_RANK[$finding['confidence']] < self::CONFIDENCE_RANK[$minConfidence]) {
-                    continue;
-                }
-                if (is_string($module) && $module !== '' && $finding['module'] !== $module) {
-                    continue;
-                }
-                $unused[] = ['id' => self::findingId('unused', [$finding['id']]), 'kind' => 'unused'] + $finding;
-            }
-        }
-
-        if ($kind !== 'unused') {
-            $modules = null;
-            if (is_string($module) && $module !== '') {
-                $modules = [];
-                foreach ($storage->nodes->declaredClasses() as $class) {
-                    $modules[$class['id']] = $class['module'];
-                }
-            }
-            foreach ((new CycleFinder())->find($storage, $index) as $cycle) {
-                if ($modules !== null && !in_array($module, array_map(static fn (string $id): string => $modules[$id] ?? '', $cycle['members']), true)) {
-                    continue;
-                }
-                $cycles[] = ['id' => self::findingId('cycle', $cycle['members']), 'kind' => 'cycle'] + $cycle;
-            }
-        }
-
-        $coverage = (new CoverageReport($storage))->summary();
+        $report = (new FindingsReport())->collect($storage, $kind, $minConfidence, is_string($module) ? $module : null);
+        $unused = $report['unused'];
+        $cycles = $report['cycles'];
+        $coverage = $report['coverage'];
 
         return match ($format) {
             'json'     => $this->json($output, $unused, $cycles, $coverage),
@@ -120,14 +90,6 @@ final class ReviewGraphFindingsCommand extends BaseCommand
             'markdown' => $this->markdown($output, $unused, $cycles, $coverage),
             default    => $this->text($io, $unused, $cycles, $coverage),
         };
-    }
-
-    /** Stable across runs: the same class, or the same set of classes in a loop, keeps its id. @param list<string> $nodeIds */
-    private static function findingId(string $kind, array $nodeIds): string
-    {
-        sort($nodeIds);
-
-        return $kind . ':' . substr(hash('xxh3', implode("\n", $nodeIds)), 0, 12);
     }
 
     /**

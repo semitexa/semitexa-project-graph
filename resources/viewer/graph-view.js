@@ -37,7 +37,7 @@ const kindRank = k => { const i = KIND_ORDER.indexOf(k); return i < 0 ? KIND_ORD
 function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
 /** A module always gets the same colour, in every view and every session. */
 const moduleClass = m => 'm' + (hash(m || '') % 10);
-function dot(node) { const d = el('span', 'gv-dot ' + (node.placeholder ? 'ph' : moduleClass(node.module))); d.title = node.module || 'no module'; return d; }
+function dot(node) { const d = el('span', 'gv-dot ' + (node.placeholder ? 'gv-ph' : moduleClass(node.module))); d.title = node.module || 'no module'; return d; }
 function when(ts) {
   if (!ts) return 'never';
   const s = Math.max(0, Math.round(Date.now() / 1000 - ts));
@@ -78,7 +78,7 @@ function mount(root, source, options = {}) {
   /* ---- skeleton ---- */
   const bar = el('div', 'gv-pane gv-bar');
   const stat = el('span', 'gv-stat', 'loading graph…');
-  const stale = el('span', 'gv-badge warn', 'stale'); stale.hidden = true;
+  const stale = el('span', 'gv-badge gv-warn', 'stale'); stale.hidden = true;
   stale.title = 'Code changed since the graph was built — rebuild with bin/semitexa ai:review-graph:generate';
   const search = el('div', 'gv-search');
   const input = el('input'); input.type = 'search'; input.placeholder = 'Find a class, route or command…  ( / )'; input.setAttribute('aria-label', 'Search the graph'); input.autocomplete = 'off';
@@ -157,7 +157,7 @@ function mount(root, source, options = {}) {
       const row = el('button', 'gv-row group');
       row.type = 'button'; row.setAttribute('role', 'treeitem'); row.setAttribute('aria-expanded', 'false');
       row.dataset.group = g.key;
-      row.append(el('span', 'gv-caret', '▸'), el('span', '', g.label), el('span', 'n', String(list.length)));
+      row.append(el('span', 'gv-caret', '▸'), el('span', '', g.label), el('span', 'gv-n', String(list.length)));
       const box = el('div'); box.setAttribute('role', 'group'); box.hidden = true;
       row.addEventListener('click', () => toggleGroup(row, box, list));
       tree.append(row, box);
@@ -183,6 +183,7 @@ function mount(root, source, options = {}) {
     row.append(caret, dot(node), el('span', 'gv-name', node.name));
     if (kind) row.append(el('span', 'gv-kind', kind));
     row.append(el('span', 'gv-type', node.type));
+    if (node.gaps > 0) { const g = el('span', 'gv-cycle', '⚠'); g.title = node.gaps + ' coverage gap(s) in this file: some of its references were not resolved'; row.append(g); }
     const shared = el('span', 'gv-shared'); shared.hidden = true; row.append(shared);
     if (cycle) { const c = el('span', 'gv-cycle', '↺'); c.title = 'cycle: this node is one of its own ancestors here'; row.append(c); }
     row.title = node.fqcn;
@@ -282,9 +283,9 @@ function mount(root, source, options = {}) {
     const head = el('div', 'gv-head');
     const h = el('h3'); h.append(dot(n), el('span', '', n.name), el('span', 'gv-type', n.type));
     head.append(h);
-    if (n.fqcn && n.fqcn !== n.name) head.append(el('div', 'fq', n.fqcn));
-    head.append(el('div', 'meta', (n.module || 'no module') + (n.file ? ' · ' + n.file + ':' + n.line : '') + ' · fan-in ' + d.fanIn));
-    const acts = el('div', 'acts');
+    if (n.fqcn && n.fqcn !== n.name) head.append(el('div', 'gv-fq', n.fqcn));
+    head.append(el('div', 'gv-meta', (n.module || 'no module') + (n.file ? ' · ' + n.file + ':' + n.line : '') + ' · fan-in ' + d.fanIn));
+    const acts = el('div', 'gv-acts');
     if (source.live && isClassId(n.id)) {
       const a = el('a', '', 'source & wiring ↗'); a.href = '/__trace/node?class=' + encodeURIComponent(n.fqcn); a.target = '_blank'; a.rel = 'noopener';
       acts.append(a);
@@ -292,8 +293,14 @@ function mount(root, source, options = {}) {
     const rev = el('button', '', 'show in tree'); rev.type = 'button'; rev.className = 'gv-btn'; rev.addEventListener('click', () => reveal(n.id));
     acts.append(rev);
     head.append(acts);
-    if (n.placeholder) head.append(el('div', 'meta', 'Placeholder: referenced, but declared outside the scanned tree.'));
+    if (n.placeholder) head.append(el('div', 'gv-meta', 'Placeholder: referenced, but declared outside the scanned tree.'));
     detailBody.append(head);
+    for (const g of d.gaps || []) {
+      const box = el('div', 'gv-gap');
+      box.append(el('b', '', g.kind.replace(/_/g, ' ')), ' · line ' + g.line + ' — ' + g.detail);
+      box.title = 'The graph may be missing an edge here: what this line refers to was not resolved statically.';
+      detailBody.append(box);
+    }
     if (options.decorateDetail) options.decorateDetail(detailBody, d);
     detailBody.append(edgeSection('Reaches', d.out), edgeSection('Reached by', d.in));
     if (d.truncated) detailBody.append(el('div', 'gv-empty', 'Only the first 400 edges per side are listed.'));
@@ -330,7 +337,7 @@ function mount(root, source, options = {}) {
     if (!list.length) hits.append(el('div', 'gv-empty', 'No match.'));
     for (const n of list) {
       const b = el('button', 'gv-hit'); b.type = 'button'; b.dataset.id = n.id; b.setAttribute('role', 'option');
-      b.append(dot(n), el('span', 'gv-name', n.name), el('span', 'gv-type', n.type), el('span', 'fq', n.fqcn));
+      b.append(dot(n), el('span', 'gv-name', n.name), el('span', 'gv-type', n.type), el('span', 'gv-fq', n.fqcn));
       b.addEventListener('click', () => { hits.hidden = true; reveal(n.id); });
       hits.append(b);
     }
@@ -652,6 +659,10 @@ const ext = api => {
     ctx.fillStyle = T.panel; ctx.fill(bodies);
     ctx.strokeStyle = T.line; ctx.lineWidth = 1 / Math.max(k, 0.35); ctx.stroke(bodies);
     for (const [c, p] of stripes) { ctx.fillStyle = c; ctx.fill(p); }
+    // A ghost — a reference resolved only at runtime — is outlined dashed, like its edge.
+    ctx.setLineDash([4, 3]); ctx.strokeStyle = T.warn;
+    for (const n of visible) if (n.ghost) { ctx.beginPath(); ctx.roundRect(n.x, n.y, n.w, n.h, 6); ctx.stroke(); }
+    ctx.setLineDash([]);
     for (const n of visible) {
       if (n.id !== D.focus && n.id !== D.selected && n !== D.hover) continue;
       ctx.strokeStyle = T.accent; ctx.lineWidth = (n.id === D.focus ? 2.2 : 1.4) / Math.max(k, 0.35);
@@ -724,6 +735,81 @@ const ext = api => {
 
   api.dag = D; // inspectable from the console, like window.__observatory
   readTheme(); resize();
+};
+window.SemitexaGraphView = window.SemitexaGraphView || {};
+(window.SemitexaGraphView.extensions = window.SemitexaGraphView.extensions || []).push(ext);
+})();
+
+/* ======================================================================
+ * Findings: what `ai:review-graph:findings` reports, one click from its node.
+ *
+ * Loops first (each is a design question), then unused classes by
+ * confidence. Medium is "nothing refers to it, but discovery keeps it alive"
+ * — common and usually fine — so it is a filter, not the default. The
+ * coverage line says how far "no finding" can be trusted.
+ * ====================================================================== */
+(() => {
+'use strict';
+const ext = api => {
+  const {source, parts, helpers} = api;
+  const {el, dot, fail} = helpers;
+  const F = {data: null, loading: null, filter: 'loops'};
+
+  api.loadFindings = () => {
+    if (F.loading) return F.loading;
+    parts.findScroll.replaceChildren(el('div', 'gv-empty', 'Running the finders over the whole graph…'));
+    F.loading = source.findings().then(d => { F.data = d; render(); }).catch(err => { F.loading = null; fail(parts.findScroll, err); });
+    return F.loading;
+  };
+
+  function render() {
+    const d = F.data; const box = parts.findScroll; box.replaceChildren();
+    const counts = {loops: d.cycles.length, high: 0, medium: 0, low: 0};
+    for (const u of d.unused) counts[u.confidence]++;
+    parts.findBadge.hidden = counts.loops + counts.high === 0;
+    parts.findBadge.textContent = String(counts.loops + counts.high);
+
+    const seg = el('div', 'gv-seg');
+    for (const key of ['loops', 'high', 'medium', 'low']) {
+      const b = el('button', key === F.filter ? 'on' : '', (key === 'loops' ? 'loops' : key) + ' ' + counts[key]); b.type = 'button';
+      b.title = key === 'loops' ? 'classes that depend on each other in a circle' : key + '-confidence unused classes';
+      b.addEventListener('click', () => { F.filter = key; render(); });
+      seg.append(b);
+    }
+    const head = el('div', 'gv-sec'); head.append(seg); box.append(head);
+
+    const cov = d.coverage || {};
+    const gaps = Object.entries(cov.gaps || {}).map(([k, n]) => n + ' ' + k.replace(/_/g, ' ')).join(', ');
+    const note = el('div', 'gv-gap');
+    if (cov.complete) note.append('Coverage complete: an absence of findings can be trusted.');
+    else { note.append(el('b', '', 'Coverage incomplete'), ' — ' + (gaps || 'gaps') + (cov.unresolved_references ? ', ' + cov.unresolved_references + ' unresolved' : '') + '. A class reached only through one of these looks unused when it is not.'); }
+    box.append(note);
+
+    const list = el('div', 'gv-sec');
+    if (F.filter === 'loops') {
+      if (!d.cycles.length) list.append(el('div', 'gv-empty', 'No dependency loops.'));
+      for (const c of d.cycles) {
+        const b = el('button', 'gv-find'); b.type = 'button';
+        const names = c.members.map(m => m.name);
+        b.append(el('span', 'gv-fc gv-medium', names.length + '×'), el('span', 'gv-ft', names.slice(0, 4).join(', ') + (names.length > 4 ? ' +' + (names.length - 4) : '')));
+        b.append(el('span', 'gv-fe', 'loop of ' + names.length + ' classes: ' + c.cycle.map(id => id.replace(/^class:/, '').split('\\').pop()).join(' › ')));
+        b.title = 'Focus the loop: its back edge is drawn in amber';
+        if (c.members[0]) b.addEventListener('click', () => api.select(c.members[0].id));
+        list.append(b);
+      }
+    } else {
+      const rows = d.unused.filter(u => u.confidence === F.filter);
+      if (!rows.length) list.append(el('div', 'gv-empty', 'None at this confidence.'));
+      for (const u of rows) {
+        const b = el('button', 'gv-find'); b.type = 'button';
+        const t = el('span', 'gv-ft'); t.append(dot(u.node), ' ', u.node.name);
+        b.append(el('span', 'gv-fc gv-' + u.confidence, u.confidence), t, el('span', 'gv-fe', u.evidence + ' · ' + u.node.file + ':' + u.node.line));
+        b.addEventListener('click', () => api.select(u.node.id));
+        list.append(b);
+      }
+    }
+    box.append(list);
+  }
 };
 window.SemitexaGraphView = window.SemitexaGraphView || {};
 (window.SemitexaGraphView.extensions = window.SemitexaGraphView.extensions || []).push(ext);

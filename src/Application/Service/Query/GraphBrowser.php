@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Service\Query;
 
+use Semitexa\ProjectGraph\Application\Service\Findings\FindingsReport;
+use Semitexa\ProjectGraph\Application\Service\Findings\UnusedClassFinder;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
@@ -51,6 +53,9 @@ final class GraphBrowser
     public const MAX_NODES = 2500;
     private const SEARCH_LIMIT = 50;
     private const MAX_EDGES_PER_SIDE = 400;
+
+    /** @var array<string, list<array{kind: string, line: int, subject: string, detail: string}>>|null gaps by absolute file path, loaded on first use */
+    private ?array $gapsByFile = null;
 
     public function __construct(
         private readonly GraphStorage $storage,
@@ -132,6 +137,7 @@ final class GraphBrowser
 
         return [
             'node' => $this->node($node),
+            'gaps' => $this->gapsOf($node->getFile()),
             'fanIn' => count($in),
             'out' => $this->sides($out, $neighbours, outgoing: true),
             'in' => $this->sides($in, $neighbours, outgoing: false),
@@ -196,6 +202,19 @@ final class GraphBrowser
         $rendered = [];
         foreach ($nodes as $id => $node) {
             $rendered[] = $this->node($node) + ['fanIn' => $fanIn[$id] ?? 0];
+
+            // A reference the indexer could not resolve — a class name known only
+            // at runtime — becomes a ghost: an unseen edge must not look like no edge.
+            $dynamic = array_filter($this->gapsOf($node->getFile()), static fn (array $g): bool => $g['kind'] === 'dynamic_reference');
+            if ($dynamic !== []) {
+                $ghost = 'ghost:' . $id;
+                $rendered[] = [
+                    'id' => $ghost, 'name' => '? ' . count($dynamic) . ' runtime ' . (count($dynamic) === 1 ? 'class' : 'classes'),
+                    'fqcn' => 'Resolved only at runtime — lines ' . implode(', ', array_map(static fn (array $g): int => $g['line'], $dynamic)),
+                    'type' => 'unresolved', 'module' => '', 'file' => '', 'line' => 0, 'placeholder' => true, 'ghost' => true, 'gaps' => 0, 'fanIn' => 0,
+                ];
+                $edges[] = ['s' => $id, 't' => $ghost, 'k' => 'dynamic_reference', 'c' => 'inferred'];
+            }
         }
 
         return [
@@ -226,6 +245,7 @@ final class GraphBrowser
 
         /** @var array<string, string> $childOf parent id => the child it was reached from */
         $childOf = [$id => ''];
+        /** @var list<string> $frontier */
         $frontier = [$id];
 
         for ($level = 0; $level < self::PATH_MAX_DEPTH && $frontier !== []; $level++) {
@@ -301,11 +321,12 @@ final class GraphBrowser
      * The JSON shape of one node. Paths are made relative to the project, since
      * the indexer stored whatever absolute path its container saw.
      *
-     * @return array{id: string, name: string, fqcn: string, type: string, module: string, file: string, line: int, placeholder: bool}
+     * @return array{id: string, name: string, fqcn: string, type: string, module: string, file: string, line: int, placeholder: bool, gaps: int}
      */
     public function node(Node $node): array
     {
         $file = $node->getFile();
+        $gaps = $file !== '' ? count($this->gapsOf($file)) : 0;
         if (str_starts_with($file, $this->projectRoot . '/')) {
             $file = substr($file, strlen($this->projectRoot) + 1);
         }
@@ -319,7 +340,69 @@ final class GraphBrowser
             'file' => $file,
             'line' => $node->getLine(),
             'placeholder' => $node->getIsPlaceholder(),
+            'gaps' => $gaps,
         ];
+    }
+
+    /**
+     * Unused classes (every confidence, so the view can filter) and loops,
+     * with their nodes resolved, plus the coverage summary that says how far
+     * an absence of findings can be trusted.
+     *
+     * @return array<string, mixed>
+     */
+    public function findings(): array
+    {
+        $report = (new FindingsReport())->collect($this->storage, 'all', UnusedClassFinder::LOW);
+
+        $ids = array_column($report['unused'], 'node');
+        foreach ($report['cycles'] as $cycle) {
+            $ids = [...$ids, ...$cycle['members']];
+        }
+        $nodes = $this->storage->nodes->findByIds($ids);
+
+        $unused = [];
+        foreach ($report['unused'] as $finding) {
+            $node = $nodes[$finding['node']] ?? null;
+            if ($node !== null) {
+                $unused[] = ['finding' => $finding['id'], 'confidence' => $finding['confidence'], 'evidence' => $finding['evidence'], 'node' => $this->node($node)];
+            }
+        }
+
+        $cycles = [];
+        foreach ($report['cycles'] as $cycle) {
+            $members = [];
+            foreach ($cycle['members'] as $id) {
+                if (isset($nodes[$id])) {
+                    $members[] = $this->node($nodes[$id]);
+                }
+            }
+            $cycles[] = ['finding' => $cycle['id'], 'members' => $members, 'cycle' => $cycle['cycle']];
+        }
+
+        return ['unused' => $unused, 'cycles' => $cycles, 'coverage' => $report['coverage']];
+    }
+
+    /**
+     * The coverage gaps recorded against one file.
+     *
+     * @return list<array{kind: string, line: int, subject: string, detail: string}>
+     */
+    private function gapsOf(string $file): array
+    {
+        if ($this->gapsByFile === null) {
+            $this->gapsByFile = [];
+            foreach ($this->storage->gaps->findAll() as $gap) {
+                $this->gapsByFile[$gap->getFile()][] = [
+                    'kind' => $gap->getKind()->value,
+                    'line' => $gap->getLine(),
+                    'subject' => $gap->getSubject(),
+                    'detail' => $gap->getDetail(),
+                ];
+            }
+        }
+
+        return $this->gapsByFile[$file] ?? [];
     }
 
     /**

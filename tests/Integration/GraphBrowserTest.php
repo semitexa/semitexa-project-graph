@@ -108,6 +108,24 @@ final class GraphBrowserTest extends TestCase
     }
 
     #[Test]
+    public function findings_carry_their_nodes_so_a_click_can_focus_one(): void
+    {
+        $fixture = GraphFixture::built();
+        $findings = (new GraphBrowser($fixture->storage, $fixture->root))->findings();
+
+        $loops = array_map(static fn (array $c): array => array_column($c['members'], 'id'), $findings['cycles']);
+        self::assertContains(
+            [GraphFixture::classId('Cycle\\Ping'), GraphFixture::classId('Cycle\\Pong')],
+            array_map(static function (array $ids): array { sort($ids); return $ids; }, $loops),
+        );
+        foreach ($findings['unused'] as $u) {
+            self::assertStringStartsWith('unused:', $u['finding']);
+            self::assertNotSame('', $u['node']['id']);
+        }
+        self::assertArrayHasKey('complete', $findings['coverage']);
+    }
+
+    #[Test]
     public function a_hostile_id_is_looked_up_never_autoloaded(): void
     {
         $fixture = GraphFixture::built();
