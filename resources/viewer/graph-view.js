@@ -58,6 +58,7 @@ function fetchSource(endpoint) {
     path: id => get({view: 'path', id}).then(b => b.path),
     search: q => get({view: 'search', q}).then(b => b.hits),
     findings: () => get({view: 'findings'}),
+    traces: id => get({view: 'traces', id}).then(b => b.traces),
   };
 }
 
@@ -302,8 +303,29 @@ function mount(root, source, options = {}) {
       detailBody.append(box);
     }
     if (options.decorateDetail) options.decorateDetail(detailBody, d);
+    if (source.traces && isClassId(n.id)) detailBody.append(traceSection(n));
     detailBody.append(edgeSection('Reaches', d.out), edgeSection('Reached by', d.in));
     if (d.truncated) detailBody.append(el('div', 'gv-empty', 'Only the first 400 edges per side are listed.'));
+  }
+
+  /** Recent recorded traces that ran this class — the way back from structure to behaviour. */
+  function traceSection(n) {
+    const sec = el('div', 'gv-sec');
+    const h = el('h4', '', 'Recent traces'); const count = el('span', '', '…'); h.append(count); sec.append(h);
+    source.traces(n.id).then(list => {
+      count.textContent = String(list.length);
+      if (!list.length) {
+        sec.append(el('div', 'gv-empty', 'No persisted trace names this class. That is not "never ran": only recorded requests (?__trace=1) write a trace, stage mode does not.'));
+        return;
+      }
+      for (const t of list) {
+        const a = el('a', 'gv-edge'); a.href = '/__trace?file=' + encodeURIComponent(t.trace); a.target = '_blank'; a.rel = 'noopener';
+        a.title = t.ts + ' · ' + t.trace;
+        a.append(el('span', 'gv-dot'), el('span', 'gv-name', t.name || t.trace), el('span', 'gv-kind', t.durationMs === null ? t.kind : Math.round(t.durationMs) + ' ms'));
+        sec.append(a);
+      }
+    }).catch(() => { count.textContent = '–'; });
+    return sec;
   }
 
   function edgeSection(title, list) {
