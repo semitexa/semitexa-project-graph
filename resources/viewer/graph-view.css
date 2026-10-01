@@ -89,6 +89,7 @@
 .gv-canvas-wrap{position:relative;flex:1;min-height:0}
 .gv-canvas-wrap canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab;touch-action:none}
 .gv-canvas-wrap canvas.drag{cursor:grabbing}
+.gv-canvas-wrap .gv-empty[hidden]{display:none}
 .gv-canvas-wrap .gv-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;pointer-events:none}
 .gv-ctl{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .gv-seg{display:inline-flex;border:1px solid var(--gv-line-2);border-radius:8px;overflow:hidden}
