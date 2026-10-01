@@ -89,8 +89,8 @@ function embeddedSource(data) {
     node(id) {
       const node = byId.get(id); if (!node) return missing(id);
       const side = (list, end) => list.map(e => ({kind: e.k, class: e.c, node: byId.get(e[end])})).filter(r => r.node);
-      const ins = inn.get(id) || [];
-      return ok({node, gaps: data.gaps[id] || [], fanIn: node.fanIn, out: side((out.get(id) || []).slice(0, 400), 't'), in: side(ins.slice(0, 400), 's'), truncated: ins.length > 400});
+      const ins = inn.get(id) || [], outs = out.get(id) || [];
+      return ok({node, gaps: data.gaps[id] || [], fanIn: node.fanIn, out: side(outs.slice(0, 400), 't'), in: side(ins.slice(0, 400), 's'), truncated: ins.length > 400 || outs.length > 400});
     },
     subgraph(id, depth) {
       if (!byId.has(id)) return missing(id);

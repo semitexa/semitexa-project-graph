@@ -58,6 +58,12 @@ final class IncrementalEngine
         $this->storage->setMeta('coverage_exclusions', (string) json_encode($this->scanner->lastExclusions()));
 
         if (empty($changes)) {
+            // A scan that found nothing to change still proves the graph current
+            // as of now. Without this, a file touched but not edited (a checkout,
+            // a reverted edit) stayed newer than last_update forever, and the
+            // viewer's "stale" could not be cleared by the command it names.
+            $this->storage->setMeta('last_update', (string) time());
+
             return UpdateResult::noChanges();
         }
 

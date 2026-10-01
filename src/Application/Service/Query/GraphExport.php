@@ -174,24 +174,31 @@ final class GraphExport
 
         $enc = static fn (mixed $v): string => self::json($v);
 
-        $title = htmlspecialchars($title, ENT_QUOTES);
-        // The file carries its own policy: it runs its two inline scripts and
-        // its stylesheet, and loads nothing else from anywhere. A graph opened
-        // from a PR artifact has no business reaching the network.
-        $nonce = base64_encode(random_bytes(16));
-        $policy = "default-src 'none'; script-src 'nonce-{$nonce}'; style-src 'nonce-{$nonce}'; img-src data:";
-        fwrite($out, self::HEAD_START . $title . "</title>\n"
-            . '<meta http-equiv="Content-Security-Policy" content="' . $policy . "\">\n"
-            . '<style nonce="' . $nonce . "\">\n" . self::PAGE_CSS . $css . "\n</style>\n</head>\n<body>\n<div id=\"graph\"></div>\n"
-            . '<script type="application/json" id="graph-data">');
-        fwrite($out, '{"meta":' . $enc($data['meta']) . ',"summary":' . $enc($data['summary']) . ',"nodes":');
-        self::writeList($out, $data['nodes']);
-        fwrite($out, ',"edges":');
-        self::writeList($out, $data['edges']);
-        fwrite($out, ',"gaps":' . ($data['gaps'] === [] ? '{}' : $enc($data['gaps'])) . ',"findings":' . $enc($data['findings']) . '}');
-        // A script body must not contain "</script"; the viewer has none, and this keeps it so.
-        fwrite($out, "</script>\n" . '<script nonce="' . $nonce . "\">\n" . str_ireplace('</script', '<\/script', $js) . "\n</script>\n"
-            . '<script nonce="' . $nonce . "\">\n" . self::BOOT . "</script>\n</body>\n</html>\n");
+        try {
+            $title = htmlspecialchars($title, ENT_QUOTES);
+            // The file carries its own policy: it runs its two inline scripts and
+            // its stylesheet, and loads nothing else from anywhere. A graph opened
+            // from a PR artifact has no business reaching the network.
+            $nonce = base64_encode(random_bytes(16));
+            $policy = "default-src 'none'; script-src 'nonce-{$nonce}'; style-src 'nonce-{$nonce}'; img-src data:";
+            self::put($out, self::HEAD_START . $title . "</title>\n"
+                . '<meta http-equiv="Content-Security-Policy" content="' . $policy . "\">\n"
+                . '<style nonce="' . $nonce . "\">\n" . self::PAGE_CSS . $css . "\n</style>\n</head>\n<body>\n<div id=\"graph\"></div>\n"
+                . '<script type="application/json" id="graph-data">');
+            self::put($out, '{"meta":' . $enc($data['meta']) . ',"summary":' . $enc($data['summary']) . ',"nodes":');
+            self::writeList($out, $data['nodes']);
+            self::put($out, ',"edges":');
+            self::writeList($out, $data['edges']);
+            self::put($out, ',"gaps":' . ($data['gaps'] === [] ? '{}' : $enc($data['gaps'])) . ',"findings":' . $enc($data['findings']) . '}');
+            // A script body must not contain "</script"; the viewer has none, and this keeps it so.
+            self::put($out, "</script>\n" . '<script nonce="' . $nonce . "\">\n" . str_ireplace('</script', '<\/script', $js) . "\n</script>\n"
+                . '<script nonce="' . $nonce . "\">\n" . self::BOOT . "</script>\n</body>\n</html>\n");
+        } catch (\Throwable $e) {
+            fclose($out);
+            @unlink($path);
+
+            throw new \RuntimeException('Could not write ' . $path . ': ' . $e->getMessage(), 0, $e);
+        }
         fclose($out);
 
         return (int) filesize($path);
@@ -199,7 +206,20 @@ final class GraphExport
 
     private static function json(mixed $value): string
     {
-        return (string) json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_INVALID_UTF8_SUBSTITUTE);
+        return json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR);
+    }
+
+    /**
+     * A short write is a failure, not a smaller file: a full disk must not be
+     * reported as "Wrote …" over a page that will not load.
+     *
+     * @param resource $out
+     */
+    private static function put($out, string $bytes): void
+    {
+        if (fwrite($out, $bytes) !== strlen($bytes)) {
+            throw new \RuntimeException('Short write while exporting the graph');
+        }
     }
 
     /**
@@ -210,11 +230,11 @@ final class GraphExport
      */
     private static function writeList($out, array $items): void
     {
-        fwrite($out, '[');
+        self::put($out, '[');
         foreach (array_chunk($items, 500) as $i => $chunk) {
-            fwrite($out, ($i > 0 ? ',' : '') . substr(self::json($chunk), 1, -1));
+            self::put($out, ($i > 0 ? ',' : '') . substr(self::json($chunk), 1, -1));
         }
-        fwrite($out, ']');
+        self::put($out, ']');
     }
 
     private const HEAD_START = "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
@@ -228,7 +248,9 @@ final class GraphExport
     private const BOOT = <<<'JS'
 (() => {
   const data = JSON.parse(document.getElementById('graph-data').textContent);
-  const fromHash = decodeURIComponent(location.hash.slice(1));
+  // A malformed fragment must not leave a blank page: no selection instead.
+  let fromHash = null;
+  try { fromHash = decodeURIComponent(location.hash.slice(1)) || null; } catch (e) { fromHash = null; }
   window.SemitexaGraphView.mount(document.getElementById('graph'), window.SemitexaGraphView.embeddedSource(data), {
     initial: fromHash || data.meta.focus || null,
     onSelect: id => history.replaceState(null, '', '#' + encodeURIComponent(id)),

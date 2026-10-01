@@ -144,6 +144,33 @@ final class GraphNodeRepository
             ->fetchAllAs(Node::class, $this->mapperRegistry);
     }
 
+    /**
+     * Name or FQCN containing $text LITERALLY (`%` and `_` are escaped), real
+     * nodes first and name-prefix matches next, ranked in SQL before the limit
+     * so placeholders cannot crowd real classes out of the page.
+     *
+     * @return list<Node>
+     */
+    public function searchText(string $text, int $limit = 50): array
+    {
+        $like = '%' . strtr($text, ['\\' => '\\\\', '%' => '\\%', '_' => '\\_']) . '%';
+        $prefix = substr($like, 1);
+        $rows = $this->adapter->execute(
+            "SELECT id FROM graph_nodes WHERE name LIKE :like ESCAPE '\\' OR fqcn LIKE :like ESCAPE '\\'"
+            . " ORDER BY is_placeholder, CASE WHEN name LIKE :prefix ESCAPE '\\' THEN 0 ELSE 1 END, name LIMIT " . max(1, $limit),
+            ['like' => $like, 'prefix' => $prefix],
+        )->fetchAll();
+        $ids = [];
+        foreach ($rows as $row) {
+            if (is_scalar($row['id'] ?? null)) {
+                $ids[] = (string) $row['id'];
+            }
+        }
+        $nodes = $this->findByIds($ids);
+
+        return array_values(array_filter(array_map(static fn (string $id): ?Node => $nodes[$id] ?? null, $ids)));
+    }
+
     /** @return list<Node> */
     public function searchFull(string $query, int $limit = 20): array
     {

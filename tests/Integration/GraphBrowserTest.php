@@ -126,6 +126,28 @@ final class GraphBrowserTest extends TestCase
     }
 
     #[Test]
+    public function search_is_literal_so_wildcards_match_only_themselves(): void
+    {
+        $fixture = GraphFixture::built();
+        $browser = new GraphBrowser($fixture->storage, $fixture->root);
+
+        self::assertSame([], $browser->search('__'));
+        self::assertSame([], $browser->search('%%'));
+        self::assertNotSame([], $browser->search('Order'));
+    }
+
+    #[Test]
+    public function a_scan_that_finds_no_change_still_dates_the_graph_current(): void
+    {
+        $fixture = GraphFixture::built();
+        $fixture->storage->setMeta('last_update', '1');
+
+        $fixture->refresh();
+
+        self::assertGreaterThan(1, (int) $fixture->storage->getMeta('last_update'));
+    }
+
+    #[Test]
     public function a_hostile_id_is_looked_up_never_autoloaded(): void
     {
         $fixture = GraphFixture::built();

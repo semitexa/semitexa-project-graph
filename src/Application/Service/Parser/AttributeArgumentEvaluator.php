@@ -127,7 +127,14 @@ final class AttributeArgumentEvaluator
                     }
                 }
             }
-            // Inherited from a parent: fall through to reading it by name.
+            // Not declared here, so inherited. Read it from the PARENT by name —
+            // never by loading the annotated class itself, whose loaded version
+            // may be a different revision than the file being parsed (a base-ref
+            // worktree in RefGraphDiff).
+            if (!$context instanceof \PhpParser\Node\Stmt\Class_ || $context->extends === null) {
+                throw new ConstExprEvaluationException(sprintf('Cannot resolve %s::%s: not declared in the class and it has no parent', $class, $constant));
+            }
+            $class = $context->extends->toString();
         }
 
         if (!class_exists($class) && !interface_exists($class) && !enum_exists($class)) {

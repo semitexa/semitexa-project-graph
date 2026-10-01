@@ -24,6 +24,34 @@ final class ProjectGraphConnection
         return $connections->manager(self::NAME);
     }
 
+    /**
+     * The SQLite file a fresh resolution would pick now, or null when a named
+     * connection is configured through the environment (nothing to follow).
+     */
+    public static function currentDefaultPath(string $projectRoot): ?string
+    {
+        return self::hasNamedConnectionEnvironment() ? null : self::resolveDefaultSqlitePath($projectRoot);
+    }
+
+    /**
+     * Replace the registered connection with one on the file resolution picks
+     * NOW. For a long-lived reader: a worker that started before the CLI wrote
+     * a newer graph somewhere else would otherwise read the old file until it
+     * restarts. The previous manager is shut down first.
+     */
+    public static function reopen(ConnectionRegistry $connections, string $projectRoot): OrmManager
+    {
+        if ($connections->has(self::NAME)) {
+            $connections->manager(self::NAME)->shutdown();
+        }
+        $connections->register(self::NAME, new OrmManager(
+            config: self::resolveConfig($projectRoot),
+            connectionName: self::NAME,
+        ));
+
+        return $connections->manager(self::NAME);
+    }
+
     private static function resolveConfig(string $projectRoot): ConnectionConfig
     {
         if (self::hasNamedConnectionEnvironment()) {
@@ -46,6 +74,11 @@ final class ProjectGraphConnection
      *
      * Among the candidates this process can use, the graph that already exists
      * and was written most recently wins; only when none exists does order decide.
+     *
+     * Resolution happens when a connection is opened. A long-lived reader must
+     * ask again ({@see currentDefaultPath()} / {@see reopen()}) to follow a graph
+     * written elsewhere later. A CLI that can write neither candidate falls back
+     * to the system temp dir, which a worker never looks at.
      */
     public static function resolveDefaultSqlitePath(string $projectRoot): string
     {

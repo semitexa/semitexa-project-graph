@@ -122,6 +122,8 @@ final class GraphBrowser
 
         $out = $this->withoutNoise($this->storage->edges->findBySourceIds([$id]));
         $in = $this->withoutNoise($this->storage->edges->findByTargetIds([$id]));
+        // Counted before the lists are capped: a hub must not read "fan-in 400".
+        $fanIn = count($in);
         $truncated = count($out) > self::MAX_EDGES_PER_SIDE || count($in) > self::MAX_EDGES_PER_SIDE;
         $out = array_slice($out, 0, self::MAX_EDGES_PER_SIDE);
         $in = array_slice($in, 0, self::MAX_EDGES_PER_SIDE);
@@ -138,7 +140,7 @@ final class GraphBrowser
         return [
             'node' => $this->node($node),
             'gaps' => $this->gapsOf($node->getFile()),
-            'fanIn' => count($in),
+            'fanIn' => $fanIn,
             'out' => $this->sides($out, $neighbours, outgoing: true),
             'in' => $this->sides($in, $neighbours, outgoing: false),
             'truncated' => $truncated,
@@ -302,7 +304,7 @@ final class GraphBrowser
         }
 
         $hits = [];
-        foreach ($this->storage->nodes->searchFull($query, self::SEARCH_LIMIT) as $node) {
+        foreach ($this->storage->nodes->searchText($query, self::SEARCH_LIMIT) as $node) {
             if (in_array($node->getType()->value, self::HIDDEN_NODES, true)) {
                 continue;
             }
