@@ -217,10 +217,14 @@ final class FindingsCampaignTest extends TestCase
         $graded = self::graded($fixture);
         $members = array_map(static fn (array $c): array => $c['members'], (new CycleFinder())->find($fixture->storage));
 
-        self::assertNotContains([NodeId::forClass('Fx\\Alpha\\Cn\\M'), NodeId::forClass('Fx\\Alpha\\Cn\\N')], $members, 'two Foo::class constants are not a loop');
-        self::assertSame('low', $graded['Fx\\Alpha\\Cn\\M']['confidence']);
-        self::assertSame('low', $graded['Fx\\Alpha\\Cn\\N']['confidence']);
         // A static call and `new` are dependencies, whatever else names the class.
         self::assertContains([NodeId::forClass('Fx\\Alpha\\Cn\\P'), NodeId::forClass('Fx\\Alpha\\Cn\\Q')], $members);
+        // In no loop at all — not as a pair, nor inside a larger one.
+        foreach ($members as $component) {
+            self::assertNotContains(NodeId::forClass('Fx\\Alpha\\Cn\\M'), $component, 'two Foo::class constants are not a loop');
+            self::assertNotContains(NodeId::forClass('Fx\\Alpha\\Cn\\N'), $component, 'two Foo::class constants are not a loop');
+        }
+        self::assertSame('low', $graded['Fx\\Alpha\\Cn\\M']['confidence']);
+        self::assertSame('low', $graded['Fx\\Alpha\\Cn\\N']['confidence']);
     }
 }

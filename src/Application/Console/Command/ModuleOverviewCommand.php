@@ -66,7 +66,11 @@ final class ModuleOverviewCommand extends BaseCommand
         if (!in_array($module, $this->query()->knownModules(), true)) {
             $known = $this->query()->knownModules();
             sort($known);
-            $output->writeln('<error>' . \Symfony\Component\Console\Formatter\OutputFormatter::escape(sprintf('No module "%s" in the graph. Known: %s.', (string) $module, implode(', ', $known))) . '</error>');
+            $message = sprintf('No module "%s" in the graph. Known: %s.', (string) $module, implode(', ', $known));
+            // A caller that asked for JSON parses stdout: the <error> text failed the parse.
+            $format === 'json'
+                ? $output->writeln((string) json_encode(['error' => $message], JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE), OutputInterface::OUTPUT_RAW)
+                : $output->writeln('<error>' . \Symfony\Component\Console\Formatter\OutputFormatter::escape($message) . '</error>');
             return Command::FAILURE;
         }
 

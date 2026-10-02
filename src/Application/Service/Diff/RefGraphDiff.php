@@ -9,6 +9,7 @@ use Semitexa\ProjectGraph\Application\Service\Graph\EphemeralGraph;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphBuilder;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
 use Semitexa\ProjectGraph\Application\Service\Index\IncrementalEngine;
+use Semitexa\ProjectGraph\Application\Service\Parser\ClassDeclarationReader;
 use Semitexa\ProjectGraph\Application\Service\Parser\PhpParserAdapter;
 use Semitexa\ProjectGraph\Application\Service\Scanner\FileScanner;
 use Semitexa\ProjectGraph\Application\Service\Scanner\IgnorePatternLoader;
@@ -19,14 +20,16 @@ use Semitexa\ProjectGraph\Application\Service\Scanner\IgnorePatternLoader;
  *
  * Both sides are built fresh, by the same code, over the same scope, into
  * their own in-memory stores: the project graph is neither read nor touched.
- * The base side is a detached worktree of the ref. Attributes are read from
- * the parsed files (never from classes this process has loaded), so the base
- * graph has the base ref's wiring — the one thing left to the running code is
- * the value of an enum case or constant an attribute names.
+ * The base side is the ref checked out into a scratch directory. Attributes
+ * are read from the parsed files (never from classes this process has
+ * loaded), so the base graph has the base ref's wiring — the one thing left
+ * to the running code is the value of an enum case or constant an attribute
+ * names.
  *
- * The base is a `git archive` export, not a worktree (see GitSnapshot), and
- * the head reads only the files git would commit, so neither side sees what
- * the other cannot.
+ * The base is a throwaway-index checkout (read-tree + checkout-index), not a
+ * worktree and not a `git archive` export, so export-ignore paths are there
+ * too (see GitSnapshot); the head reads only the files git would commit, so
+ * neither side sees what the other cannot.
  */
 final class RefGraphDiff
 {
@@ -59,9 +62,13 @@ final class RefGraphDiff
             $repository,
             $baseRef,
             $scratchDir,
-            function (string $snapshot) use ($scope, &$baseBodies, &$baseRoot, &$baseUnreadable): GraphStorage {
+            function (string $snapshot) use ($scope, $path, &$baseBodies, &$baseRoot, &$baseUnreadable): GraphStorage {
                 $baseRoot = rtrim($snapshot . '/' . $scope, '/');
-                $graph = $this->build($baseRoot, null, $baseBodies);
+                // Composer maps the holders of constants to the working tree;
+                // the base reads them from its own checkout.
+                $graph = ClassDeclarationReader::shared()->readsAs($baseRoot, $path, function () use ($baseRoot, &$baseBodies): GraphStorage {
+                    return $this->build($baseRoot, null, $baseBodies);
+                });
                 // By content, while the export exists: a file that never parsed
                 // and was only renamed is not newly unreadable.
                 foreach (OrphanedRemovals::unreadableFiles($graph) as $file) {

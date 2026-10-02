@@ -51,7 +51,10 @@ final class FileScannerRulesTest extends TestCase
     #[Test]
     public function the_default_fixture_directory_is_left_out_at_any_depth(): void
     {
-        self::assertNotContains('pkg/a/tests/fixtures/Fix.php', $this->scanned(new FileScanner(new IgnorePatternLoader())));
+        $paths = $this->scanned(new FileScanner(new IgnorePatternLoader()));
+
+        self::assertContains('src/New.php', $paths, 'precondition: the scan found files');
+        self::assertNotContains('pkg/a/tests/fixtures/Fix.php', $paths);
     }
 
     #[Test]

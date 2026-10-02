@@ -364,10 +364,9 @@ final class GraphQueryService implements QueryInterface
     }
 
     /**
-     * The unfiltered view: counts of everything (as `stats` reports them — the
-     * view used to count classes only), and no node or edge lists.
+     * @param list<string> $nodeIds
+     * @return array<string, int>
      */
-    /** @param list<string> $nodeIds @return array<string, int> */
     public function inboundCounts(array $nodeIds): array
     {
         return $this->storage->edges->countInboundByTarget($nodeIds);
@@ -395,6 +394,10 @@ final class GraphQueryService implements QueryInterface
         return $this->storage->nodes->distinctModules();
     }
 
+    /**
+     * The unfiltered view: counts of everything (as `stats` reports them — the
+     * view used to count classes only), and no node or edge lists.
+     */
     public function wholeGraphCensus(): GraphView
     {
         $census = $this->storage->lookup->census();

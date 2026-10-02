@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
 use Semitexa\ProjectGraph\Tests\Support\ExtractorCampaign;
+use Semitexa\ProjectGraph\Tests\Support\GraphFixture;
 
 /**
  * An anonymous class has no name, and the AST extractors used to treat it
@@ -95,14 +96,16 @@ final class AnonymousClassScopeTest extends TestCase
     public function deleting_the_file_removes_every_edge_it_produced(): void
     {
         $fixture = self::graphOf(['Anon/Host.php' => self::HOST]);
+        $fromHost = static fn (GraphFixture $f): array => array_values(array_filter(
+            $f->edgeLines(),
+            static fn (string $line): bool => str_contains($line, ' class:Campaign\\Anon'),
+        ));
+        self::assertNotSame([], $fromHost($fixture), 'precondition: the file produced edges');
+
         $fixture->delete('Anon/Host.php');
         $fixture->refresh();
 
-        $left = array_values(array_filter(
-            $fixture->edgeLines(),
-            static fn (string $line): bool => str_contains($line, ' class:Campaign\\Anon'),
-        ));
-        self::assertSame([], $left);
+        self::assertSame([], $fromHost($fixture));
     }
 
     #[Test]

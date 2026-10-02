@@ -46,7 +46,8 @@ final class AttributeArgumentEvaluator
 
     private readonly ClassDeclarationReader $declarations;
 
-    public function __construct(?ClassDeclarationReader $declarations = null)
+    /** @param string|null $file the file being parsed: a copy at another revision reads its own holders (see ClassDeclarationReader::readsAs()) */
+    public function __construct(?ClassDeclarationReader $declarations = null, private readonly ?string $file = null)
     {
         $this->declarations = $declarations ?? ClassDeclarationReader::shared();
     }
@@ -158,12 +159,12 @@ final class AttributeArgumentEvaluator
         // parsed — never the loaded class, which may be another revision (a
         // base-ref worktree in RefGraphDiff, the pre-edit version in watch mode).
         $own = $context->namespacedName?->toString() ?? (string) $context->name;
-        $declaration = strcasecmp($class, $own) === 0 ? $context : $this->declarations->find($class);
+        $declaration = strcasecmp($class, $own) === 0 ? $context : $this->declarations->find($class, $this->file);
         if ($declaration === null) {
             throw new ConstExprEvaluationException(sprintf('Cannot read %s::%s: no file the autoloader maps declares %s (it is never loaded to find out)', $class, $constant, $class));
         }
 
-        $found = $this->declarations->declarationOf($declaration, $constant);
+        $found = $this->declarations->declarationOf($declaration, $constant, 0, $this->file);
         if ($found === null) {
             throw new ConstExprEvaluationException(sprintf('Cannot read %s::%s: neither %s nor what it inherits from declares it', $class, $constant, $class));
         }

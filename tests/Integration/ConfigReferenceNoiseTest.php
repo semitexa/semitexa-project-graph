@@ -29,8 +29,11 @@ final class ConfigReferenceNoiseTest extends TestCase
         $fixture = self::graphOf([
             'src/DeadCode.php' => self::DEAD,
             'phpstan-baseline.neon' => "parameters:\n\tignoreErrors:\n\t\t-\n\t\t\tmessage: '#^Class Campaign\\\\Rel\\\\DeadCode is never used\\.$#'\n\t\t\tpath: src/DeadCode.php\n",
+            // The control: a .neon beside it that wires a class is read.
+            'phpstan.neon' => "rules:\n    - Campaign\\Rel\\Wired\n",
         ]);
 
+        self::assertSame(['class:Campaign\\Rel\\Wired'], self::targetsFrom($fixture, NodeId::forFile($fixture->path('phpstan.neon')), EdgeType::References));
         self::assertSame([], self::edgesFrom($fixture, NodeId::forFile($fixture->path('phpstan-baseline.neon'))));
         self::assertSame('high', self::unused($fixture)['Campaign\\Rel\\DeadCode'] ?? null);
     }

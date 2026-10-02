@@ -236,8 +236,11 @@ final class RefDiffHardeningTest extends TestCase
 
         $result = $this->diff($repo);
 
-        self::assertNotSame([], OrphanedRemovals::unreadableFiles($result['head']));
-        self::assertNotSame([], OrphanedRemovals::unreadableFiles($result['base']));
+        $head = OrphanedRemovals::unreadableFiles($result['head']);
+        self::assertCount(1, $head);
+        self::assertCount(1, OrphanedRemovals::unreadableFiles($result['base']));
+        // What the gate keys "already broken at the base" by: the same content there.
+        self::assertSame([(string) hash_file('xxh3', $head[0]) => true], $result['base_unreadable_hashes']);
     }
 
     #[Test]
@@ -250,8 +253,11 @@ final class RefDiffHardeningTest extends TestCase
         }
 
         $tester = new CommandTester(new GraphDiffCommand());
-        $tester->execute(['--fail-on' => 'orphaned-removals', '--format' => 'json']);
-        self::assertIsArray(json_decode(trim($tester->getDisplay()), true), 'a JSON caller got a text error');
+        self::assertSame(1, $tester->execute(['--fail-on' => 'orphaned-removals', '--format' => 'json']));
+        $decoded = json_decode(trim($tester->getDisplay()), true);
+        self::assertIsArray($decoded, 'a JSON caller got a text error');
+        self::assertSame(['error'], array_keys($decoded), 'a refusal, not a counts payload');
+        self::assertStringContainsString('--base', (string) $decoded['error']);
     }
 
     #[Test]

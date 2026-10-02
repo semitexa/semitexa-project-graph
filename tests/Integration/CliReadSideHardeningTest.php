@@ -51,11 +51,14 @@ final class CliReadSideHardeningTest extends TestCase
         $fixture = GraphFixture::built();
         $view = (new GraphQueryService($fixture->storage))->buildView(focus: GraphFixture::classId('Orders\\PlaceOrderHandler'), depth: 10);
 
+        self::assertGreaterThan(1, $view->totalNodes, 'precondition: the walk found something');
+        self::assertGreaterThan(0, $view->totalEdges, 'precondition: and edges');
         self::assertSame($view->totalEdges, array_sum($view->edgeTypeCounts), 'every edge type read double');
         self::assertLessThanOrEqual(GraphQueryService::VIEW_MAX_NODES, $view->totalNodes);
         self::assertNotContains('imports', array_keys($view->edgeTypeCounts), 'the walk goes through wiring, not import hubs');
 
         $modules = (new GraphQueryService($fixture->storage))->buildView(types: ['class', 'handler']);
+        self::assertGreaterThan(0, $modules->totalEdges, 'precondition: the typed view has edges');
         self::assertSame($modules->totalEdges, array_sum($modules->edgeTypeCounts));
     }
 

@@ -39,7 +39,8 @@ final class ExportLocation
         }
 
         $path = self::normalise(str_starts_with($requested, '/') ? $requested : $root . '/' . $requested);
-        if ($allowAnywhere || str_starts_with($path, self::normalise($root . '/var') . '/')) {
+        $var = self::normalise($root . '/var');
+        if ($allowAnywhere || str_starts_with($path, $var . '/') && self::staysIn($path, $var)) {
             return $path;
         }
 
@@ -75,6 +76,28 @@ final class ExportLocation
         ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
 
         return $written === false ? null : $hint;
+    }
+
+    /**
+     * Whether what already exists of $path is really inside $var. The lexical
+     * check passed `var/out/graph.html` with `var/out -> ../public`, and the
+     * export landed on the site. The deepest part of the path that exists —
+     * the file itself, when it is there (a symlink to follow) — must resolve
+     * inside var/ as var/ itself resolves: a symlinked var/ is still var/.
+     */
+    private static function staysIn(string $path, string $var): bool
+    {
+        $realVar = realpath($var);
+        if ($realVar === false) {
+            return true; // no var/ yet: nothing under it can point elsewhere
+        }
+        $existing = $path;
+        while (!file_exists($existing) && !is_link($existing) && $existing !== $var) {
+            $existing = dirname($existing);
+        }
+        $real = realpath($existing); // false for a dangling link: refused
+
+        return $real !== false && ($real === $realVar || str_starts_with($real, rtrim($realVar, '/') . '/'));
     }
 
     /** `..` and `.` resolved lexically: the file need not exist yet, and a symlinked var/ is still var/. */

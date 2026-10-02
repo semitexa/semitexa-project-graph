@@ -47,6 +47,10 @@ final class EngineRound2ConvergenceTest extends TestCase
             'src/modules/Billing/src/Refund.php' => "<?php\nnamespace {$ns}\\Billing;\n\nfinal class Refund\n{\n    public function of(Invoice \$i): void {}\n}\n",
             'src/Dup/A.php' => "<?php\nnamespace {$ns}\\Dup;\n\n#[\\Semitexa\\Core\\Attribute\\AsPublicPayload(path: '/one', methods: ['GET'])]\nfinal class Twin\n{\n}\n",
             'src/Dup/B.php' => "<?php\nnamespace {$ns}\\Dup;\n\n#[\\Semitexa\\Core\\Attribute\\AsPublicPayload(path: '/two', methods: ['GET'])]\nfinal class Twin\n{\n}\n",
+            // The resource role comes from the handler's attribute alone (handle() returns nothing).
+            'src/Orders/PlaceOrderPayload.php' => $payload('PlaceOrderPayload', "'/place'", 'Orders'),
+            'src/Orders/OrderResource.php' => "<?php\nnamespace {$ns}\\Orders;\n\nfinal class OrderResource\n{\n}\n",
+            'src/Orders/PlaceOrderHandler.php' => "<?php\nnamespace {$ns}\\Orders;\n\n#[\\Semitexa\\Core\\Attribute\\AsPayloadHandler(payload: PlaceOrderPayload::class, resource: OrderResource::class)]\nfinal class PlaceOrderHandler\n{\n    public function handle(PlaceOrderPayload \$payload): void\n    {\n    }\n}\n",
         ];
     }
 
@@ -93,7 +97,7 @@ final class EngineRound2ConvergenceTest extends TestCase
             rename($f->path('src/Dup/A.php'), $f->path('config/Twin.php'));
             })($fixture),
             'a handler stops naming its resource' => (static function (GraphFixture $f): void {
-            $f->write('Orders/PlaceOrderHandler.php', str_replace(', resource: OrderResource::class', '', $f->read('Orders/PlaceOrderHandler.php')));
+            $f->write('src/Orders/PlaceOrderHandler.php', str_replace(', resource: OrderResource::class', '', $f->read('src/Orders/PlaceOrderHandler.php')));
             })($fixture),
         };
     }
@@ -104,10 +108,14 @@ final class EngineRound2ConvergenceTest extends TestCase
     public function a_refresh_converges_to_a_full_build(string $edit): void
     {
         $refreshed = $this->built();
+        $before = [$refreshed->nodeLines(), $refreshed->edgeLines()];
         self::apply($edit, $refreshed);
         $refreshed->refresh();
         $refreshedNodes = $refreshed->nodeLines();
         $refreshedEdges = $refreshed->edgeLines();
+        // An edit of a file the project does not have wrote a new, empty one
+        // and compared two unchanged graphs.
+        self::assertNotSame($before, [$refreshedNodes, $refreshedEdges], 'the edit changed nothing, so it tested nothing');
 
         $rebuilt = GraphFixture::create();
         $this->write($rebuilt);
@@ -132,7 +140,9 @@ final class EngineRound2ConvergenceTest extends TestCase
         $fixture->refresh();
 
         self::assertContains('class:R2Engine\\Dup\\Twin payload ' . self::holder($fixture), $fixture->nodeLines());
-        foreach ($fixture->storage->gaps->findAll(\Semitexa\ProjectGraph\Application\Service\Coverage\CoverageGapKind::DuplicateClass) as $gap) {
+        $gaps = $fixture->storage->gaps->findAll(\Semitexa\ProjectGraph\Application\Service\Coverage\CoverageGapKind::DuplicateClass);
+        self::assertCount(1, $gaps, 'the other copy still records the duplicate');
+        foreach ($gaps as $gap) {
             $named = substr($gap->getDetail(), strlen('The graph already holds this class from '));
             self::assertFileExists($named, $gap->getDetail());
         }

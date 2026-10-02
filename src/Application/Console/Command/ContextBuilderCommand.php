@@ -72,7 +72,11 @@ final class ContextBuilderCommand extends BaseCommand
         }
         $depth = (int) $rawDepth;
         if ($module !== null && !in_array($module, $this->query()->knownModules(), true)) {
-            $output->writeln('<error>' . OutputFormatter::escape(sprintf('No module "%s" in the graph.', $module)) . '</error>');
+            $message = sprintf('No module "%s" in the graph.', $module);
+            // A caller that asked for JSON parses stdout: the <error> text failed the parse.
+            $format === 'json'
+                ? $output->writeln((string) json_encode(['error' => $message], JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE), OutputInterface::OUTPUT_RAW)
+                : $output->writeln('<error>' . OutputFormatter::escape($message) . '</error>');
             return Command::FAILURE;
         }
 
@@ -230,7 +234,12 @@ final class ContextBuilderCommand extends BaseCommand
                 $context['related_events'][] = [
                     'class' => $lifecycle->eventClass,
                     'nats_subject' => $lifecycle->natsSubject,
-                    'listeners' => array_values(array_map('strval', [...$lifecycle->syncListeners, ...$lifecycle->asyncListeners, ...$lifecycle->queuedListeners])),
+                    // A queued listener is {class, queue}: strval() made it "Array".
+                    'listeners' => array_values(array_map('strval', [
+                        ...$lifecycle->syncListeners,
+                        ...$lifecycle->asyncListeners,
+                        ...array_column($lifecycle->queuedListeners, 'class'),
+                    ])),
                 ];
             }
         }

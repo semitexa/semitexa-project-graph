@@ -102,7 +102,14 @@ final class GitSnapshot
 
         $snapshot = rtrim($parentDir, '/') . '/' . self::PREFIX . getmypid() . '-' . bin2hex(random_bytes(6));
         $lock = @fopen($snapshot . '.lock', 'c');
-        if ($lock === false || !flock($lock, LOCK_EX)) {
+        if ($lock === false) {
+            throw new \RuntimeException('Cannot lock ' . $snapshot . '.lock');
+        }
+        if (!flock($lock, LOCK_EX)) {
+            // sweep() skips .lock files and no snapshot exists to judge this
+            // one by: left behind, nothing would ever remove it.
+            fclose($lock);
+            @unlink($snapshot . '.lock');
             throw new \RuntimeException('Cannot lock ' . $snapshot . '.lock');
         }
         $index = $snapshot . '.index';

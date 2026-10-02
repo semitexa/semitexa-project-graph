@@ -8,6 +8,7 @@ use Semitexa\ProjectGraph\Application\Service\Findings\InboundIndex;
 use Semitexa\ProjectGraph\Application\Service\Findings\TestCode;
 use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
+use Semitexa\ProjectGraph\Application\Service\Index\ModuleOfPath;
 
 /**
  * Code the graph holds no edges for, and which modules it could reach.
@@ -33,6 +34,9 @@ use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
  * Module dependencies are read from production code only (a test reaching
  * across modules says nothing about what the module can load) and from every
  * dependency edge class, imports included: a `use` line is enough to name.
+ * A package's composer.json `require` counts too: a dependency used only
+ * through runtime names, or only inside an ignored class, leaves no edge,
+ * and its classes were graded HIGH with absence_is_proof.
  *
  * Files outside packages/, src/ and tests/ have module ''. One '' bucket would
  * tie unrelated top-level directories together (measured 2026-10-02: the
@@ -173,7 +177,15 @@ final class UnreadCode
             }
         }
 
-        foreach (array_unique(array_values($unread->keyOfClass)) as $module) {
+        foreach (self::declaredDependencies($root) as $from => $targets) {
+            foreach ($targets as $to) {
+                if ($from !== $to) {
+                    $direct[$from][$to] = true;
+                }
+            }
+        }
+
+        foreach (array_unique([...array_values($unread->keyOfClass), ...array_map('strval', array_keys($direct))]) as $module) {
             $seen = [$module => true];
             $queue = [$module];
             while ($queue !== []) {
@@ -190,6 +202,45 @@ final class UnreadCode
         return $unread;
     }
 
+    /**
+     * What each package under packages/ requires (require, not require-dev:
+     * production code only), as module keys. The project's own composer.json
+     * is not read: it requires every package, and would make any runtime name
+     * in the app reach all of them.
+     *
+     * @return array<string, list<string>> module key => module keys it requires
+     */
+    private static function declaredDependencies(string $root): array
+    {
+        if ($root === '') {
+            return [];
+        }
+        $moduleOf = [];
+        $requires = [];
+        foreach (glob($root . '/packages/*/composer.json') ?: [] as $file) {
+            $json = json_decode((string) @file_get_contents($file), true);
+            $module = ModuleOfPath::of($root, $file);
+            if (!is_array($json) || $module === '') {
+                continue;
+            }
+            if (is_string($json['name'] ?? null)) {
+                $moduleOf[strtolower($json['name'])] = $module;
+            }
+            $requires[$module] = is_array($json['require'] ?? null) ? array_map('strval', array_keys($json['require'])) : [];
+        }
+
+        $declared = [];
+        foreach ($requires as $module => $names) {
+            foreach ($names as $name) {
+                if (isset($moduleOf[strtolower($name)])) {
+                    $declared[$module][] = $moduleOf[strtolower($name)];
+                }
+            }
+        }
+
+        return $declared;
+    }
+
     /** Module key of a declared class, or null for a node the graph does not declare. */
     public function keyOfClass(string $classId): ?string
     {
@@ -198,13 +249,21 @@ final class UnreadCode
 
     /**
      * Module key of any file — also one that declares nothing the graph holds
-     * (an ignored class, a shadowed duplicate): the nearest directory above
-     * it that belongs to exactly one module.
+     * (an ignored class, a shadowed duplicate): its module by path, or outside
+     * any module the nearest directory above it that belongs to exactly one
+     * module.
      */
     public function keyOfFile(string $file): string
     {
         if (isset($this->keyOfFile[$file])) {
             return $this->keyOfFile[$file];
+        }
+        // A file in a module is in that module, whatever else the module
+        // declares: an ignored class alone in its package fell through to
+        // the packages/ directory, a key that reaches nothing.
+        $module = $this->rootPrefix === '' ? '' : ModuleOfPath::of($this->rootPrefix, $file);
+        if ($module !== '') {
+            return $module;
         }
         for ($dir = dirname($file); $this->isBelowRoot($dir); $dir = dirname($dir)) {
             if (array_key_exists($dir, $this->keyOfDir)) {

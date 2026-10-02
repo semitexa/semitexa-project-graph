@@ -61,12 +61,15 @@ final class StorageHardeningTest extends TestCase
         $fixture = GraphFixture::built();
         $fixture->storage->setMeta('graph_diff_last_scan', '{"total_nodes":1}');
         $fixture->storage->setMeta('graph_diff_last_scan:Orm', '{"total_nodes":2}');
+        // `_` is a LIKE wildcard: this key matched 'graph_diff_last_scan%' and survived.
+        $fixture->storage->setMeta('graphXdiffXlastXscan', 'derived');
 
         $fixture->build();
 
         self::assertSame('{"total_nodes":1}', $fixture->storage->getMeta('graph_diff_last_scan'));
         self::assertSame('{"total_nodes":2}', $fixture->storage->getMeta('graph_diff_last_scan:Orm'));
         self::assertNotNull($fixture->storage->getMeta('last_update'), 'what the build derives is rewritten');
+        self::assertNull($fixture->storage->getMeta('graphXdiffXlastXscan'), 'only the baseline keys are kept');
     }
 
     #[Test]
@@ -91,6 +94,7 @@ final class StorageHardeningTest extends TestCase
         $fixture->write('Orders/OrderPlaced.php', $source);
         $back = $fixture->refresh();
 
+        self::assertSame(2, $gone->nodesRemoved, 'what the file declared leaves');
         self::assertSame($gone->nodesRemoved, $back->nodesAdded);
     }
 

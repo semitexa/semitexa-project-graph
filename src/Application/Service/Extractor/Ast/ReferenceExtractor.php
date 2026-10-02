@@ -135,12 +135,12 @@ final class ReferenceExtractor implements ExtractorInterface
             {
                 $current = $this->classLikes[array_key_last($this->classLikes) ?? -1] ?? null;
                 $named = ClassNames::of($class, $this->scope->parentClass());
-                $start = $named === null ? $current : $this->declarations->find($named);
+                $start = $named === null ? $current : $this->declarations->find($named, $this->file->path);
                 if ($start === null) {
                     return;
                 }
 
-                $found = $this->declarations->declarationOf($start, $constant);
+                $found = $this->declarations->declarationOf($start, $constant, 0, $this->file->path);
                 $declarer = $found !== null ? $found[0]->namespacedName?->toString() : null;
                 if ($found === null && $named === null) {
                     // Not readable from here (the parent's file is not mapped):

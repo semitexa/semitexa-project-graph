@@ -95,6 +95,9 @@ final class TopLevelCodeTest extends TestCase
     {
         $fixture = self::graphOf(self::project());
         $config = NodeId::forFile($fixture->path('config/app.php'));
+        self::assertNotNull($fixture->storage->nodes->findById($config), 'precondition: the script has its node');
+        self::assertNotSame([], self::edgesFrom($fixture, $config), 'precondition: and its edges');
+        self::assertArrayNotHasKey('Campaign\\Cfg\\FromConfig', self::unused($fixture), 'precondition: the script keeps it used');
 
         $fixture->delete('config/app.php');
         $fixture->refresh();

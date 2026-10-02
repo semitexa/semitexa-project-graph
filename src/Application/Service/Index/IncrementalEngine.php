@@ -35,6 +35,9 @@ final class IncrementalEngine
     /** Files applied per transaction: bounds how many extraction results are held at once. */
     private const BATCH_SIZE = 200;
 
+    /** How many rounds of take-over re-reads one batch may need. */
+    private const REREAD_ROUNDS = 5;
+
     /**
      * Rebuild the graph from nothing — or not at all.
      *
@@ -45,13 +48,22 @@ final class IncrementalEngine
      */
     public function fullBuild(string $projectRoot): UpdateResult
     {
-        return $this->exclusively($projectRoot, fn (): UpdateResult => $this->storage->transaction(function () use ($projectRoot): UpdateResult {
+        return $this->exclusively($projectRoot, fn (): UpdateResult => $this->rebuild($projectRoot));
+    }
+
+    /** The full build itself; the caller holds the lock. */
+    private function rebuild(string $projectRoot): UpdateResult
+    {
+        $result = $this->storage->transaction(function () use ($projectRoot): UpdateResult {
             $this->storage->truncate();
 
             // Every edge is "added" on a full build; keeping ~67k of them in
             // the result would cost memory and say nothing.
-            return $this->update($projectRoot, keepEdgeLists: false);
-        }));
+            return $this->doUpdate($projectRoot, keepEdgeLists: false);
+        });
+        \assert($result instanceof UpdateResult);
+
+        return $result;
     }
 
     public function update(string $projectRoot, bool $keepEdgeLists = true): UpdateResult
@@ -63,8 +75,6 @@ final class IncrementalEngine
         // its holder was already indexed (round 2 fuzzing, 2026-10-02).
         return $this->exclusively($projectRoot, fn (): UpdateResult => $this->storage->transaction(fn (): UpdateResult => $this->doUpdate($projectRoot, $keepEdgeLists)));
     }
-
-    private static int $lockDepth = 0;
 
     private bool $locking = true;
 
@@ -85,14 +95,20 @@ final class IncrementalEngine
      * project's own var/tmp, so the app container and a host CLI share it;
      * whoever comes second waits, then finds nothing left to do.
      *
+     * Taken once, at the public entry points; what runs under it calls the
+     * unlocked rebuild()/doUpdate(). A static depth counter used to stand for
+     * "the lock is already ours" — shared by every coroutine of a worker, so
+     * a second refresh in the same process skipped the lock while the first
+     * held it.
+     *
      * @template T
      * @param callable(): T $work
      * @return T
      */
     private function exclusively(string $projectRoot, callable $work): mixed
     {
-        if (self::$lockDepth > 0 || !$this->locking) {
-            return $work(); // fullBuild() calls update(): the lock is already ours
+        if (!$this->locking) {
+            return $work();
         }
         $dir = rtrim($projectRoot, '/') . '/var/tmp';
         $path = $dir . '/.project-graph.lock';
@@ -111,11 +127,9 @@ final class IncrementalEngine
             $handle = null;
         }
 
-        self::$lockDepth++;
         try {
             return $work();
         } finally {
-            self::$lockDepth--;
             if ($handle !== null) {
                 flock($handle, LOCK_UN);
                 fclose($handle);
@@ -134,7 +148,7 @@ final class IncrementalEngine
         // not change. Measured 2026-10-02: a graph without the gaps table
         // stayed "no gaps" through every refresh; a full build found 368.
         if ($indexedFiles !== [] && $this->storage->getMeta('build_version') !== self::buildVersion()) {
-            return $this->fullBuild($projectRoot);
+            return $this->rebuild($projectRoot);
         }
         // Findings judge "is this test code" relative to it (see TestCode).
         $this->storage->setMeta('project_root', rtrim($projectRoot, '/'));
@@ -191,13 +205,13 @@ final class IncrementalEngine
             }
 
             if (count($batch) >= self::BATCH_SIZE) {
-                $this->applyBatch($batch, $indexUpdates, $totals, $keepEdgeLists);
+                $this->applyBatch($batch, $indexUpdates, $totals, $errors, $keepEdgeLists);
                 $batch = [];
                 $indexUpdates = [];
             }
         }
 
-        $this->applyBatch($batch, $indexUpdates, $totals, $keepEdgeLists);
+        $this->applyBatch($batch, $indexUpdates, $totals, $errors, $keepEdgeLists);
         // A full build reads every file already: looking for dependents there
         // materialised every inbound edge for nothing — +26 MB, the build
         // peaking at 113 MB of a 128 MB limit (round 2).
@@ -377,7 +391,7 @@ final class IncrementalEngine
                     $changedClassIds[] = NodeId::forClass($fqcn);
                 }
             }
-            $this->applyBatch($batch, $indexUpdates, $totals, $keepEdgeLists);
+            $this->applyBatch($batch, $indexUpdates, $totals, $errors, $keepEdgeLists);
         }
     }
 
@@ -430,7 +444,7 @@ final class IncrementalEngine
                 $hash = hash_file('xxh3', $path);
                 $indexUpdates[$path] = $hash === false ? null : $hash;
             }
-            $this->applyBatch($batch, $indexUpdates, $totals, $keepEdgeLists);
+            $this->applyBatch($batch, $indexUpdates, $totals, $errors, $keepEdgeLists);
         }
     }
 
@@ -445,18 +459,19 @@ final class IncrementalEngine
      * @param array<string, ExtractionResult> $batch
      * @param array<string, ?string> $indexUpdates path => content hash, or null for a deleted file
      * @param array{nodes: array<string, int>, edges: array<string, int>, addedEdges: array<string, \Semitexa\ProjectGraph\Domain\Model\Edge>, removedEdges: array<string, \Semitexa\ProjectGraph\Domain\Model\Edge>} $totals
+     * @param list<array{file: string, message: string}> $errors the run's: a re-read that fails is reported like any other read
      */
-    private function applyBatch(array $batch, array $indexUpdates, array &$totals, bool $keepEdgeLists): void
+    private function applyBatch(array $batch, array $indexUpdates, array &$totals, array &$errors, bool $keepEdgeLists): void
     {
         if ($batch === []) {
             return;
         }
 
-        $diff = $this->storage->transaction(function () use ($batch, $indexUpdates) {
+        $diff = $this->storage->transaction(function () use ($batch, $indexUpdates, &$errors) {
             $diff = $this->builder->apply($batch);
             // Files that lost a class to a smaller path are read again now,
             // so they keep everything else they declare.
-            for ($round = 0; $round < 5 && ($rereads = $this->builder->takeRereads()) !== []; $round++) {
+            for ($round = 0; $round < self::REREAD_ROUNDS && ($rereads = $this->builder->takeRereads()) !== []; $round++) {
                 $again = [];
                 foreach ($rereads as $path) {
                     // Even a file this batch already read: the take-over removed
@@ -464,13 +479,25 @@ final class IncrementalEngine
                     // rest (round-3 fuzzing, seed 2132: a multi-class holder
                     // lost its other class).
                     if (is_file($path)) {
-                        $errors = [];
-                        $again[$path] = $this->extractFile($this->root, $path, $errors);
+                        $failed = [];
+                        $again[$path] = $this->extractFile($this->root, $path, $failed);
+                        // Its errors were dropped, so filesErrored left the file out.
+                        foreach ($failed as $error) {
+                            if (!in_array($error, $errors, true)) {
+                                $errors[] = $error;
+                            }
+                        }
                     }
                 }
                 if ($again !== []) {
                     $this->mergeDiff($diff, $this->builder->apply($again));
                 }
+            }
+            // Each round needs a new take-over, so this is not expected to be
+            // reached; if it is, a file is left without what it declares and
+            // the graph is not what a full build gives. Said, not dropped.
+            foreach ($this->builder->takeRereads() as $path) {
+                $errors[] = ['file' => $path, 'message' => sprintf('Not re-read after losing a class: more than %d rounds of take-overs. Run a full build.', self::REREAD_ROUNDS)];
             }
 
             foreach ($indexUpdates as $path => $hash) {
@@ -555,46 +582,6 @@ trait IncrementalEngineModuleResolver
 {
     private function resolveModule(string $projectRoot, string $filePath): string
     {
-        $normalizedRoot = rtrim(str_replace('\\', '/', $projectRoot), '/');
-        $normalizedPath = str_replace('\\', '/', $filePath);
-
-        if (str_starts_with($normalizedPath, $normalizedRoot . '/packages/')) {
-            $relative = substr($normalizedPath, strlen($normalizedRoot . '/packages/'));
-            $package = explode('/', $relative, 2)[0] ?? '';
-
-            if ($package !== '') {
-                $package = preg_replace('/^semitexa-/', '', $package) ?? $package;
-                return $this->studly($package);
-            }
-        }
-
-        // A local module is a module: everything under src/ used to be "App"
-        // (579 classes), so --module=Playground found nothing and a file moved
-        // between two local modules was "no structural change".
-        if (str_starts_with($normalizedPath, $normalizedRoot . '/src/modules/')) {
-            $name = explode('/', substr($normalizedPath, strlen($normalizedRoot . '/src/modules/')), 2)[0] ?? '';
-            if ($name !== '' && str_contains(substr($normalizedPath, strlen($normalizedRoot . '/src/modules/')), '/')) {
-                return $name;
-            }
-        }
-
-        if (str_starts_with($normalizedPath, $normalizedRoot . '/src/')
-            || str_starts_with($normalizedPath, $normalizedRoot . '/tests/')
-        ) {
-            return 'App';
-        }
-
-        return '';
-    }
-
-    private function studly(string $value): string
-    {
-        $parts = preg_split('/[^a-zA-Z0-9]+/', $value) ?: [];
-        $parts = array_filter($parts, static fn (string $part): bool => $part !== '');
-
-        return implode('', array_map(
-            static fn (string $part): string => ucfirst(strtolower($part)),
-            $parts,
-        ));
+        return ModuleOfPath::of($projectRoot, $filePath);
     }
 }

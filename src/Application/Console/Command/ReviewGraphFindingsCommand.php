@@ -13,6 +13,7 @@ use Semitexa\ProjectGraph\Application\Service\Findings\FindingsReport;
 use Semitexa\ProjectGraph\Application\Service\Findings\UnusedClassFinder;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
 use Semitexa\ProjectGraph\Application\Service\Support\AutoRefreshesProjectGraph;
+use Semitexa\ProjectGraph\Application\Service\Support\RefusesInMachineFormat;
 use Semitexa\ProjectGraph\Application\Service\Support\UsesProjectGraphConnection;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -35,6 +36,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 final class ReviewGraphFindingsCommand extends BaseCommand
 {
     use AutoRefreshesProjectGraph;
+    use RefusesInMachineFormat;
     use UsesProjectGraphConnection;
 
     private const CONFIDENCE_RANK = FindingsReport::CONFIDENCE_RANK;
@@ -198,13 +200,10 @@ final class ReviewGraphFindingsCommand extends BaseCommand
      */
     private function fail(SymfonyStyle $io, OutputInterface $output, bool $machine, string $message): int
     {
-        if ($machine) {
-            $output->writeln((string) json_encode(['error' => $message], JSON_UNESCAPED_SLASHES));
-        } else {
-            $io->error($message);
-        }
-
-        return self::FAILURE;
+        // The shared refusal: it substitutes invalid UTF-8 (a --module with a
+        // bad byte made json_encode() return false and print an empty line)
+        // and writes raw, so the formatter cannot touch the message.
+        return $this->refuse($output, $io, $message, $machine);
     }
 
     private static function shortName(string $id): string

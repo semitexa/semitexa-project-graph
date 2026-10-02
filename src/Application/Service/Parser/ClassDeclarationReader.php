@@ -36,6 +36,13 @@ use PhpParser\ParserFactory;
  * Parsed files are cached by path and validated by content hash, so an edit
  * between two refreshes of one process is seen. The cache is bounded and
  * holds only class declarations; it carries no request state.
+ *
+ * A copy of a tree at another revision (RefGraphDiff's base checkout) is not
+ * what Composer maps: its maps point at the working tree. A file inside a
+ * registered copy reads its holders from that copy — see readsAs() — or the
+ * base graph took the head's Routes::LIST and a changed constant showed no
+ * route change at all (measured 2026-10-02). The registration is keyed by
+ * the copy's own (unique) directory, so it never applies to anything else.
  */
 final class ClassDeclarationReader
 {
@@ -49,6 +56,9 @@ final class ClassDeclarationReader
     /** @var array<string, array{hash: string, classes: array<string, ClassLike>}> */
     private array $files = [];
 
+    /** @var array<string, string> a copy's directory => the directory Composer maps in its place */
+    private array $copies = [];
+
     public function __construct()
     {
         $this->parser = (new ParserFactory())->createForNewestSupportedVersion();
@@ -60,12 +70,37 @@ final class ClassDeclarationReader
         return self::$shared ??= new self();
     }
 
-    /** The declaration of $fqcn from the file the autoloader maps it to; null when there is none to read. */
-    public function find(string $fqcn): ?ClassLike
+    /**
+     * While $work runs, a file under $copy reads a holder Composer maps under
+     * $mapped from the same place under $copy instead.
+     *
+     * @template T
+     * @param callable(): T $work
+     * @return T
+     */
+    public function readsAs(string $copy, string $mapped, callable $work): mixed
+    {
+        $copy = rtrim($copy, '/');
+        $this->copies[$copy] = rtrim($mapped, '/');
+        try {
+            return $work();
+        } finally {
+            unset($this->copies[$copy]);
+        }
+    }
+
+    /**
+     * The declaration of $fqcn from the file the autoloader maps it to; null when there is none to read.
+     *
+     * @param string|null $fromFile the file asking: inside a copy registered with readsAs(), the copy's holder is read
+     */
+    public function find(string $fqcn, ?string $fromFile = null): ?ClassLike
     {
         $fqcn = ltrim($fqcn, '\\');
+        $copy = $this->copyOf($fromFile);
         foreach ($this->candidateFiles($fqcn) as $file) {
-            $class = $this->classesIn($file)[strtolower($fqcn)] ?? null;
+            $file = $this->inCopy($file, $copy);
+            $class = $file === null ? null : $this->classesIn($file)[strtolower($fqcn)] ?? null;
             if ($class !== null) {
                 return $class;
             }
@@ -79,12 +114,44 @@ final class ClassDeclarationReader
         // unreadable without this.
         if (class_exists($fqcn, false) || interface_exists($fqcn, false) || enum_exists($fqcn, false) || trait_exists($fqcn, false)) {
             $file = (new \ReflectionClass($fqcn))->getFileName();
-            if (is_string($file)) {
+            $file = is_string($file) ? $this->inCopy($file, $copy) : null;
+            if ($file !== null) {
                 return $this->classesIn($file)[strtolower($fqcn)] ?? null;
             }
         }
 
         return null;
+    }
+
+    /** @return array{0: string, 1: string}|null [copy, mapped] for a file inside a registered copy */
+    private function copyOf(?string $file): ?array
+    {
+        if ($file === null) {
+            return null;
+        }
+        foreach ($this->copies as $copy => $mapped) {
+            if (str_starts_with($file, $copy . '/')) {
+                return [$copy, $mapped];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * $file as the copy has it: a path under the mapped tree moves into the
+     * copy. Anything outside the mapped tree (vendor, another package) is
+     * read where it is. Null when there is no such file to read.
+     *
+     * @param array{0: string, 1: string}|null $copy
+     */
+    private function inCopy(string $file, ?array $copy): ?string
+    {
+        if ($copy !== null && str_starts_with($file, $copy[1] . '/')) {
+            $file = $copy[0] . substr($file, strlen($copy[1]));
+        }
+
+        return is_file($file) ? $file : null;
     }
 
     /**
@@ -94,7 +161,7 @@ final class ClassDeclarationReader
      *
      * @return array{0: ClassLike, 1: Node\Const_|Node\Stmt\EnumCase}|null
      */
-    public function declarationOf(ClassLike $class, string $constant, int $depth = 0): ?array
+    public function declarationOf(ClassLike $class, string $constant, int $depth = 0, ?string $fromFile = null): ?array
     {
         foreach ($class->stmts as $stmt) {
             if ($stmt instanceof Node\Stmt\ClassConst) {
@@ -112,9 +179,9 @@ final class ClassDeclarationReader
         }
 
         foreach (self::parentsOf($class) as $parent) {
-            $declaration = $this->find($parent);
+            $declaration = $this->find($parent, $fromFile);
             if ($declaration !== null && $declaration !== $class) {
-                $found = $this->declarationOf($declaration, $constant, $depth + 1);
+                $found = $this->declarationOf($declaration, $constant, $depth + 1, $fromFile);
                 if ($found !== null) {
                     return $found;
                 }
@@ -159,7 +226,9 @@ final class ClassDeclarationReader
 
     /**
      * Composer's own lookup order (class map, PSR-4, PSR-4 fallback, PSR-0),
-     * read from its public maps.
+     * read from its public maps. Whether a file is there is asked later, of
+     * the tree being read: a holder the working tree deleted can still be in
+     * a copy at another revision.
      *
      * @return list<string>
      */
@@ -171,7 +240,7 @@ final class ClassDeclarationReader
             $files[] = $classMap[$fqcn];
         }
         if ($loader->isClassMapAuthoritative()) {
-            return array_values(array_filter($files, 'is_file'));
+            return $files;
         }
 
         $relative = strtr($fqcn, '\\', '/') . '.php';
@@ -204,7 +273,7 @@ final class ClassDeclarationReader
             $files[] = rtrim($dir, '/') . '/' . $psr0;
         }
 
-        return array_values(array_filter($files, 'is_file'));
+        return $files;
     }
 
     /** @return array<string, ClassLike> lower-cased FQCN => declaration */

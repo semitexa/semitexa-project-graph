@@ -43,8 +43,68 @@ final class ExportLocationTest extends TestCase
             );
             self::assertNull(ExportLocation::hintFor($root, $root . '/var/tmp/g.html', 'Orders'), 'a place the operator chose is theirs');
         } finally {
-            exec('rm -rf ' . escapeshellarg($root));
+            self::remove($root);
         }
+    }
+
+    #[Test]
+    public function a_symlink_inside_var_does_not_lead_out_of_it(): void
+    {
+        $root = sys_get_temp_dir() . '/semitexa-export-link-' . bin2hex(random_bytes(4));
+        mkdir($root . '/var/tmp', 0777, true);
+        mkdir($root . '/public', 0777, true);
+        mkdir($root . '/elsewhere', 0777, true);
+        symlink('../public', $root . '/var/out');
+        touch($root . '/public/graph.html');
+        symlink('../public/graph.html', $root . '/var/linked.html');
+        symlink('../public/missing.html', $root . '/var/dangling.html');
+        try {
+            foreach (['var/out/graph.html', 'var/out/new/graph.html', 'var/linked.html', 'var/dangling.html'] as $requested) {
+                try {
+                    ExportLocation::resolve($root, $requested, 'whole', false);
+                    self::fail($requested . ' was accepted: it is written outside var/');
+                } catch (\InvalidArgumentException $e) {
+                    self::assertStringContainsString('--allow-anywhere', $e->getMessage());
+                }
+            }
+            self::assertSame($root . '/var/out/graph.html', ExportLocation::resolve($root, 'var/out/graph.html', 'whole', true));
+            // A real directory under var/, existing or not yet, is still fine.
+            self::assertSame($root . '/var/tmp/g.html', ExportLocation::resolve($root, 'var/tmp/g.html', 'whole', false));
+            self::assertSame($root . '/var/new/dir/g.html', ExportLocation::resolve($root, 'var/new/dir/g.html', 'whole', false));
+        } finally {
+            self::remove($root);
+        }
+    }
+
+    #[Test]
+    public function a_symlinked_var_is_still_var(): void
+    {
+        $root = sys_get_temp_dir() . '/semitexa-export-var-' . bin2hex(random_bytes(4));
+        mkdir($root . '/storage/var/tmp', 0777, true);
+        symlink('storage/var', $root . '/var');
+        try {
+            self::assertSame($root . '/var/tmp/g.html', ExportLocation::resolve($root, 'var/tmp/g.html', 'whole', false));
+        } finally {
+            self::remove($root);
+        }
+    }
+
+    /** Without a shell: `rm -rf` failed silently where there is no rm. */
+    private static function remove(string $path): void
+    {
+        if (is_link($path) || is_file($path)) {
+            unlink($path);
+            return;
+        }
+        if (!is_dir($path)) {
+            return;
+        }
+        foreach (scandir($path) ?: [] as $entry) {
+            if ($entry !== '.' && $entry !== '..') {
+                self::remove($path . '/' . $entry);
+            }
+        }
+        rmdir($path);
     }
 
     /** @return iterable<string, array{string, string}> */
