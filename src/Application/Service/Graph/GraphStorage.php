@@ -15,6 +15,7 @@ use Semitexa\ProjectGraph\Application\Db\SQLite\Repository\GraphCoverageGapRepos
 use Semitexa\ProjectGraph\Application\Db\SQLite\Repository\GraphEdgeRepository;
 use Semitexa\ProjectGraph\Application\Db\SQLite\Repository\GraphFileIndexRepository;
 use Semitexa\ProjectGraph\Application\Db\SQLite\Repository\GraphMetaRepository;
+use Semitexa\ProjectGraph\Application\Db\SQLite\Repository\GraphNodeLookupRepository;
 use Semitexa\ProjectGraph\Application\Db\SQLite\Repository\GraphNodeRepository;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Domain\Model\Node;
@@ -26,6 +27,7 @@ final class GraphStorage
     public readonly GraphFileIndexRepository $fileIndex;
     public readonly GraphMetaRepository $meta;
     public readonly GraphCoverageGapRepository $gaps;
+    public readonly GraphNodeLookupRepository $lookup;
 
     public function __construct(
         private readonly DatabaseAdapterInterface      $adapter,
@@ -41,6 +43,7 @@ final class GraphStorage
         $this->fileIndex = $this->createFileIndexRepository();
         $this->meta      = $this->createMetaRepository();
         $this->gaps      = new GraphCoverageGapRepository($this->adapter);
+        $this->lookup    = new GraphNodeLookupRepository($this->adapter);
     }
 
     public function transaction(callable $callback): mixed
@@ -108,17 +111,31 @@ final class GraphStorage
         if ($node->getIsPlaceholder()) {
             $type = self::moreSpecific($existing->getType(), $node->getType());
             if ($type !== $existing->getType()) {
-                $this->nodes->upsert(self::withType($existing, $type));
+                $this->nodes->upsert(self::withType($existing, $type, $existing->getIsPlaceholder() ? null : $existing->getType()));
             }
             return null;
         }
 
         if ($existing->getIsPlaceholder()) {
-            $this->nodes->upsert(self::withType($node, self::moreSpecific($node->getType(), $existing->getType())));
+            $type = self::moreSpecific($node->getType(), $existing->getType());
+            // The type the class declared is kept beside a role another file
+            // gave it, so the role can be taken back (reconcileResourceRoles).
+            $this->nodes->upsert(self::withType($node, $type, $type !== $node->getType() ? $node->getType() : null));
             return null;
         }
 
         if ($existing->getFile() !== $node->getFile() && $existing->getFile() !== '') {
+            // A node many files emit (route, flow, domain) is held by the
+            // smallest path, as a full build — which reads files sorted —
+            // holds it; first-read-wins gave refreshes and rebuilds different
+            // owners (round-3 fuzzing: ~80 refreshes). Classes are taken over
+            // in GraphBuilder, where the old holder can be read again.
+            if (!str_starts_with($node->getId(), 'class:') && strcmp($node->getFile(), $existing->getFile()) < 0) {
+                $this->nodes->upsert($node);
+
+                return null;
+            }
+
             return $existing->getFile();
         }
 
@@ -133,10 +150,14 @@ final class GraphStorage
         return in_array($held, $generic, true) && !in_array($incoming, $generic, true) ? $incoming : $held;
     }
 
-    private static function withType(Node $node, NodeType $type): Node
+    private static function withType(Node $node, NodeType $type, ?NodeType $declared = null): Node
     {
         if ($node->getType() === $type) {
             return $node;
+        }
+        $metadata = $node->getMetadata();
+        if ($declared !== null) {
+            $metadata['declared_type'] = $declared->value;
         }
 
         return new Node(
@@ -147,7 +168,7 @@ final class GraphStorage
             line:          $node->getLine(),
             endLine:       $node->getEndLine(),
             module:        $node->getModule(),
-            metadata:      $node->getMetadata(),
+            metadata:      $metadata,
             isPlaceholder: $node->getIsPlaceholder(),
         );
     }

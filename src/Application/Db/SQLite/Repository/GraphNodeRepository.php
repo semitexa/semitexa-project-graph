@@ -151,14 +151,33 @@ final class GraphNodeRepository
      *
      * @return list<Node>
      */
-    public function searchText(string $text, int $limit = 50): array
+    /**
+     * @param list<string> $excludeTypes node types left out IN the query: filtering
+     *        them after the LIMIT let fifty hidden nodes crowd every visible match out
+     */
+    public function searchText(string $text, int $limit = 50, array $excludeTypes = [], ?string $module = null, ?string $type = null): array
     {
         $like = '%' . strtr($text, ['\\' => '\\\\', '%' => '\\%', '_' => '\\_']) . '%';
         $prefix = substr($like, 1);
+        $params = ['like' => $like, 'prefix' => $prefix];
+        if ($module !== null) {
+            $params['module'] = $module;
+        }
+        if ($type !== null) {
+            $params['type'] = $type;
+        }
+        $exclude = '';
+        foreach (array_values($excludeTypes) as $i => $excluded) {
+            $params['x' . $i] = $excluded;
+            $exclude .= ($exclude === '' ? '' : ', ') . ':x' . $i;
+        }
         $rows = $this->adapter->execute(
-            "SELECT id FROM graph_nodes WHERE name LIKE :like ESCAPE '\\' OR fqcn LIKE :like ESCAPE '\\'"
+            "SELECT id FROM graph_nodes WHERE (name LIKE :like ESCAPE '\\' OR fqcn LIKE :like ESCAPE '\\')"
+            . ($exclude === '' ? '' : ' AND type NOT IN (' . $exclude . ')')
+            . ($module === null ? '' : ' AND module = :module')
+            . ($type === null ? '' : ' AND type = :type')
             . " ORDER BY is_placeholder, CASE WHEN name LIKE :prefix ESCAPE '\\' THEN 0 ELSE 1 END, name LIMIT " . max(1, $limit),
-            ['like' => $like, 'prefix' => $prefix],
+            $params,
         )->fetchAll();
         $ids = [];
         foreach ($rows as $row) {
@@ -251,6 +270,71 @@ final class GraphNodeRepository
     }
 
     /** A node known only because an edge points at it. Plain SQL: runs once per edge target. */
+    public function existsDeclared(string $nodeId): bool
+    {
+        return $this->adapter->execute(
+            'SELECT 1 FROM graph_nodes WHERE id = :id AND is_placeholder = 0 LIMIT 1',
+            ['id' => $nodeId],
+        )->fetchColumn() !== false;
+    }
+
+    /**
+     * "resource" is a role another file gives a class (a handler's
+     * `produces`). It stuck after the handler stopped naming it, and a
+     * placeholder kept it after the class was deleted (round 2). The role
+     * holds exactly while a `produces` edge points at the node; otherwise a
+     * declaration returns to the type it declared and a placeholder to the
+     * type its id implies.
+     */
+    public function reconcileResourceRoles(): void
+    {
+        // And the other way: a declared class something `produces` IS a
+        // resource, however the files were read. A handler file that also
+        // declared a copy of the class lost the role in a full build and kept
+        // it in a refresh (round-4 fuzzing, seed 3160).
+        $promote = $this->adapter->execute(
+            "SELECT id, type, metadata FROM graph_nodes WHERE is_placeholder = 0 AND type IN ('class', 'interface', 'trait', 'enum')"
+            . " AND EXISTS (SELECT 1 FROM graph_edges e WHERE e.target_id = graph_nodes.id AND e.type = 'produces')",
+        )->fetchAll();
+        foreach ($promote as $row) {
+            $meta = json_decode((string) ($row['metadata'] ?? ''), true);
+            $meta = is_array($meta) ? $meta : [];
+            $meta['declared_type'] = (string) $row['type'];
+            $this->adapter->execute('UPDATE graph_nodes SET type = :type, metadata = :metadata WHERE id = :id', [
+                'type' => NodeType::Resource->value,
+                'metadata' => (string) json_encode($meta),
+                'id' => (string) $row['id'],
+            ]);
+        }
+
+        $rows = $this->adapter->execute(
+            "SELECT id, is_placeholder, metadata FROM graph_nodes WHERE type = 'resource'"
+            . " AND NOT EXISTS (SELECT 1 FROM graph_edges e WHERE e.target_id = graph_nodes.id AND e.type = 'produces')",
+        )->fetchAll();
+        foreach ($rows as $row) {
+            $meta = json_decode((string) ($row['metadata'] ?? ''), true);
+            $declared = is_array($meta) && is_string($meta['declared_type'] ?? null) ? $meta['declared_type'] : null;
+            if ((int) $row['is_placeholder'] === 1) {
+                $type = NodeType::forPlaceholderId((string) $row['id'])->value;
+            } elseif ($declared !== null) {
+                $type = $declared;
+            } else {
+                continue; // declared as a resource by its own file
+            }
+            // The bookkeeping goes with the role: a full build of the same tree
+            // never wrote it.
+            if (is_array($meta)) {
+                unset($meta['declared_type']);
+            }
+            $this->adapter->execute('UPDATE graph_nodes SET type = :type, metadata = :metadata WHERE id = :id', [
+                'type' => $type,
+                // Encoded as the mapper encodes it, so it compares byte for byte.
+                'metadata' => (int) $row['is_placeholder'] === 1 ? '[]' : (string) json_encode(is_array($meta) ? $meta : []),
+                'id' => (string) $row['id'],
+            ]);
+        }
+    }
+
     public function insertPlaceholder(string $nodeId): void
     {
         if ($this->exists($nodeId)) {
@@ -306,12 +390,33 @@ final class GraphNodeRepository
             return;
         }
 
-        $placeholders = implode(',', array_fill(0, count($ids), '?'));
-        $this->adapter->execute(
-            "UPDATE graph_nodes SET is_placeholder = 1, file = '', line = 0, end_line = 0, module = '', metadata = '{}'"
-            . ' WHERE id IN (' . $placeholders . ')',
-            $ids,
-        );
+        // Back to exactly what insertPlaceholder() writes, with one exception:
+        // a type another file's edge still implies. The declared role ("event"
+        // from #[AsEvent], "payload") used to survive the declaration, so a
+        // class that lost its attribute kept the role a full build drops.
+        // A handler's `produces` edge is the one mention that implies a role.
+        foreach (array_chunk(array_values($ids), 500) as $chunk) {
+            $in = implode(',', array_fill(0, count($chunk), '?'));
+            $produced = [];
+            foreach ($this->adapter->execute("SELECT DISTINCT target_id FROM graph_edges WHERE type = 'produces' AND target_id IN (" . $in . ')', $chunk)->fetchAll() as $row) {
+                $produced[(string) $row['target_id']] = true;
+            }
+            foreach ($chunk as $id) {
+                // fqcn and name as insertPlaceholder() writes them: a demoted
+                // flow node kept "" where a fresh build has its name (round 2).
+                $fqcn = NodeId::extractFqcn($id);
+                $slash = strrpos($fqcn, '\\');
+                $this->adapter->execute(
+                    "UPDATE graph_nodes SET is_placeholder = 1, type = :type, fqcn = :fqcn, name = :name, file = '', line = 0, end_line = 0, module = '', metadata = '[]' WHERE id = :id",
+                    [
+                        'id' => $id,
+                        'type' => isset($produced[$id]) ? NodeType::Resource->value : NodeType::forPlaceholderId($id)->value,
+                        'fqcn' => $fqcn,
+                        'name' => $slash === false ? $fqcn : substr($fqcn, $slash + 1),
+                    ],
+                );
+            }
+        }
     }
 
     /** @return int count of placeholders deleted because no edge points at them any more */

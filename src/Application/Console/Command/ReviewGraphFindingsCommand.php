@@ -59,27 +59,35 @@ final class ReviewGraphFindingsCommand extends BaseCommand
         $format = (string) $input->getOption('format');
         $module = $input->getOption('module');
 
-        if (!in_array($kind, ['unused', 'cycles', 'all'], true)) {
-            $io->error('--kind must be unused, cycles or all.');
-            return self::FAILURE;
-        }
-        if (!isset(self::CONFIDENCE_RANK[$minConfidence])) {
-            $io->error('--min-confidence must be high, medium or low.');
-            return self::FAILURE;
-        }
-        if (!in_array($format, ['text', 'json', 'ndjson', 'markdown'], true)) {
-            $io->error('--format must be text, json, ndjson or markdown.');
-            return self::FAILURE;
+        $machine = in_array($format, ['json', 'ndjson'], true);
+        $error = match (true) {
+            !in_array($kind, ['unused', 'cycles', 'all'], true) => '--kind must be unused, cycles or all.',
+            !isset(self::CONFIDENCE_RANK[$minConfidence])      => '--min-confidence must be high, medium or low.',
+            !in_array($format, ['text', 'json', 'ndjson', 'markdown'], true) => '--format must be text, json, ndjson or markdown.',
+            default => null,
+        };
+        if ($error !== null) {
+            return $this->fail($io, $output, $machine, $error);
         }
 
         $storage = $this->createStorage();
         $this->refreshProjectGraph($storage, $io, (bool) $input->getOption('no-refresh'), $format !== 'text');
         if ((int) ($storage->getMeta('total_nodes') ?: 0) === 0) {
+            if ($machine) {
+                return $this->fail($io, $output, true, 'Graph is empty. Run ai:review-graph:generate first.');
+            }
             $io->warning('Graph is empty. Run ai:review-graph:generate first.');
             return self::FAILURE;
         }
 
-        $report = (new FindingsReport())->collect($storage, $kind, $minConfidence, is_string($module) ? $module : null);
+        // An unknown or miscased name answered "No findings." with exit 0.
+        if (is_string($module) && $module !== '' && !in_array($module, $storage->nodes->distinctModules(), true)) {
+            $known = $storage->nodes->distinctModules();
+            sort($known);
+            return $this->fail($io, $output, $machine, sprintf('No module "%s" in the graph. Known: %s.', $module, implode(', ', $known)));
+        }
+
+        $report = (new FindingsReport())->collect($storage, $kind, $minConfidence, is_string($module) && $module !== '' ? $module : null);
         $unused = $report['unused'];
         $cycles = $report['cycles'];
         $coverage = $report['coverage'];
@@ -180,6 +188,23 @@ final class ReviewGraphFindingsCommand extends BaseCommand
         $output->writeln(implode("\n", $lines));
 
         return self::SUCCESS;
+    }
+
+    /**
+     * A refusal in the format the caller asked for. With --format=json a
+     * script parses stdout; SymfonyStyle's "[ERROR] ..." block there made it
+     * fail on the parse instead of on the message (measured 2026-10-02), so a
+     * machine format gets one JSON object and the same non-zero exit.
+     */
+    private function fail(SymfonyStyle $io, OutputInterface $output, bool $machine, string $message): int
+    {
+        if ($machine) {
+            $output->writeln((string) json_encode(['error' => $message], JSON_UNESCAPED_SLASHES));
+        } else {
+            $io->error($message);
+        }
+
+        return self::FAILURE;
     }
 
     private static function shortName(string $id): string

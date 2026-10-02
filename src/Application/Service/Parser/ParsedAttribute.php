@@ -15,8 +15,9 @@ namespace Semitexa\ProjectGraph\Application\Service\Parser;
  * worktree of another git ref it is HEAD's, and a class that could not be
  * autoloaded came back with no attributes at all.
  *
- * newInstance() still loads the ATTRIBUTE class (a framework class) and any
- * enum or class constant an argument names — never the annotated class.
+ * newInstance() still loads the ATTRIBUTE class (a framework class) — never
+ * the annotated class, nor a constant holder or enum an argument names: those
+ * are read from their ASTs (an enum case arrives as an EnumCaseReference).
  */
 final readonly class ParsedAttribute
 {
@@ -57,10 +58,44 @@ final readonly class ParsedAttribute
         return $this->unreadable;
     }
 
+    /**
+     * The attribute object — or, when its constructor refuses an argument read
+     * from an AST (an {@see EnumCaseReference} where it types the real enum),
+     * an {@see AttributeStandIn} carrying the same named values.
+     *
+     * Enum cases used to be the loaded enums; reading them from the AST
+     * instead (so a scan never runs project code) made 108 edges vanish on
+     * the workspace (measured 2026-10-02: AsPublicPayload's transport:
+     * TransportType::Sse lost the route, SatisfiesServiceContract's
+     * factoryKey lost satisfies_contract, ORM relations lost has_relation and
+     * maps_to_table), because every extractor reads attributes through
+     * newInstance(). The stand-in keeps what they read.
+     */
     public function newInstance(): object
     {
         $class = $this->name;
+        $arguments = $this->getArguments();
 
-        return new $class(...$this->getArguments());
+        try {
+            return new $class(...$arguments);
+        } catch (\TypeError $e) {
+            if (!self::carriesEnumReference($arguments)) {
+                throw $e;
+            }
+
+            return AttributeStandIn::of($class, $arguments);
+        }
+    }
+
+    /** @param array<int|string, mixed> $arguments */
+    private static function carriesEnumReference(array $arguments): bool
+    {
+        foreach ($arguments as $argument) {
+            if ($argument instanceof EnumCaseReference || is_array($argument) && self::carriesEnumReference($argument)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

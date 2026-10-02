@@ -56,7 +56,7 @@ function fetchSource(endpoint) {
     node: id => get({view: 'node', id}),
     subgraph: (id, depth) => get({view: 'subgraph', id, depth}),
     path: id => get({view: 'path', id}).then(b => b.path),
-    search: q => get({view: 'search', q}).then(b => b.hits),
+    search: q => get({view: 'search', q}).then(b => { const hits = b.hits; hits.truncated = b.truncated === true; return hits; }),
     findings: () => get({view: 'findings'}),
     traces: id => get({view: 'traces', id}).then(b => b.traces),
   };
@@ -138,11 +138,13 @@ function embeddedSource(data) {
     },
     search(q) {
       const needle = q.trim().toLowerCase(); if (needle.length < 2) return ok([]);
-      const hits = [];
-      for (const n of data.nodes) { if (n.name.toLowerCase().includes(needle) || n.fqcn.toLowerCase().includes(needle)) { hits.push(n); if (hits.length >= 200) break; } }
+      // Rank every match, then cut: stopping at the first 200 in data order
+      // dropped the exact-name hit the live view puts first.
+      const hits = data.nodes.filter(n => n.name.toLowerCase().includes(needle) || n.fqcn.toLowerCase().includes(needle));
       const rank = n => [n.placeholder ? 1 : 0, n.name.toLowerCase().startsWith(needle) ? 0 : 1];
       hits.sort((a, b) => { const ra = rank(a), rb = rank(b); return ra[0] - rb[0] || ra[1] - rb[1] || a.name.localeCompare(b.name); });
-      return ok(hits.slice(0, 50));
+      const page = hits.slice(0, 50); page.truncated = hits.length > 50;
+      return ok(page);
     },
     findings: () => ok(data.findings),
   };
@@ -451,6 +453,7 @@ function mount(root, source, options = {}) {
       b.addEventListener('click', () => { hits.hidden = true; reveal(n.id); });
       hits.append(b);
     }
+    if (list.truncated) hits.append(el('div', 'gv-empty', 'Showing the first ' + list.length + ' — type more to narrow it.'));
     hits.hidden = false;
   }
   input.addEventListener('keydown', e => {
@@ -824,12 +827,13 @@ const ext = api => {
   });
   const end = e => {
     canvas.classList.remove('drag');
-    if (drag && !drag.moved) { const n = hit(e.offsetX, e.offsetY); if (n) api.select(n.id, null, {keepFocus: true}); }
+    // A ghost stands for classes named only at runtime: no node to select or redraw around.
+    if (drag && !drag.moved) { const n = hit(e.offsetX, e.offsetY); if (n && !n.ghost) api.select(n.id, null, {keepFocus: true}); }
     drag = null;
   };
   canvas.addEventListener('pointerup', end); canvas.addEventListener('pointercancel', () => { drag = null; canvas.classList.remove('drag'); });
   canvas.addEventListener('pointerleave', () => { tip.hidden = true; if (D.hover) { D.hover = null; D.dirty = true; request(); } });
-  canvas.addEventListener('dblclick', e => { const n = hit(e.offsetX, e.offsetY); if (n) api.select(n.id); else fitView(); });
+  canvas.addEventListener('dblclick', e => { const n = hit(e.offsetX, e.offsetY); if (n && !n.ghost) api.select(n.id); else if (!n) fitView(); });
   canvas.addEventListener('wheel', e => { e.preventDefault(); zoomAt(e.offsetX, e.offsetY, Math.exp(-e.deltaY * 0.0015)); }, {passive: false});
   canvas.addEventListener('keydown', e => {
     if (e.key === '+' || e.key === '=') zoomAt(D.w / 2, D.h / 2, 1.2);

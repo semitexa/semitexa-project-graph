@@ -15,6 +15,9 @@
   display:grid;grid-template-columns:minmax(260px,340px) minmax(0,1fr) minmax(260px,330px);grid-template-rows:auto minmax(0,1fr);
   grid-template-areas:"bar bar bar" "side main detail";gap:10px;min-height:0;min-width:0;height:100%;
   color:var(--gv-text);font:13px/1.45 var(--gv-sans)}
+/* The grid above outranks the browser's own [hidden]{display:none}: without
+   this the Observatory's live view kept the graph drawn after leaving it. */
+.gv[hidden]{display:none}
 @media (prefers-color-scheme: light){
   .gv{--gv-bg:var(--bg,#f4f6fb);--gv-panel:var(--panel,#ffffff);--gv-panel-2:var(--panel-2,#f7f8fc);
     --gv-line:var(--line,#dfe4f0);--gv-line-2:var(--line-2,#cdd4e6);

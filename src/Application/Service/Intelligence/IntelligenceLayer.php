@@ -216,57 +216,58 @@ final class IntelligenceLayer
                 'id' => $node->getId(),
                 'name' => $node->getMetadata()['name'] ?? $node->getId(),
                 'entry_point' => $node->getMetadata()['entry_point'] ?? '',
+                // `module --include-flows` prints the steps; they were never handed over.
+                'steps' => is_array($node->getMetadata()['steps'] ?? null) ? $node->getMetadata()['steps'] : [],
             ];
         }
         return $flows;
     }
 
+    /** Node kinds other code calls into: where a missing statement of intent costs a reader most. */
+    private const DOCUMENTED_SURFACE = ['payload', 'handler', 'service', 'event', 'event_listener', 'command', 'resource', 'component', 'interface', 'repository', 'job'];
+
+    /**
+     * Public-surface nodes with no inferred intent, worst first.
+     *
+     * This asked findNodes() with no filter — which returns [] by contract —
+     * so it always reported "Total gaps: 0"; its score looked for attribute
+     * names inside node ids (never there) and fetched every cross-module edge
+     * of the module once per node.
+     *
+     * @return list<array{node: Node, score: int}>
+     */
     public function getDocGaps(?string $module = null): array
     {
-        $nodes = $module !== null
-            ? $this->query->findNodes(module: $module)
-            : $this->query->findNodes();
+        $crossModuleByModule = [];
+        $documented = $this->query->sourcesOf(EdgeType::IntentFor->value);
+        $candidates = [];
+        foreach (self::DOCUMENTED_SURFACE as $type) {
+            foreach ($this->query->findNodes(type: $type, module: $module) as $node) {
+                if (!$node->getIsPlaceholder() && !isset($documented[$node->getId()])) {
+                    $candidates[$node->getId()] = $node;
+                }
+            }
+        }
+        // One query for every fan-in, not one per node (round 2: 36 s).
+        $fanIn = $this->query->inboundCounts(array_keys($candidates));
 
         $gaps = [];
-        foreach ($nodes as $node) {
-            if ($node->getType() === NodeType::DocNode || $node->getType() === NodeType::Hotspot) {
-                continue;
+        foreach ($candidates as $id => $node) {
+            $score = 20; // on the surface at all
+            if (str_starts_with($node->getFqcn(), 'App\\Api\\')) {
+                $score += 30;
             }
-
-            $hasIntent = $this->query->getEdges($node->getId(), EdgeType::IntentFor->value, Direction::Outgoing);
-            if ($hasIntent !== []) {
-                continue;
+            $score += min(($fanIn[$id] ?? 0) * 2, 30);
+            if ($node->getModule() !== '') {
+                $crossModuleByModule[$node->getModule()] ??= count($this->query->getCrossModuleEdges($node->getModule()));
+                $score += min($crossModuleByModule[$node->getModule()], 15);
             }
-
-            $score = $this->scoreDocGap($node);
-            if ($score > 20) {
-                $gaps[] = ['node' => $node, 'score' => $score];
-            }
+            $gaps[$id] = ['node' => $node, 'score' => $score];
         }
 
-        usort($gaps, fn($a, $b) => $b['score'] <=> $a['score']);
+        $gaps = array_values($gaps);
+        usort($gaps, static fn (array $a, array $b): int => [$b['score'], $a['node']->getId()] <=> [$a['score'], $b['node']->getId()]);
+
         return $gaps;
-    }
-
-    private function scoreDocGap(Node $node): int
-    {
-        $score = 0;
-
-        if (str_starts_with($node->getFqcn(), 'App\\Api\\')) $score += 30;
-
-        $publicAttrs = ['AsPayload', 'AsPayloadHandler', 'AsService', 'AsEvent'];
-        foreach ($publicAttrs as $attr) {
-            if (str_contains($node->getId(), $attr)) $score += 20;
-        }
-
-        $deps = $this->query->getEdges($node->getId());
-        $score += min(count($deps) * 2, 20);
-
-        if ($node->getModule() !== '') {
-            $crossModule = $this->query->getCrossModuleEdges($node->getModule());
-            $score += min(count($crossModule), 15);
-        }
-
-        return $score;
     }
 }

@@ -16,8 +16,9 @@ use Semitexa\ProjectGraph\Domain\Model\Node;
  * Same client as the Observatory's Graph view — graph-view.js and .css are
  * inlined, not copied into a second viewer — with the data embedded as a
  * JSON block instead of fetched: the client's embedded data source answers
- * the same questions from it. The file opens from file://, so a PR can carry
- * it as an artifact and a reviewer needs no running stack.
+ * the same questions from it. The file opens from file://, so a reviewer
+ * needs no running stack. It is a map of the codebase: it is written under
+ * var/ ({@see ExportLocation}) and travels only where the operator sends it.
  *
  * What is embedded is a slice, and the filters exist to keep it small: a
  * focus and depth (that node's dependency walk), a module, or node types.
@@ -49,9 +50,17 @@ final class GraphExport
             $focusId = $node->getId();
         }
 
+        foreach ($types ?? [] as $type) {
+            if (in_array($type, GraphBrowser::HIDDEN_NODES, true)) {
+                // It wrote a file with 0 nodes and said [OK].
+                throw new \InvalidArgumentException(sprintf('The viewer does not show %s nodes; pick another --type.', $type));
+            }
+        }
+        // The depth actually walked: 7 was clamped to 4 while the meta said 7.
+        $depth = max(1, min(GraphBrowser::MAX_DEPTH, $depth));
         $keep = [];
         if ($focusId !== null) {
-            $slice = $browser->subgraph($focusId, max(1, min(GraphBrowser::MAX_DEPTH, $depth))) ?? ['nodes' => []];
+            $slice = $browser->subgraph($focusId, $depth) ?? ['nodes' => []];
             foreach ($slice['nodes'] as $row) {
                 if (!($row['ghost'] ?? false) && is_string($row['id'] ?? null)) {
                     $keep[$row['id']] = true;

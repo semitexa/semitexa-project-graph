@@ -21,7 +21,7 @@ final class RefGraphDiffTest extends TestCase
 {
     private function diff(GitFixtureRepo $repo, string $ref = 'HEAD'): array
     {
-        return (new RefGraphDiff())->diff($repo->root, $ref, sys_get_temp_dir() . '/semitexa-graph-diff-scratch');
+        return (new RefGraphDiff())->diff($repo->root, $ref, GraphFixture::diffScratch());
     }
 
     /** @param list<\Semitexa\ProjectGraph\Domain\Model\Edge> $edges @return list<string> */

@@ -47,7 +47,13 @@ final class ReviewGraphWatchCommand extends BaseCommand
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
-        $interval = (int) $input->getOption('interval');
+        $rawInterval = $input->getOption('interval');
+        // 0 or a negative interval made the loop spin with no sleep at all.
+        if (!is_numeric($rawInterval) || (int) $rawInterval < 1 || (string) (int) $rawInterval !== trim((string) $rawInterval)) {
+            $io->error('--interval must be a whole number of seconds, at least 1.');
+            return self::FAILURE;
+        }
+        $interval = (int) $rawInterval;
         $fullOnStart = $input->getOption('full-on-start');
 
         $storage = $this->createStorage();
@@ -66,11 +72,10 @@ final class ReviewGraphWatchCommand extends BaseCommand
         $io->newLine();
 
         $running = true;
-        pcntl_signal(SIGINT, fn() => $running = false);
-        pcntl_signal(SIGTERM, fn() => $running = false);
+        $signals = $this->stopOnSignals($running);
 
         while ($running) {
-            pcntl_signal_dispatch();
+            $signals && pcntl_signal_dispatch();
             try {
                 $result = $engine->update($this->getProjectRoot());
                 if (!$result->isNoChanges()) {
@@ -84,12 +89,36 @@ final class ReviewGraphWatchCommand extends BaseCommand
             while ($running && $slept < $interval) {
                 sleep(1);
                 $slept++;
-                pcntl_signal_dispatch();
+                $signals && pcntl_signal_dispatch();
             }
         }
 
         $io->text('Watch stopped.');
         return self::SUCCESS;
+    }
+
+    /**
+     * Ctrl+C and SIGTERM stop the loop after the current update, so a refresh
+     * is never cut in half. This called pcntl_signal() unconditionally — a
+     * fatal on the app image, which has no pcntl — and its handlers were arrow
+     * functions, which capture $running BY VALUE: with pcntl, the signal was
+     * swallowed and only SIGKILL stopped the watch. Without pcntl the default
+     * signal handling applies: the process ends, the update's transaction with it.
+     *
+     * @internal public for the test of the by-reference capture
+     */
+    public function stopOnSignals(bool &$running): bool
+    {
+        if (!function_exists('pcntl_signal') || !function_exists('pcntl_signal_dispatch')) {
+            return false;
+        }
+        $stop = static function () use (&$running): void {
+            $running = false;
+        };
+        pcntl_signal(SIGINT, $stop);
+        pcntl_signal(SIGTERM, $stop);
+
+        return true;
     }
 
     private function createStorage(): GraphStorage

@@ -14,6 +14,7 @@ use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractorInterface;
 use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
+use Semitexa\ProjectGraph\Application\Service\Parser\EnumCaseReference;
 use Semitexa\ProjectGraph\Application\Service\Parser\ParsedFile;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Domain\Model\Node;
@@ -71,9 +72,11 @@ final class AuthExtractor implements ExtractorInterface
             }
 
             foreach ($classInfo->getAttributes(RequiresCapability::class) as $capAttr) {
-                $cap = $capAttr->newInstance();
-                $capability = $cap->capability ?? null;
-                $slug = $capability instanceof \BackedEnum ? (string) $capability->value : '';
+                // From the argument, not newInstance(): the case is an
+                // EnumCaseReference read from the enum's AST (see PayloadExtractor).
+                $args = $capAttr->getArguments();
+                $capability = $args['capability'] ?? $args[0] ?? null;
+                $slug = $capability instanceof EnumCaseReference || $capability instanceof \BackedEnum ? (string) $capability->value : '';
                 $result->addEdge(new Edge(
                     sourceId: NodeId::forClass($classInfo->fqcn),
                     targetId: 'capability:' . $slug,

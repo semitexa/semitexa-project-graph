@@ -104,7 +104,9 @@ final class ProjectGraphConnection
 
             $firstUsable ??= $path;
 
-            $mtime = is_file($path) ? (int) filemtime($path) : -1;
+            // The newest write may still sit in the -wal file: a graph written
+            // while another connection held it open leaves the main file old.
+            $mtime = is_file($path) ? max((int) filemtime($path), is_file($path . '-wal') ? (int) filemtime($path . '-wal') : 0) : -1;
             if ($mtime > $newestMtime) {
                 $newest = $path;
                 $newestMtime = $mtime;

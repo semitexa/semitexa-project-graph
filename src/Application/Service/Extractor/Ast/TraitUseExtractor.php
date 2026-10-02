@@ -25,29 +25,41 @@ final class TraitUseExtractor implements ExtractorInterface
         $result = new ExtractionResult();
 
         $visitor = new class($file, $result) extends NodeVisitorAbstract {
-            private string $currentClass = '';
+            private readonly ClassScope $scope;
 
             public function __construct(
-                private readonly ParsedFile $file,
+                ParsedFile $file,
                 private readonly ExtractionResult $result,
-            ) {}
+            ) {
+                $this->scope = new ClassScope($file);
+            }
 
             public function enterNode(AstNode $node): ?int
             {
-                if ($node instanceof AstNode\Stmt\ClassLike && $node->namespacedName !== null) {
-                    $this->currentClass = $node->namespacedName->toString();
+                if ($node instanceof AstNode\Stmt\ClassLike) {
+                    $this->scope->enter($node);
                 }
 
-                if ($node instanceof AstNode\Stmt\TraitUse && $this->currentClass !== '') {
+                // A trait used by an anonymous class is part of the code of
+                // the class declaring it (see ClassScope).
+                if ($node instanceof AstNode\Stmt\TraitUse) {
                     foreach ($node->traits as $trait) {
-                        $traitFqcn = $trait->toString();
                         $this->result->addEdge(new Edge(
-                            sourceId: NodeId::forClass($this->currentClass),
-                            targetId: NodeId::forClass($traitFqcn),
+                            sourceId: $this->scope->sourceIn($this->result),
+                            targetId: NodeId::forClass($trait->toString()),
                             type:     EdgeType::Uses,
                             metadata: [],
                         ));
                     }
+                }
+
+                return null;
+            }
+
+            public function leaveNode(AstNode $node): ?int
+            {
+                if ($node instanceof AstNode\Stmt\ClassLike) {
+                    $this->scope->leave($node);
                 }
 
                 return null;

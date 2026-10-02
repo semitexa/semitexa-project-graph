@@ -6,9 +6,12 @@ namespace Semitexa\ProjectGraph\Application\Console\Command;
 
 use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageReport;
 use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\ProjectGraph\Application\Service\Support\RefusesInMachineFormat;
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Console\BaseCommand;
 use Semitexa\ProjectGraph\Application\Service\Analysis\ImpactResult;
+use Semitexa\ProjectGraph\Application\Service\Analysis\ImpactedNode;
+use Semitexa\ProjectGraph\Application\Service\Query\NodeResolver;
 use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
 use Semitexa\ProjectGraph\Application\Service\Analysis\ImpactAnalyzer;
 use Semitexa\ProjectGraph\Application\Service\Context\ContextPacker;
@@ -18,6 +21,7 @@ use Semitexa\ProjectGraph\Application\Service\Context\SourceSnippetLoader;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
 use Semitexa\ProjectGraph\Application\Service\Support\AutoRefreshesProjectGraph;
 use Semitexa\ProjectGraph\Application\Service\Support\UsesProjectGraphConnection;
+use Symfony\Component\Console\Formatter\OutputFormatter;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -30,6 +34,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 final class ReviewGraphImpactCommand extends BaseCommand
 {
+    use RefusesInMachineFormat;
+
     use AutoRefreshesProjectGraph;
     use UsesProjectGraphConnection;
 
@@ -63,19 +69,31 @@ final class ReviewGraphImpactCommand extends BaseCommand
         $ndjson = (bool) $input->getOption('ndjson');
 
         if (!is_string($target) || $target === '') {
-            $io->error('Target must be a non-empty string.');
-            return self::FAILURE;
+            return $this->refuse($output, $io, 'Target must be a non-empty string.', $json || $ndjson);
         }
 
         if ($json && $ndjson) {
-            $io->error('Use either --json or --ndjson, not both.');
-            return self::FAILURE;
+            return $this->refuse($output, $io, 'Use either --json or --ndjson, not both.', $json || $ndjson);
         }
 
         $depth = $this->parseDepth($depthOption, $io);
         if ($depth === null) {
             return self::FAILURE;
         }
+
+        // A prompt is made from the context package, so asking for one implies
+        // it; an unknown prompt kind used to fall back to "review" in silence.
+        $prompt = $input->getOption('prompt');
+        if ($prompt !== null && !in_array($prompt, self::PROMPTS, true)) {
+            return $this->refuse($output, $io, sprintf('--prompt accepts %s; got "%s".', implode(', ', self::PROMPTS), (string) $prompt), $json || $ndjson);
+        }
+        $withContext = (bool) $input->getOption('context') || $prompt !== null;
+        if ($withContext && $ndjson) {
+            // The context used to vanish from --ndjson without a word.
+            return $this->refuse($output, $io, '--context/--prompt have no NDJSON form; use --json (the context is a field) or text.', true);
+        }
+        $module = $input->getOption('module');
+        $module = is_string($module) && $module !== '' ? $module : null;
 
         $storage = $this->createStorage();
         $this->refreshProjectGraph(
@@ -90,25 +108,43 @@ final class ReviewGraphImpactCommand extends BaseCommand
             return self::FAILURE;
         }
 
-        $analyzer = new ImpactAnalyzer($storage);
-
-        $nodeId = $this->resolveNodeId($storage, $target);
-        if ($nodeId === null) {
-            $io->error('Node not found: ' . $target);
-            return self::FAILURE;
+        if ($module !== null && !in_array($module, $storage->nodes->distinctModules(), true)) {
+            return $this->refuse($output, $io, sprintf('No module "%s" in the graph.', $module), $json || $ndjson);
         }
 
+        $analyzer = new ImpactAnalyzer($storage);
+
+        $resolver = new NodeResolver($storage, $this->getProjectRoot());
+        $node = $resolver->resolve($target);
+        if ($node === null) {
+            // It used to take the first LIKE match in row order and analyse
+            // that — another class, with exit 0 and no word about it.
+            return $this->refuse($output, $io, $resolver->notFound($target), $json || $ndjson);
+        }
+        $nodeId = $node->getId();
+
         $impact = $analyzer->analyze([$nodeId], $depth);
+        if ($module !== null) {
+            // --module was declared and never read.
+            $impact = new ImpactResult(
+                $impact->changed,
+                array_filter($impact->impacted, static fn (ImpactedNode $n): bool => $n->node->getModule() === $module),
+            );
+        }
         $coverage = (new CoverageReport($storage))->forNodes([$nodeId]);
 
         if ($json) {
-            $payload = json_encode($this->buildJsonPayload($impact) + ['coverage' => $coverage], JSON_UNESCAPED_SLASHES);
+            $extra = ['coverage' => $coverage];
+            if ($withContext) {
+                // --context with --json used to drop the context.
+                $extra['context'] = $this->contextText($impact, $prompt);
+            }
+            $payload = json_encode($this->buildJsonPayload($impact) + $extra, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
             if ($payload === false) {
-                $io->error('Failed to encode JSON payload.');
-                return self::FAILURE;
+                return $this->refuse($output, $io, 'Failed to encode JSON payload.', $json || $ndjson);
             }
 
-            $output->writeln($payload);
+            $output->writeln($payload, OutputInterface::OUTPUT_RAW);
             return self::SUCCESS;
         }
 
@@ -131,29 +167,30 @@ final class ReviewGraphImpactCommand extends BaseCommand
             $io->text(CoverageReport::describe($coverage, $this->getProjectRoot()));
         }
 
-        if ($input->getOption('context')) {
-            $scorer = new RelevanceScorer();
-            $snippetLoader = new SourceSnippetLoader();
-            $packer = new ContextPacker($scorer, $snippetLoader);
-            $context = $packer->pack($impact);
-
-            if ($input->getOption('prompt')) {
-                $formatter = new PromptFormatter();
-                $prompt = match ($input->getOption('prompt')) {
-                    'review'    => $formatter->formatForReview($context),
-                    'refactor'  => $formatter->formatForRefactor($context, 'improve architecture'),
-                    'test'      => $formatter->formatForTests($context),
-                    default     => $formatter->formatForReview($context),
-                };
-                $io->section('LLM Prompt');
-                $output->writeln($prompt);
-            } else {
-                $io->section('Context Package');
-                $output->writeln($context->toMarkdown());
-            }
+        if ($withContext) {
+            $io->section($prompt !== null ? 'LLM Prompt' : 'Context Package');
+            // Raw: source code is full of <tags> the console would eat.
+            $output->writeln($this->contextText($impact, $prompt), OutputInterface::OUTPUT_RAW);
         }
 
         return self::SUCCESS;
+    }
+
+    private const PROMPTS = ['review', 'refactor', 'test'];
+
+    private function contextText(ImpactResult $impact, ?string $prompt): string
+    {
+        $context = (new ContextPacker(new RelevanceScorer(), new SourceSnippetLoader()))->pack($impact);
+        if ($prompt === null) {
+            return $context->toMarkdown();
+        }
+        $formatter = new PromptFormatter();
+
+        return match ($prompt) {
+            'refactor' => $formatter->formatForRefactor($context, 'improve architecture'),
+            'test'     => $formatter->formatForTests($context),
+            default    => $formatter->formatForReview($context),
+        };
     }
 
     /**
@@ -185,13 +222,12 @@ final class ReviewGraphImpactCommand extends BaseCommand
             'max_depth' => $impact->maxDepth(),
             'modules'   => $modules,
             'coverage'  => $coverage,
-        ], JSON_UNESCAPED_SLASHES);
+        ], JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
         if ($summary === false) {
-            $io->error('Failed to encode NDJSON summary payload.');
-            return self::FAILURE;
+            return $this->refuse($output, $io, 'Failed to encode NDJSON summary payload.', true);
         }
 
-        $output->writeln($summary);
+        $output->writeln($summary, OutputInterface::OUTPUT_RAW);
 
         foreach ($impact->impacted as $impacted) {
             $node = $impacted->node;
@@ -203,13 +239,12 @@ final class ReviewGraphImpactCommand extends BaseCommand
                 'module'   => $node->getModule(),
                 'distance' => $impacted->distance,
                 'action'   => $isDirect ? 'edit' : 'review',
-            ], JSON_UNESCAPED_SLASHES);
+            ], JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
             if ($line === false) {
-                $io->error('Failed to encode NDJSON impacted-node payload.');
-                return self::FAILURE;
+                return $this->refuse($output, $io, 'Failed to encode NDJSON impacted-node payload.', true);
             }
 
-            $output->writeln($line);
+            $output->writeln($line, OutputInterface::OUTPUT_RAW);
         }
 
         return self::SUCCESS;
@@ -259,33 +294,6 @@ final class ReviewGraphImpactCommand extends BaseCommand
         ];
     }
 
-    private function resolveNodeId(GraphStorage $storage, string $target): ?string
-    {
-        $node = $storage->nodes->findById($target);
-        if ($node !== null) {
-            return $node->getId();
-        }
-
-        $node = $storage->nodes->findByFqcn($target);
-        if ($node !== null) {
-            return $node->getId();
-        }
-
-        if (is_file($target)) {
-            $nodes = $storage->nodes->findByFile($target);
-            if (!empty($nodes)) {
-                return $nodes[0]->getId();
-            }
-        }
-
-        $nodes = $storage->nodes->searchFull($target, 1);
-        if (!empty($nodes)) {
-            return $nodes[0]->getId();
-        }
-
-        return null;
-    }
-
     private function renderImpact(ImpactResult $impact, SymfonyStyle $io): void
     {
         $io->title('Impact Analysis');
@@ -307,7 +315,7 @@ final class ReviewGraphImpactCommand extends BaseCommand
         foreach ($byDepth as $depth => $nodes) {
             $io->section('Depth ' . $depth . ' (' . count($nodes) . ' nodes)');
             foreach ($nodes as $impacted) {
-                $io->text('<info>' . $impacted->node->getFqcn() . '</info> (' . $impacted->node->getType()->value . ', ' . $impacted->node->getModule() . ')');
+                $io->text('<info>' . OutputFormatter::escape($impacted->node->getFqcn()) . '</info> (' . $impacted->node->getType()->value . ', ' . $impacted->node->getModule() . ')');
             }
         }
     }

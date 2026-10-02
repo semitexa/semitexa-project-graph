@@ -51,6 +51,9 @@ final class GraphMetaRepository
 
     public function truncate(): void
     {
-        $this->adapter->execute('DELETE FROM graph_meta');
+        // What the build derives goes; what a person recorded stays. A full
+        // build used to erase `ai:review-graph:diff`'s baseline with the rest,
+        // so the next diff said "previous scan: never".
+        $this->adapter->execute("DELETE FROM graph_meta WHERE meta_key NOT LIKE 'graph_diff_last_scan%'");
     }
 }

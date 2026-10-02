@@ -20,7 +20,7 @@ final class OrphanedRemovalsTest extends TestCase
     /** @return array{0: list<array<string, mixed>>, 1: list<string>} */
     private function gate(GitFixtureRepo $repo): array
     {
-        $result = (new RefGraphDiff())->diff($repo->root, 'HEAD', sys_get_temp_dir() . '/semitexa-graph-diff-scratch');
+        $result = (new RefGraphDiff())->diff($repo->root, 'HEAD', GraphFixture::diffScratch());
 
         return [OrphanedRemovals::find($result['diff'], $result['base'], $result['head']), OrphanedRemovals::unreadableFiles($result['head'])];
     }

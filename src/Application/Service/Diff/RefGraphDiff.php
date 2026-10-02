@@ -23,44 +23,83 @@ use Semitexa\ProjectGraph\Application\Service\Scanner\IgnorePatternLoader;
  * the parsed files (never from classes this process has loaded), so the base
  * graph has the base ref's wiring — the one thing left to the running code is
  * the value of an enum case or constant an attribute names.
+ *
+ * The base is a `git archive` export, not a worktree (see GitSnapshot), and
+ * the head reads only the files git would commit, so neither side sees what
+ * the other cannot.
  */
 final class RefGraphDiff
 {
-    /** @return array{diff: EdgeSetDiff, base: GraphStorage, head: GraphStorage, scope: string, repository: string} */
+    /**
+     * @return array{diff: EdgeSetDiff, moves: MovedEdges, base: GraphStorage, head: GraphStorage, scope: string, repository: string, scope_dir: string, base_root: string, base_unreadable_hashes: array<string, true>}
+     */
     public function diff(string $path, string $baseRef, string $scratchDir): array
     {
-        $path = rtrim((string) realpath($path), '/');
-        if ($path === '' || !is_dir($path)) {
+        $resolved = realpath($path);
+        if ($resolved === false || !is_dir($resolved)) {
             throw new \InvalidArgumentException('Not a directory: ' . $path);
         }
-        $repository = GitWorktree::repositoryRoot($path);
+        $path = rtrim($resolved, '/');
+        $repository = GitSnapshot::repositoryRoot($path);
         if ($repository === null) {
             throw new \InvalidArgumentException(sprintf(
                 '%s is not inside a git repository. Pass --path=<a directory inside one> (in a workspace of package repositories, e.g. --path=packages/semitexa-orm).',
                 $path,
             ));
         }
+        $repository = rtrim((string) (realpath($repository) ?: $repository), '/');
         $scope = ltrim(substr($path, strlen($repository)), '/');
 
-        $head = $this->build($path);
-        $base = GitWorktree::with(
+        $headBodies = [];
+        $head = $this->build($path, GitSnapshot::workingFiles($repository, $scope), $headBodies);
+        $baseBodies = [];
+        $baseRoot = '';
+        $baseUnreadable = [];
+        $base = GitSnapshot::with(
             $repository,
             $baseRef,
             $scratchDir,
-            fn (string $checkout): GraphStorage => $this->build(rtrim($checkout . '/' . $scope, '/')),
+            function (string $snapshot) use ($scope, &$baseBodies, &$baseRoot, &$baseUnreadable): GraphStorage {
+                $baseRoot = rtrim($snapshot . '/' . $scope, '/');
+                $graph = $this->build($baseRoot, null, $baseBodies);
+                // By content, while the export exists: a file that never parsed
+                // and was only renamed is not newly unreadable.
+                foreach (OrphanedRemovals::unreadableFiles($graph) as $file) {
+                    $hash = @hash_file('xxh3', $file);
+                    if ($hash !== false) {
+                        $baseUnreadable[$hash] = true;
+                    }
+                }
+
+                return $graph;
+            },
+            $scope,
         );
 
+        $diff = EdgeSetDiff::between($base, $head, $baseRoot, $path);
+        // Body hashes are keyed by class id, which carries no path: no normalising needed.
+        $moves = MovePairing::pair($diff, $base, $head, $baseBodies, $headBodies);
+
         return [
-            'diff'       => EdgeSetDiff::between($base, $head),
+            'diff'       => $diff,
+            'moves'      => $moves,
             'base'       => $base,
             'head'       => $head,
             // The repository's own name when the whole repository is compared.
             'scope'      => $scope === '' ? basename($repository) : $scope,
             'repository' => $repository,
+            // Where each side was read, for turning stored paths back into repository paths.
+            'scope_dir'  => $scope,
+            'base_root'  => $baseRoot,
+            'base_unreadable_hashes' => $baseUnreadable,
         ];
     }
 
-    private function build(string $root): GraphStorage
+    /**
+     * @param array<string, true>|null $only     the files to read; null = everything under $root
+     * @param array<string, string>    $bodies   filled with MovePairing::bodyHashes() while $root exists
+     */
+    private function build(string $root, ?array $only, array &$bodies): GraphStorage
     {
         $storage = EphemeralGraph::inMemory();
         if (!is_dir($root)) {
@@ -68,12 +107,13 @@ final class RefGraphDiff
         }
 
         (new IncrementalEngine(
-            new FileScanner(new IgnorePatternLoader()),
+            (new FileScanner(new IgnorePatternLoader()))->restrictedTo($only),
             new PhpParserAdapter(),
             new ExtractorPipeline(ExtractorPipeline::default()),
             new GraphBuilder($storage),
             $storage,
-        ))->fullBuild($root);
+        ))->withoutLocking()->fullBuild($root);
+        $bodies = MovePairing::bodyHashes($storage, $root);
 
         return $storage;
     }

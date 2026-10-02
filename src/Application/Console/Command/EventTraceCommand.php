@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Console\Command;
 
 use Semitexa\ProjectGraph\Application\Service\Intelligence\IntelligenceLayer;
+use Semitexa\ProjectGraph\Application\Service\Query\Direction;
 use Semitexa\ProjectGraph\Application\Service\Query\GraphQueryService;
 use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Attribute\InjectAsReadonly;
@@ -12,6 +13,7 @@ use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
 use Semitexa\ProjectGraph\Application\Service\Support\UsesProjectGraphConnection;
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Formatter\OutputFormatter;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -52,11 +54,16 @@ final class EventTraceCommand extends BaseCommand
         $intelligence = new IntelligenceLayer($this->query());
         $eventArg = $input->getArgument('event');
         $format = $input->getOption('format') ?? 'text';
+        // yaml and markdown printed text and exited 0.
+        if (!in_array($format, ['text', 'json'], true)) {
+            $output->writeln('<error>--format accepts text or json.</error>');
+            return Command::FAILURE;
+        }
         $includeCode = $input->getOption('include-code');
 
         $eventClass = $this->resolveEventClass($eventArg);
         if ($eventClass === null) {
-            $output->writeln("<error>Event not found: {$eventArg}</error>");
+            $output->writeln('<error>' . OutputFormatter::escape(sprintf('Not an event in the graph: %s', (string) $eventArg)) . '</error>');
             $output->writeln('');
             $output->writeln('Search results:');
             $results = $this->query()->search($eventArg);
@@ -181,25 +188,28 @@ final class EventTraceCommand extends BaseCommand
         return Command::SUCCESS;
     }
 
+    /**
+     * The event class a person meant, or null. This called class_exists(),
+     * which is case-insensitive AND autoloads — a lowercase name passed,
+     * then nothing in the graph matched it — and took the first search hit
+     * ending in "Event". Any class at all was then traced as an event.
+     */
     private function resolveEventClass(string $eventArg): ?string
     {
-        if (class_exists($eventArg)) {
-            return $eventArg;
+        $node = $this->query()->resolver($this->getProjectRoot())->resolve($eventArg);
+        if ($node === null) {
+            return null;
         }
+        $isEvent = $node->getType()->value === 'event'
+            || $this->query()->getEdges($node->getId(), 'listens_to', Direction::Incoming) !== []
+            || $this->query()->getEdges($node->getId(), 'emits', Direction::Incoming) !== [];
 
-        $results = $this->query()->search($eventArg);
-        foreach ($results as $node) {
-            if ($node->getType()->value === 'event' || str_ends_with($node->getFqcn(), 'Event')) {
-                return $node->getFqcn();
-            }
-        }
-
-        return null;
+        return $isEvent ? $node->getFqcn() : null;
     }
 
     private function showBasicEventInfo(string $eventClass, OutputInterface $output): void
     {
-        $edges = $this->query()->getEdges($eventClass);
+        $edges = $this->query()->getEdges('class:' . $eventClass);
         $listeners = [];
         $emitters = [];
 

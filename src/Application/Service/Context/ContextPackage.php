@@ -16,13 +16,16 @@ final readonly class ContextPackage
         public int   $totalTokens,
         /** @var list<string> */
         public array $changed,
+        /** Impacted nodes the budget left out — the reader must know the list is a part. */
+        public int   $omitted = 0,
     ) {}
 
     public function toMarkdown(): string
     {
         $lines = ['# Context Package', ''];
         $lines[] = '**Changed:** ' . implode(', ', $this->changed);
-        $lines[] = '**Nodes:** ' . count($this->nodes);
+        $lines[] = '**Nodes:** ' . count($this->nodes)
+            . ($this->omitted > 0 ? sprintf(' (%d more impacted, left out by the size budget — ranked by relevance)', $this->omitted) : '');
         $lines[] = '**Edges:** ' . count($this->edges);
         $lines[] = '**Estimated tokens:** ' . $this->totalTokens;
         $lines[] = '';

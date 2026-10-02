@@ -76,7 +76,10 @@ final class AttributeArgumentsAreNotExecutedTest extends TestCase
 
         self::assertCount(1, $classes);
         self::assertSame(['fine'], $classes[0]->getAttribute('Fixture\\Boom\\Second')?->getArguments());
-        self::assertSame('autoloader exploded on Boom\\Thing', $classes[0]->getAttribute('Fixture\\Boom\\First')?->unreadableReason());
+        // Round 2 (2026-10-02): a constant holder is read from its AST, never
+        // autoloaded — the autoloader is not even asked, and the attribute is
+        // still the only thing lost.
+        self::assertStringContainsString('Cannot read Boom\\Thing::VALUE', (string) $classes[0]->getAttribute('Fixture\\Boom\\First')?->unreadableReason());
     }
 
     /** @return list<\Semitexa\ProjectGraph\Application\Service\Parser\ClassInfo> */

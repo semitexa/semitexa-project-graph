@@ -15,6 +15,7 @@ use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
 use Semitexa\ProjectGraph\Application\Service\Support\UsesProjectGraphConnection;
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Formatter\OutputFormatter;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -56,28 +57,46 @@ final class ContextBuilderCommand extends BaseCommand
         $intelligence = new IntelligenceLayer($this->query());
         $task = $input->getArgument('task');
         $format = $input->getOption('format') ?? 'text';
-        $depth = (int) ($input->getOption('depth') ?? 2);
+        $rawDepth = (string) ($input->getOption('depth') ?? '2');
         $module = $input->getOption('module');
+        $module = is_string($module) && $module !== '' ? $module : null;
 
-        $context = $this->buildContext($task, $depth, $module, $intelligence);
+        // Bad values used to run silently: yaml printed text, -4 and abc ran as 1.
+        if (!in_array($format, ['text', 'json'], true)) {
+            $output->writeln('<error>--format accepts text or json.</error>');
+            return Command::FAILURE;
+        }
+        if (!in_array($rawDepth, ['1', '2', '3'], true)) {
+            $output->writeln('<error>--depth accepts 1, 2 or 3.</error>');
+            return Command::FAILURE;
+        }
+        $depth = (int) $rawDepth;
+        if ($module !== null && !in_array($module, $this->query()->knownModules(), true)) {
+            $output->writeln('<error>' . OutputFormatter::escape(sprintf('No module "%s" in the graph.', $module)) . '</error>');
+            return Command::FAILURE;
+        }
+
+        $context = $this->buildContext((string) $task, $depth, $module, $intelligence);
 
         if ($format === 'json') {
-            $output->writeln(json_encode($context, JSON_UNESCAPED_SLASHES));
+            // Raw: the formatter stripped <tags> out of the task inside the JSON.
+            $output->writeln((string) json_encode($context, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE), OutputInterface::OUTPUT_RAW);
             return Command::SUCCESS;
         }
 
-        $output->writeln('<comment>=== Context for: ' . $task . ' ===</comment>');
+        // The task is the person's text: `fix </info> bug` crashed the formatter.
+        $output->writeln('<comment>=== Context for: ' . OutputFormatter::escape((string) $task) . ' ===</comment>');
         $output->writeln('');
 
         if ($context['matched_nodes'] !== []) {
             $output->writeln('<info>Matched Components:</info>');
             foreach ($context['matched_nodes'] as $node) {
-                $output->writeln("  → {$node['fqcn']} ({$node['type']})");
+                $output->writeln("  → {$node['fqcn']} ({$node['type']})", OutputInterface::OUTPUT_RAW);
                 if (!empty($node['file'])) {
-                    $output->writeln("    file: {$node['file']}");
+                    $output->writeln("    file: {$node['file']}", OutputInterface::OUTPUT_RAW);
                 }
                 if (!empty($node['intent'])) {
-                    $output->writeln("    purpose: {$node['intent']}");
+                    $output->writeln("    purpose: {$node['intent']}", OutputInterface::OUTPUT_RAW);
                 }
             }
             $output->writeln('');
@@ -86,10 +105,10 @@ final class ContextBuilderCommand extends BaseCommand
         if ($context['related_flows'] !== []) {
             $output->writeln('<info>Related Execution Flows:</info>');
             foreach ($context['related_flows'] as $flow) {
-                $output->writeln("  → {$flow['name']}");
-                $output->writeln("    entry: {$flow['entry_point']}");
+                $output->writeln("  → {$flow['name']}", OutputInterface::OUTPUT_RAW);
+                $output->writeln("    entry: {$flow['entry_point']}", OutputInterface::OUTPUT_RAW);
                 foreach ($flow['steps'] as $step) {
-                    $output->writeln("    {$step['order']}. {$step['node']} ({$step['role']})");
+                    $output->writeln("    {$step['order']}. {$step['node']} ({$step['role']})", OutputInterface::OUTPUT_RAW);
                 }
             }
             $output->writeln('');
@@ -98,9 +117,9 @@ final class ContextBuilderCommand extends BaseCommand
         if ($context['related_events'] !== []) {
             $output->writeln('<info>Related Events:</info>');
             foreach ($context['related_events'] as $event) {
-                $output->writeln("  → {$event['class']}");
+                $output->writeln("  → {$event['class']}", OutputInterface::OUTPUT_RAW);
                 if ($event['nats_subject'] !== null) {
-                    $output->writeln("    subject: {$event['nats_subject']}");
+                    $output->writeln("    subject: {$event['nats_subject']}", OutputInterface::OUTPUT_RAW);
                 }
                 if ($event['listeners'] !== []) {
                     $output->writeln("    listeners: " . implode(', ', $event['listeners']));
@@ -112,7 +131,7 @@ final class ContextBuilderCommand extends BaseCommand
         if ($context['dependencies'] !== []) {
             $output->writeln('<info>Direct Dependencies:</info>');
             foreach ($context['dependencies'] as $dep) {
-                $output->writeln("  → {$dep['target']} ({$dep['type']})");
+                $output->writeln("  → {$dep['target']} ({$dep['type']})", OutputInterface::OUTPUT_RAW);
             }
             $output->writeln('');
         }
@@ -120,7 +139,7 @@ final class ContextBuilderCommand extends BaseCommand
         if ($context['dependents'] !== []) {
             $output->writeln('<info>Components That Depend On This:</info>');
             foreach ($context['dependents'] as $dep) {
-                $output->writeln("  ← {$dep['source']} ({$dep['type']})");
+                $output->writeln("  ← {$dep['source']} ({$dep['type']})", OutputInterface::OUTPUT_RAW);
             }
             $output->writeln('');
         }
@@ -128,9 +147,9 @@ final class ContextBuilderCommand extends BaseCommand
         if ($context['hotspots'] !== []) {
             $output->writeln('<comment>⚠ Hotspots (high risk):</comment>');
             foreach ($context['hotspots'] as $h) {
-                $output->writeln("  ⚠ {$h['node_id']} (risk: {$h['risk_score']})");
+                $output->writeln("  ⚠ {$h['node_id']} (risk: {$h['risk_score']})", OutputInterface::OUTPUT_RAW);
                 if (!empty($h['recommendation'])) {
-                    $output->writeln("    → {$h['recommendation']}");
+                    $output->writeln("    → {$h['recommendation']}", OutputInterface::OUTPUT_RAW);
                 }
             }
             $output->writeln('');
@@ -155,11 +174,9 @@ final class ContextBuilderCommand extends BaseCommand
         $matchedIds = [];
 
         foreach ($keywords as $keyword) {
-            $results = $this->query()->search($keyword);
+            // Scoped in the query: filtering after its limit of 20 lost real matches.
+            $results = $this->query()->search($keyword, 20, $module);
             foreach ($results as $node) {
-                if ($module !== null && $node->getModule() !== $module) {
-                    continue;
-                }
                 if (!isset($matchedIds[$node->getId()])) {
                     $matchedIds[$node->getId()] = true;
                     $intent = $intelligence->getIntent($node->getId());
@@ -176,6 +193,45 @@ final class ContextBuilderCommand extends BaseCommand
                         $this->addDependents($node->getId(), $context, $depth);
                     }
                 }
+            }
+        }
+
+        // The flows and events the matched classes take part in. Both sections
+        // were declared, rendered, and never filled (round 2).
+        $flowIds = [];
+        $eventIds = [];
+        foreach (array_keys($matchedIds) as $id) {
+            foreach ($this->query()->getEdges($id, EdgeType::ParticipatesInFlow->value, Direction::Outgoing) as $edge) {
+                $flowIds[$edge->getTargetId()] = true;
+            }
+            foreach ([EdgeType::Emits, EdgeType::ListensTo] as $type) {
+                foreach ($this->query()->getEdges($id, $type->value, Direction::Outgoing) as $edge) {
+                    $eventIds[$edge->getTargetId()] = true;
+                }
+            }
+        }
+        foreach (array_slice(array_keys($flowIds), 0, 10) as $flowId) {
+            $flow = $intelligence->getExecutionFlow(str_starts_with($flowId, 'flow:') ? substr($flowId, 5) : $flowId);
+            if ($flow !== null) {
+                $context['related_flows'][] = [
+                    'name' => $flow->name,
+                    'entry_point' => $flow->entryPoint,
+                    'steps' => array_values(array_map(
+                        static fn (array $step, int $i): array => ['order' => $step['order'] ?? $i + 1, 'node' => $step['node'] ?? '', 'role' => $step['role'] ?? ''],
+                        $flow->steps,
+                        array_keys($flow->steps),
+                    )),
+                ];
+            }
+        }
+        foreach (array_slice(array_keys($eventIds), 0, 10) as $eventId) {
+            $lifecycle = $intelligence->getEventLifecycle(str_starts_with($eventId, 'class:') ? substr($eventId, 6) : $eventId);
+            if ($lifecycle !== null) {
+                $context['related_events'][] = [
+                    'class' => $lifecycle->eventClass,
+                    'nats_subject' => $lifecycle->natsSubject,
+                    'listeners' => array_values(array_map('strval', [...$lifecycle->syncListeners, ...$lifecycle->asyncListeners, ...$lifecycle->queuedListeners])),
+                ];
             }
         }
 
@@ -227,29 +283,48 @@ final class ContextBuilderCommand extends BaseCommand
         return array_unique($keywords);
     }
 
+    private const CONTEXT_EDGES = [EdgeType::Calls, EdgeType::Instantiates, EdgeType::InjectsReadonly, EdgeType::InjectsMutable];
+
+    /**
+     * $depth 2 is the direct dependencies, 3 adds theirs. --depth used to be
+     * read and then ignored: 2, 3 and 99 printed the same thing.
+     */
     private function addDependencies(string $nodeId, array &$context, int $depth): void
     {
-        $edges = $this->query()->getEdges($nodeId, direction: Direction::Outgoing);
-        foreach ($edges as $edge) {
-            if (in_array($edge->getType(), [EdgeType::Calls, EdgeType::Instantiates, EdgeType::InjectsReadonly, EdgeType::InjectsMutable], true)) {
-                $context['dependencies'][] = [
-                    'target' => $edge->getTargetId(),
-                    'type' => $edge->getType()->value,
-                ];
-            }
-        }
+        $this->walk($nodeId, $context, $depth - 1, Direction::Outgoing, 'dependencies', 'target');
     }
 
     private function addDependents(string $nodeId, array &$context, int $depth): void
     {
-        $edges = $this->query()->getEdges($nodeId, direction: Direction::Incoming);
-        foreach ($edges as $edge) {
-            if (in_array($edge->getType(), [EdgeType::Calls, EdgeType::Instantiates, EdgeType::InjectsReadonly, EdgeType::InjectsMutable], true)) {
-                $context['dependents'][] = [
-                    'source' => $edge->getSourceId(),
-                    'type' => $edge->getType()->value,
-                ];
+        $this->walk($nodeId, $context, $depth - 1, Direction::Incoming, 'dependents', 'source');
+    }
+
+    /** @param array<string, mixed> $context */
+    private function walk(string $nodeId, array &$context, int $levels, Direction $direction, string $key, string $field): void
+    {
+        $seen = [];
+        foreach ($context[$key] as $row) {
+            $seen[$row[$field] . '|' . $row['type']] = true;
+        }
+        $frontier = [$nodeId];
+        for ($level = 0; $level < $levels && $frontier !== []; $level++) {
+            $next = [];
+            foreach ($frontier as $id) {
+                foreach ($this->query()->getEdges($id, direction: $direction) as $edge) {
+                    if (!in_array($edge->getType(), self::CONTEXT_EDGES, true)) {
+                        continue;
+                    }
+                    $other = $direction === Direction::Outgoing ? $edge->getTargetId() : $edge->getSourceId();
+                    $k = $other . '|' . $edge->getType()->value;
+                    if (isset($seen[$k])) {
+                        continue;
+                    }
+                    $seen[$k] = true;
+                    $context[$key][] = [$field => $other, 'type' => $edge->getType()->value];
+                    $next[] = $other;
+                }
             }
+            $frontier = array_values(array_unique($next));
         }
     }
 }

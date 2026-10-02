@@ -97,14 +97,14 @@ final class CoverageGapStoreTest extends TestCase
     public function a_second_declaration_of_a_class_is_a_duplicate_class_gap(): void
     {
         $fixture = GraphFixture::built();
-        $fixture->write('Copies/Ping.php', str_replace(
+        $fixture->write('ZCopies/Ping.php', str_replace(
             'namespace Semitexa\\ProjectGraph\\Tests\\Fixture\\GraphProject\\Cycle;',
             "namespace Semitexa\\ProjectGraph\\Tests\\Fixture\\GraphProject\\Cycle;\n\nuse Semitexa\\ProjectGraph\\Tests\\Fixture\\GraphProject\\Cycle\\Pong;",
             $fixture->read('Cycle/Ping.php'),
         ));
         $fixture->refresh();
 
-        $gaps = $fixture->storage->gaps->findByFile($fixture->path('Copies/Ping.php'));
+        $gaps = $fixture->storage->gaps->findByFile($fixture->path('ZCopies/Ping.php'));
         self::assertCount(1, $gaps);
         self::assertSame(CoverageGapKind::DuplicateClass, $gaps[0]->getKind());
         self::assertSame(GraphFixture::NS . 'Cycle\\Ping', $gaps[0]->getSubject());
@@ -119,16 +119,16 @@ final class CoverageGapStoreTest extends TestCase
         $resource = GraphFixture::classId('Orders\\OrderResource');
         self::assertFalse($fixture->hasEdge(EdgeType::Imports, $ping, $resource), 'precondition: the real Ping does not import it');
 
-        $fixture->write('Copies/Ping.php', str_replace(
+        $fixture->write('ZCopies/Ping.php', str_replace(
             'namespace Semitexa\\ProjectGraph\\Tests\\Fixture\\GraphProject\\Cycle;',
             "namespace Semitexa\\ProjectGraph\\Tests\\Fixture\\GraphProject\\Cycle;\n\nuse Semitexa\\ProjectGraph\\Tests\\Fixture\\GraphProject\\Orders\\OrderResource;",
             $fixture->read('Cycle/Ping.php'),
         ));
         $fixture->refresh();
-        self::assertCount(1, $fixture->storage->gaps->findByFile($fixture->path('Copies/Ping.php')), 'the copy is seen as a duplicate');
+        self::assertCount(1, $fixture->storage->gaps->findByFile($fixture->path('ZCopies/Ping.php')), 'the copy is seen as a duplicate');
         self::assertFalse($fixture->hasEdge(EdgeType::Imports, $ping, $resource));
 
-        $fixture->delete('Copies/Ping.php');
+        $fixture->delete('ZCopies/Ping.php');
         $fixture->refresh();
         self::assertFalse($fixture->hasEdge(EdgeType::Imports, $ping, $resource));
     }

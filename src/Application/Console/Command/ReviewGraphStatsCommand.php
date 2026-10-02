@@ -78,6 +78,8 @@ final class ReviewGraphStatsCommand extends BaseCommand
             ['Total' => ($totalNodes ?: '0') . ' (live count: ' . $storage->nodes->countAll() . ')'],
         );
 
+        // The ten largest, not the first ten alphabetically (route, payload and handler were left out).
+        arsort($nodeCounts);
         $topTypes = array_slice($nodeCounts, 0, 10, true);
         $typeLines = [];
         foreach ($topTypes as $type => $count) {

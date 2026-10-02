@@ -27,22 +27,32 @@ final class InheritanceExtractor implements ExtractorInterface
         $result = new ExtractionResult();
 
         $visitor = new class($file, $result) extends NodeVisitorAbstract {
-            private string $currentNamespace = '';
+            private readonly ClassScope $scope;
 
             public function __construct(
                 private readonly ParsedFile $file,
                 private readonly ExtractionResult $result,
-            ) {}
+            ) {
+                $this->scope = new ClassScope($file);
+            }
 
             public function enterNode(AstNode $node): ?int
             {
-                if ($node instanceof AstNode\Stmt\Namespace_) {
-                    $this->currentNamespace = $node->name?->toString() ?? '';
+                if ($node instanceof AstNode\Stmt\Class_ && $node->namespacedName === null) {
+                    $this->scope->enter($node);
+                    $this->anonymousClass($node);
+
+                    return null;
+                }
+                if ($node instanceof AstNode\Stmt\ClassLike) {
+                    $this->scope->enter($node);
                 }
 
-                if ($node instanceof AstNode\Stmt\Class_) {
+                if ($node instanceof AstNode\Stmt\Class_ && $node->namespacedName !== null) {
+                    $fqcn = $node->namespacedName->toString();
                     $this->registerClassLike(
                         node: $node,
+                        fqcn: $fqcn,
                         nodeType: NodeType::Class_,
                         metadata: [
                             'abstract' => $node->isAbstract(),
@@ -52,66 +62,99 @@ final class InheritanceExtractor implements ExtractorInterface
                     );
 
                     if ($node->extends !== null) {
-                        $this->result->addEdge(new Edge(
-                            sourceId: NodeId::forClass($this->resolveNodeFqcn($node)),
-                            targetId: NodeId::forClass($node->extends->toString()),
-                            type: EdgeType::Extends,
-                            metadata: [],
-                        ));
+                        $this->edge($fqcn, $node->extends->toString(), EdgeType::Extends);
                     }
-
                     foreach ($node->implements as $interface) {
-                        $this->result->addEdge(new Edge(
-                            sourceId: NodeId::forClass($this->resolveNodeFqcn($node)),
-                            targetId: NodeId::forClass($interface->toString()),
-                            type: EdgeType::Implements,
-                            metadata: [],
-                        ));
+                        $this->edge($fqcn, $interface->toString(), EdgeType::Implements);
                     }
                 }
 
-                if ($node instanceof AstNode\Stmt\Interface_) {
-                    $this->registerClassLike($node, NodeType::Interface_);
+                if ($node instanceof AstNode\Stmt\Interface_ && $node->namespacedName !== null) {
+                    $fqcn = $node->namespacedName->toString();
+                    $this->registerClassLike($node, $fqcn, NodeType::Interface_);
                     foreach ($node->extends as $parent) {
-                        $this->result->addEdge(new Edge(
-                            sourceId: NodeId::forClass($this->resolveNodeFqcn($node)),
-                            targetId: NodeId::forClass($parent->toString()),
-                            type: EdgeType::Extends,
-                            metadata: [],
-                        ));
+                        $this->edge($fqcn, $parent->toString(), EdgeType::Extends);
                     }
                 }
 
-                if ($node instanceof AstNode\Stmt\Trait_) {
-                    $this->registerClassLike($node, NodeType::Trait_);
+                if ($node instanceof AstNode\Stmt\Trait_ && $node->namespacedName !== null) {
+                    $this->registerClassLike($node, $node->namespacedName->toString(), NodeType::Trait_);
                 }
 
-                if ($node instanceof AstNode\Stmt\Enum_) {
-                    $this->registerClassLike($node, NodeType::Enum_);
+                if ($node instanceof AstNode\Stmt\Enum_ && $node->namespacedName !== null) {
+                    $fqcn = $node->namespacedName->toString();
+                    $this->registerClassLike($node, $fqcn, NodeType::Enum_);
                     foreach ($node->implements as $interface) {
-                        $this->result->addEdge(new Edge(
-                            sourceId: NodeId::forClass($this->resolveNodeFqcn($node)),
-                            targetId: NodeId::forClass($interface->toString()),
-                            type: EdgeType::Implements,
-                            metadata: [],
-                        ));
+                        $this->edge($fqcn, $interface->toString(), EdgeType::Implements);
                     }
                 }
 
                 return null;
             }
 
+            public function leaveNode(AstNode $node): ?int
+            {
+                if ($node instanceof AstNode\Stmt\ClassLike) {
+                    $this->scope->leave($node);
+                }
+
+                return null;
+            }
+
+            /**
+             * An anonymous class has no node of its own. What it extends and
+             * implements is a dependency of the code that declares it — the
+             * host class, or the file at the top level — so it is a
+             * REFERENCE from there ({via: anonymous_class, relation}). It used
+             * to be stored as the host's own extends/implements, flagged
+             * anonymous:true: 293 edges on the workspace (measured
+             * 2026-10-02), e.g. LedgerBootstrap "implementing"
+             * QueueTransportFactoryInterface, and no reader of inheritance
+             * (query --usages, blast radius, relevance, cross-module edges)
+             * looks at the flag. Before that it left "class:<Namespace>"
+             * (see ClassScope).
+             */
+            private function anonymousClass(AstNode\Stmt\Class_ $node): void
+            {
+                $owner = $this->scope->owner();
+                $parents = [];
+                if ($node->extends !== null) {
+                    $parents[] = [$node->extends->toString(), EdgeType::Extends];
+                }
+                foreach ($node->implements as $interface) {
+                    $parents[] = [$interface->toString(), EdgeType::Implements];
+                }
+
+                foreach ($parents as [$target, $type]) {
+                    if ($target === $owner) {
+                        continue;
+                    }
+                    $this->result->addEdge(new Edge(
+                        $this->scope->sourceIn($this->result),
+                        NodeId::forClass($target),
+                        EdgeType::References,
+                        ['via' => 'anonymous_class', 'relation' => $type->value],
+                    ));
+                }
+            }
+
+            private function edge(string $source, string $target, EdgeType $type): void
+            {
+                $this->result->addEdge(new Edge(
+                    sourceId: NodeId::forClass($source),
+                    targetId: NodeId::forClass($target),
+                    type: $type,
+                    metadata: [],
+                ));
+            }
+
+            /** @param array<string, mixed> $metadata */
             private function registerClassLike(
                 AstNode\Stmt\ClassLike $node,
+                string $fqcn,
                 NodeType $nodeType,
                 array $metadata = [],
             ): void {
-                if ($node->name === null) {
-                    return;
-                }
-
-                $fqcn = $this->resolveNodeFqcn($node);
-
                 $this->result->addNode(new Node(
                     id: NodeId::forClass($fqcn),
                     type: $nodeType,
@@ -122,22 +165,6 @@ final class InheritanceExtractor implements ExtractorInterface
                     module: $this->file->module,
                     metadata: $metadata,
                 ));
-            }
-
-            private function resolveNodeFqcn(AstNode\Stmt\ClassLike $node): string
-            {
-                if ($node->name === null) {
-                    return $this->currentNamespace;
-                }
-
-                return $node->namespacedName?->toString() ?? $this->resolveFqcn($node->name->toString());
-            }
-
-            private function resolveFqcn(string $shortName): string
-            {
-                return $this->currentNamespace
-                    ? $this->currentNamespace . '\\' . $shortName
-                    : $shortName;
             }
         };
 

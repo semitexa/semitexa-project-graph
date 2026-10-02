@@ -25,5 +25,7 @@ final readonly class GraphView
         public int   $placeholderNodes,
         /** @var array<string, int> */
         public array $moduleCounts,
+        /** The walk stopped at {@see GraphQueryService::VIEW_MAX_NODES}: the view is a part. */
+        public bool  $truncated = false,
     ) {}
 }

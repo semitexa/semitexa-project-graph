@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Service\Extractor;
 
 use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageGapKind;
+use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
 use Semitexa\ProjectGraph\Application\Service\Parser\ParsedFile;
 use Semitexa\ProjectGraph\Attribute\GraphIgnore;
@@ -38,7 +39,47 @@ final class ExtractorPipeline
 
         $merged->declaredClasses = array_map(static fn ($class): string => $class->fqcn, $file->getClasses());
 
-        return $this->withoutIgnoredClasses($file, $merged);
+        return $this->withoutIgnoredClasses($file, $this->withoutRedundantAttributeReferences($merged));
+    }
+
+    /**
+     * Foo::class in an attribute argument is a reference (ReferenceExtractor)
+     * — unless an attribute extractor already turned that argument into the
+     * edge it means: #[AsPayloadHandler(payload: P::class)] is `handles P`,
+     * and a second "references P" beside it says nothing new. Decided here
+     * because only the merged result knows what every extractor emitted; an
+     * extractor that threw leaves its argument as a plain reference, which is
+     * still true. An import is no such edge: it says the name was written,
+     * not what it is for.
+     */
+    private function withoutRedundantAttributeReferences(ExtractionResult $result): ExtractionResult
+    {
+        $wired = [];
+        $candidates = false;
+        foreach ($result->edges as $edge) {
+            if ($edge->getType() === EdgeType::References) {
+                $candidates = $candidates || ($edge->getMetadata()['via'] ?? null) === Ast\ReferenceExtractor::VIA_ATTRIBUTE;
+            } elseif ($edge->getType() !== EdgeType::Imports) {
+                $wired[$edge->getSourceId() . "\0" . $edge->getTargetId()] = true;
+            }
+        }
+        if (!$candidates) {
+            return $result;
+        }
+
+        $edges = [];
+        foreach ($result->edges as $edge) {
+            if ($edge->getType() === EdgeType::References
+                && ($edge->getMetadata()['via'] ?? null) === Ast\ReferenceExtractor::VIA_ATTRIBUTE
+                && isset($wired[$edge->getSourceId() . "\0" . $edge->getTargetId()])
+            ) {
+                continue;
+            }
+            $edges[] = $edge;
+        }
+        $result->edges = $edges;
+
+        return $result;
     }
 
     /**
