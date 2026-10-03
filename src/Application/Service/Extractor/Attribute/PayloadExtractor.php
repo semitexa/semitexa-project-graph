@@ -15,6 +15,7 @@ use Semitexa\ProjectGraph\Application\Service\Extractor\SafeAttributeResolver;
 use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
+use Semitexa\ProjectGraph\Application\Service\Parser\EnumCaseReference;
 use Semitexa\ProjectGraph\Application\Service\Parser\ParsedFile;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Domain\Model\Node;
@@ -126,17 +127,22 @@ final class PayloadExtractor implements ExtractorInterface
                 }
 
                 foreach ($classInfo->getAttributes(RequiresCapability::class) as $cap) {
-                    $capInstance = $this->safeNewInstance($cap);
-                    if ($capInstance !== null) {
-                        $capability = $capInstance->capability ?? null;
-                        $slug = $capability instanceof \BackedEnum ? (string) $capability->value : '';
-                        $result->addEdge(new Edge(
-                            sourceId: $payloadNode->getId(),
-                            targetId: 'capability:' . $slug,
-                            type:     EdgeType::RequiresCapability,
-                            metadata: ['slug' => $slug],
-                        ));
+                    // The capability is an enum case read from its AST (an
+                    // EnumCaseReference): RequiresCapability's constructor wants
+                    // a CapabilityInterface and refuses it, so the slug comes
+                    // from the argument itself.
+                    $args = $this->getAttributeArguments($cap);
+                    $capability = $args['capability'] ?? $args[0] ?? null;
+                    if ($capability === null) {
+                        continue;
                     }
+                    $slug = $capability instanceof EnumCaseReference || $capability instanceof \BackedEnum ? (string) $capability->value : '';
+                    $result->addEdge(new Edge(
+                        sourceId: $payloadNode->getId(),
+                        targetId: 'capability:' . $slug,
+                        type:     EdgeType::RequiresCapability,
+                        metadata: ['slug' => $slug],
+                    ));
                 }
             }
         }

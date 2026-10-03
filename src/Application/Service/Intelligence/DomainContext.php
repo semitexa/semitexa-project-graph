@@ -33,7 +33,11 @@ final readonly class DomainContext
             relatedDomains: $node->getMetadata()['related_domains'] ?? [],
             keyEntities: $node->getMetadata()['key_entities'] ?? [],
             nodeIds: $node->getMetadata()['node_ids'] ?? [],
-            inferredFrom: $node->getMetadata()['inferred_from'] ?? 'namespace',
+            // The extractor stores a list (["module_name", "namespace_patterns"]):
+            // read as a string, the first domain anyone looked up was a TypeError.
+            inferredFrom: is_array($node->getMetadata()['inferred_from'] ?? null)
+                ? implode(', ', array_map('strval', $node->getMetadata()['inferred_from']))
+                : (string) ($node->getMetadata()['inferred_from'] ?? 'namespace'),
         );
     }
 

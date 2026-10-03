@@ -21,7 +21,7 @@ final class EdgeDiffScenariosTest extends TestCase
     /** @return array{added: list<string>, removed: list<string>, orphans: list<string>} */
     private function review(GitFixtureRepo $repo): array
     {
-        $result = (new RefGraphDiff())->diff($repo->root, 'HEAD', sys_get_temp_dir() . '/semitexa-graph-diff-scratch');
+        $result = (new RefGraphDiff())->diff($repo->root, 'HEAD', GraphFixture::diffScratch());
         $keys = static fn (array $edges): array => array_map(static fn ($e): string => str_replace("\0", ' ', GraphDiff::edgeKey($e)), $edges);
 
         return [

@@ -11,7 +11,7 @@ use PhpParser\Node\Attribute;
 use PhpParser\Node\Expr;
 use PhpParser\Node\Identifier;
 use PhpParser\Node\Name;
-use PhpParser\Node\Stmt\ClassConst;
+use PhpParser\Node\Stmt\EnumCase;
 use PhpParser\Node\Stmt\ClassLike;
 use PhpParser\Node\VariadicPlaceholder;
 
@@ -26,13 +26,32 @@ use PhpParser\Node\VariadicPlaceholder;
  * recorded as a {@see ConstructedArgument}, never executed: scanning must not
  * run the constructor of whatever class a scanned file names.
  *
- * Constants of the class being parsed come from its own AST. Constants and
- * enum cases of OTHER classes are read by loading those classes — framework
- * enums and constant holders, not the annotated class, whose loaded version
- * is exactly what must not be trusted.
+ * Every constant and enum case is read from an AST: the class being parsed
+ * from its own, any other class from the file the autoloader maps it to
+ * ({@see ClassDeclarationReader}) — never by loading it. Loading the holder
+ * FATALed the full build (round 2, measured 2026-10-02: "Cannot redeclare
+ * class", "Trait not found") and made a route depend on which file had loaded
+ * the holder first. A constant that cannot be read that way leaves the
+ * attribute unreadable (ParsedAttribute::unreadableReason()), exactly as a
+ * failed load did. The only classes still asked of the runtime are INTERNAL
+ * ones already present (\Attribute::TARGET_CLASS): no file is involved.
+ * An enum case becomes an {@see EnumCaseReference}.
  */
 final class AttributeArgumentEvaluator
 {
+    /** Constants defined by other constants, across files: a cycle or a long chain is given up on, not followed. */
+    private const MAX_DEPTH = 24;
+
+    private int $depth = 0;
+
+    private readonly ClassDeclarationReader $declarations;
+
+    /** @param string|null $file the file being parsed: a copy at another revision reads its own holders (see ClassDeclarationReader::readsAs()) */
+    public function __construct(?ClassDeclarationReader $declarations = null, private readonly ?string $file = null)
+    {
+        $this->declarations = $declarations ?? ClassDeclarationReader::shared();
+    }
+
     /** @return array{0: array<int|string, mixed>, 1: ?string} evaluated arguments, and why they could not be (null when they could) */
     public function evaluate(Attribute $attribute, ClassLike $context): array
     {
@@ -63,9 +82,17 @@ final class AttributeArgumentEvaluator
 
     private function value(Expr $expr, ClassLike $context): mixed
     {
-        $evaluator = new ConstExprEvaluator(fn (Expr $e): mixed => $this->fallback($e, $context));
+        if ($this->depth >= self::MAX_DEPTH) {
+            throw new ConstExprEvaluationException('Constant expression nested too deep (a cycle?)');
+        }
+        $this->depth++;
+        try {
+            $evaluator = new ConstExprEvaluator(fn (Expr $e): mixed => $this->fallback($e, $context));
 
-        return $evaluator->evaluateDirectly($expr);
+            return $evaluator->evaluateDirectly($expr);
+        } finally {
+            $this->depth--;
+        }
     }
 
     private function fallback(Expr $expr, ClassLike $context): mixed
@@ -99,6 +126,8 @@ final class AttributeArgumentEvaluator
         }
 
         if ($expr instanceof Expr\ConstFetch) {
+            // A global constant (PHP_INT_MAX, DIRECTORY_SEPARATOR): defined()
+            // and constant() on a name without "::" never autoload a class.
             $name = $expr->name->toString();
             if (defined($name)) {
                 return constant($name);
@@ -116,38 +145,50 @@ final class AttributeArgumentEvaluator
         /** @var Identifier $constantName */
         $constantName = $expr->name;
         $constant = $constantName->toString();
-        $selfReference = in_array($expr->class->toLowerString(), ['self', 'static'], true);
         $class = $this->className($expr->class, $context);
 
         if ($constant === 'class') {
             return $class;
         }
 
-        if ($selfReference) {
-            foreach ($context->stmts as $stmt) {
-                if ($stmt instanceof ClassConst) {
-                    foreach ($stmt->consts as $const) {
-                        if ($const->name->toString() === $constant) {
-                            return $this->value($const->value, $context);
-                        }
-                    }
-                }
-            }
-            // Not declared here, so inherited. Read it from the PARENT by name —
-            // never by loading the annotated class itself, whose loaded version
-            // may be a different revision than the file being parsed (a base-ref
-            // worktree in RefGraphDiff).
-            if (!$context instanceof \PhpParser\Node\Stmt\Class_ || $context->extends === null) {
-                throw new ConstExprEvaluationException(sprintf('Cannot resolve %s::%s: not declared in the class and it has no parent', $class, $constant));
-            }
-            $class = $context->extends->toString();
+        if (self::isLoadedInternal($class)) {
+            return constant($class . '::' . $constant);
         }
 
-        if (!class_exists($class) && !interface_exists($class) && !enum_exists($class)) {
-            throw new ConstExprEvaluationException(sprintf('Cannot resolve %s::%s: %s is not loadable', $class, $constant, $class));
+        // self::/static:: and the class naming itself start from the AST being
+        // parsed — never the loaded class, which may be another revision (a
+        // base-ref worktree in RefGraphDiff, the pre-edit version in watch mode).
+        $own = $context->namespacedName?->toString() ?? (string) $context->name;
+        $declaration = strcasecmp($class, $own) === 0 ? $context : $this->declarations->find($class, $this->file);
+        if ($declaration === null) {
+            throw new ConstExprEvaluationException(sprintf('Cannot read %s::%s: no file the autoloader maps declares %s (it is never loaded to find out)', $class, $constant, $class));
         }
 
-        return constant($class . '::' . $constant);
+        $found = $this->declarations->declarationOf($declaration, $constant, 0, $this->file);
+        if ($found === null) {
+            throw new ConstExprEvaluationException(sprintf('Cannot read %s::%s: neither %s nor what it inherits from declares it', $class, $constant, $class));
+        }
+        [$declarer, $node] = $found;
+
+        if ($node instanceof EnumCase) {
+            return new EnumCaseReference(
+                $declarer->namespacedName?->toString() ?? $class,
+                $constant,
+                $node->expr !== null ? $this->value($node->expr, $declarer) : null,
+            );
+        }
+
+        return $this->value($node->value, $declarer);
+    }
+
+    /** An internal class (\Attribute, \ReflectionMethod) already present: reading its constant runs no project code. */
+    private static function isLoadedInternal(string $class): bool
+    {
+        if (!class_exists($class, false) && !interface_exists($class, false) && !enum_exists($class, false)) {
+            return false;
+        }
+
+        return (new \ReflectionClass($class))->isInternal();
     }
 
     private function className(Name $name, ClassLike $context): string

@@ -7,6 +7,8 @@ namespace Semitexa\ProjectGraph\Tests\Integration;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
+use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
+use Semitexa\ProjectGraph\Domain\Model\Node;
 use Semitexa\ProjectGraph\Application\Service\Query\GraphBrowser;
 use Semitexa\ProjectGraph\Tests\Support\GraphFixture;
 
@@ -90,6 +92,37 @@ final class GraphBrowserTest extends TestCase
         self::assertNotSame([], $hits);
         self::assertStringStartsWith('Order', $hits[0]['name']);
         self::assertSame([], (new GraphBrowser($fixture->storage, $fixture->root))->search('O'));
+    }
+
+    #[Test]
+    public function hidden_nodes_cannot_crowd_visible_matches_out_of_the_page(): void
+    {
+        // The SQL LIMIT ran before the hidden types were dropped: fifty flow
+        // nodes named Order* left a search for "Order" with no class at all.
+        $fixture = GraphFixture::built();
+        for ($i = 0; $i < 60; $i++) {
+            $fixture->storage->upsertNode(new Node('flow:OrderAFlow' . $i, NodeType::ExecutionFlow, 'Flows\\OrderAFlow' . $i, '', 0, 0, '', []));
+        }
+
+        $page = (new GraphBrowser($fixture->storage, $fixture->root))->searchPage('Order');
+
+        self::assertContains(GraphFixture::classId('Orders\\OrderPlaced'), array_column($page['hits'], 'id'));
+        self::assertNotContains('execution_flow', array_column($page['hits'], 'type'));
+        self::assertFalse($page['truncated']);
+    }
+
+    #[Test]
+    public function a_cut_page_says_it_was_cut(): void
+    {
+        $fixture = GraphFixture::built();
+        for ($i = 0; $i < 60; $i++) {
+            $fixture->storage->upsertNode(new Node('class:Many\\Thing' . $i, NodeType::Class_, 'Many\\Thing' . $i, '', 0, 0, '', []));
+        }
+
+        $page = (new GraphBrowser($fixture->storage, $fixture->root))->searchPage('Thing');
+
+        self::assertCount(50, $page['hits']);
+        self::assertTrue($page['truncated']);
     }
 
     #[Test]

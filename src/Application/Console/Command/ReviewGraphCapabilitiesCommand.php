@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Console\Command;
 
 use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\ProjectGraph\Application\Service\Support\RefusesInMachineFormat;
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
@@ -24,6 +25,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 final class ReviewGraphCapabilitiesCommand extends BaseCommand
 {
+    use RefusesInMachineFormat;
+
     use UsesProjectGraphConnection;
 
     /**
@@ -39,14 +42,19 @@ final class ReviewGraphCapabilitiesCommand extends BaseCommand
     {
         $this->addOption('json', null, InputOption::VALUE_NONE, 'Output as JSON manifest');
         $this->addOption('markdown', null, InputOption::VALUE_NONE, 'Output as Markdown');
-        $this->addOption('category', 'c', InputOption::VALUE_REQUIRED, 'Filter by category: generators, introspection, operations, graph, all', 'all');
+        $this->addOption('category', 'c', InputOption::VALUE_REQUIRED, 'Filter by category: generator, introspection, graph, other, all (plural forms accepted)', 'all');
         $this->addOption('module', 'm', InputOption::VALUE_REQUIRED, 'Focus on capabilities relevant to a specific module');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
-        $category = $input->getOption('category');
+        // The help offered "generators" and "operations"; the kinds are
+        // "generator" and "other", so both answered 0 commands with exit 0.
+        $category = self::CATEGORY_ALIASES[(string) $input->getOption('category')] ?? (string) $input->getOption('category');
+        if (!in_array($category, ['all', 'generator', 'introspection', 'graph', 'other'], true)) {
+            return $this->refuse($output, $io, sprintf('Unknown --category "%s". Use generator, introspection, graph, other or all.', $category), (bool) $input->getOption('json'));
+        }
         $module = $input->getOption('module');
 
         $storage = $this->createStorage();
@@ -60,6 +68,9 @@ final class ReviewGraphCapabilitiesCommand extends BaseCommand
             return self::FAILURE;
         }
 
+        if (is_string($module) && $module !== '' && !in_array($module, $storage->nodes->distinctModules(), true)) {
+            return $this->refuse($output, $io, sprintf('No module "%s" in the graph.', $module), (bool) $input->getOption('json'));
+        }
         $manifest = $projection->build(category: $category, module: $module);
 
         if ($input->getOption('json')) {
@@ -79,17 +90,17 @@ final class ReviewGraphCapabilitiesCommand extends BaseCommand
             return self::SUCCESS;
         }
 
-        $this->renderTerminal($manifest, $io);
+        $this->renderTerminal($manifest, $io, is_string($module) && $module !== '' ? $module : null);
 
         return self::SUCCESS;
     }
 
-    private function renderTerminal(object $manifest, SymfonyStyle $io): void
+    private const CATEGORY_ALIASES = ['generators' => 'generator', 'operations' => 'other', 'graphs' => 'graph'];
+
+    private function renderTerminal(object $manifest, SymfonyStyle $io, ?string $module): void
     {
-        $title = 'Review Graph Capabilities';
-        if (!empty($manifest->projectContext->modules)) {
-            $title .= ' — ' . array_key_first($manifest->projectContext->modules);
-        }
+        // It named the first module of the project ("— Core") even unfiltered.
+        $title = 'Review Graph Capabilities' . ($module !== null ? ' — ' . $module : '');
         $io->title($title);
 
         $grouped = [];

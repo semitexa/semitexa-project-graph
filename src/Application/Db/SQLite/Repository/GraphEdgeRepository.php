@@ -104,13 +104,15 @@ final class GraphEdgeRepository
         ];
         $metadata = json_encode($edge->getMetadata()) ?: '{}';
 
-        $existingId = $this->adapter->execute(
-            'SELECT id FROM graph_edges WHERE source_id = :source AND target_id = :target AND type = :type LIMIT 1',
+        $existing = $this->adapter->execute(
+            'SELECT id, metadata FROM graph_edges WHERE source_id = :source AND target_id = :target AND type = :type LIMIT 1',
             $key,
-        )->fetchColumn();
+        )->fetchOne();
 
-        if ($existingId !== false && $existingId !== null) {
-            $this->adapter->execute('UPDATE graph_edges SET metadata = :metadata WHERE id = :id', ['metadata' => $metadata, 'id' => $existingId]);
+        if (is_array($existing) && isset($existing['id'])) {
+            $held = json_decode((string) ($existing['metadata'] ?? '{}'), true);
+            $merged = self::mergeMetadata(is_array($held) ? $held : [], $edge->getMetadata());
+            $this->adapter->execute('UPDATE graph_edges SET metadata = :metadata WHERE id = :id', ['metadata' => json_encode($merged) ?: '{}', 'id' => $existing['id']]);
             return false;
         }
 
@@ -120,6 +122,52 @@ final class GraphEdgeRepository
         );
 
         return true;
+    }
+
+    /** How strongly a reference proves a use; a bare Foo::class proves least. */
+    private const VIA_STRENGTH = ['class_name' => 0, 'config' => 1];
+
+    /**
+     * Two edges of one type between the same two nodes are one row; their
+     * metadata used to be overwritten by whichever came last. So the verdict
+     * depended on statement order — `Util::make(); return Util::class;` read
+     * as "named only as a class name" — and of two #[BelongsTo] relations to
+     * one target only the last survived (measured 2026-10-02: 4 relations of
+     * TenantRelationOrder stored as 1). Now order-independent: the variant
+     * with the strongest `via` is the edge's metadata, the others are kept in
+     * `also`, sorted.
+     *
+     * @param array<string, mixed> $held
+     * @param array<string, mixed> $incoming
+     * @return array<string, mixed>
+     */
+    public static function mergeMetadata(array $held, array $incoming): array
+    {
+        $variants = [];
+        foreach ([$held, ...(is_array($held['also'] ?? null) ? $held['also'] : []), $incoming] as $variant) {
+            if (!is_array($variant)) {
+                continue;
+            }
+            unset($variant['also']);
+            ksort($variant);
+            $variants[(string) json_encode($variant)] = $variant;
+        }
+        // An empty variant says nothing a non-empty one does not: kept, it
+        // sorted first and pushed every handles edge's `execution` into
+        // `also` (round 2).
+        if (count($variants) > 1) {
+            unset($variants['[]']);
+        }
+        $strength = static fn (array $v): int => is_string($v['via'] ?? null) ? (self::VIA_STRENGTH[$v['via']] ?? 2) : 2;
+        uksort($variants, static fn (string $a, string $b): int => [-$strength($variants[$a]), $a] <=> [-$strength($variants[$b]), $b]);
+        $variants = array_values($variants);
+
+        $primary = $variants[0] ?? [];
+        if (count($variants) > 1) {
+            $primary['also'] = array_slice($variants, 1);
+        }
+
+        return $primary;
     }
 
     /**
@@ -346,6 +394,84 @@ final class GraphEdgeRepository
         );
 
         return (int) ($result->fetchOne()['cnt'] ?? 0);
+    }
+
+    /**
+     * Edges of these types between two declared modules, optionally from
+     * module $from and/or into module $to.
+     *
+     * @param list<string> $types
+     * @return list<Edge>
+     */
+    public function crossModule(array $types, ?string $from = null, ?string $to = null): array
+    {
+        [$in, $params] = self::named('k', $types);
+        $sql = 'SELECT e.source_id, e.target_id, e.type, e.metadata FROM graph_edges e'
+            . ' JOIN graph_nodes s ON s.id = e.source_id JOIN graph_nodes t ON t.id = e.target_id'
+            . " WHERE e.type IN (" . $in . ") AND s.module != '' AND t.module != '' AND s.module != t.module";
+        if ($from !== null) {
+            $sql .= ' AND s.module = :from';
+            $params['from'] = $from;
+        }
+        if ($to !== null) {
+            $sql .= ' AND t.module = :to';
+            $params['to'] = $to;
+        }
+        $sql .= ' ORDER BY e.id';
+
+        return array_values(array_map(
+            static fn (array $row): Edge => new Edge(
+                sourceId: (string) $row['source_id'],
+                targetId: (string) $row['target_id'],
+                type:     EdgeType::from((string) $row['type']),
+                metadata: json_decode((string) $row['metadata'], true) ?: [],
+            ),
+            $this->adapter->execute($sql, $params)->fetchAll(),
+        ));
+    }
+
+    /**
+     * Files whose declared nodes read a constant of one of these classes
+     * (a `references` edge with via "constant", as the edge or in `also`).
+     * In SQL: collecting the edges first cost a full build 26 MB.
+     *
+     * @param list<string> $targetIds
+     * @return list<string>
+     */
+    public function sourceFilesReadingConstantsOf(array $targetIds): array
+    {
+        $files = [];
+        foreach (array_chunk(array_values(array_unique($targetIds)), 500) as $chunk) {
+            [$in, $params] = self::named('t', $chunk);
+            $rows = $this->adapter->execute(
+                "SELECT DISTINCT n.file AS file FROM graph_edges e JOIN graph_nodes n ON n.id = e.source_id"
+                . " WHERE e.type = 'references' AND e.target_id IN (" . $in . ") AND e.metadata LIKE '%\"constant\"%'"
+                . " AND n.file != '' AND n.is_placeholder = 0",
+                $params,
+            )->fetchAll();
+            foreach ($rows as $row) {
+                $files[self::text($row['file'] ?? null)] = true;
+            }
+        }
+        unset($files['']);
+
+        return array_keys($files);
+    }
+
+    /**
+     * Files of declared nodes with an edge into $nodeId, first few by path.
+     *
+     * @return list<string>
+     */
+    public function sourceFilesPointingAt(string $nodeId, int $limit): array
+    {
+        $rows = $this->adapter->execute(
+            'SELECT DISTINCT n.file AS file FROM graph_edges e JOIN graph_nodes n ON n.id = e.source_id'
+            . " WHERE e.target_id = :id AND n.file != '' AND n.is_placeholder = 0 ORDER BY n.file LIMIT " . max(1, $limit),
+            ['id' => $nodeId],
+        )->fetchAll();
+
+        return array_values(array_filter(array_map(static fn (array $r): string => self::text($r['file'] ?? null), $rows)));
     }
 
     public function countAll(): int

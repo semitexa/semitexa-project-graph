@@ -6,6 +6,7 @@ namespace Semitexa\ProjectGraph\Application\Console\Command;
 
 use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageReport;
 use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\ProjectGraph\Application\Service\Support\RefusesInMachineFormat;
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
@@ -13,6 +14,9 @@ use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
 use Semitexa\ProjectGraph\Application\Service\Query\GraphQueryService;
 use Semitexa\ProjectGraph\Application\Service\Support\AutoRefreshesProjectGraph;
 use Semitexa\ProjectGraph\Application\Service\Support\UsesProjectGraphConnection;
+use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
+use Semitexa\ProjectGraph\Application\Service\Query\NodeResolver;
+use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
@@ -24,6 +28,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 final class ReviewGraphQueryCommand extends BaseCommand
 {
+    use RefusesInMachineFormat;
+
     use AutoRefreshesProjectGraph;
     use UsesProjectGraphConnection;
 
@@ -45,7 +51,8 @@ final class ReviewGraphQueryCommand extends BaseCommand
         $this->addOption('cross-module', null, InputOption::VALUE_NONE, 'Show cross-module dependencies');
         $this->addOption('from', null, InputOption::VALUE_REQUIRED, 'Cross-module: from module');
         $this->addOption('to', null, InputOption::VALUE_REQUIRED, 'Cross-module: to module');
-        $this->addOption('search', null, InputOption::VALUE_REQUIRED, 'Full-text search');
+        $this->addOption('search', null, InputOption::VALUE_REQUIRED, 'Names and FQCNs containing the text, literally (exact-prefix names first)');
+        $this->addOption('limit', null, InputOption::VALUE_REQUIRED, 'With --search: how many matches to show', '20');
         $this->addOption('compact', null, InputOption::VALUE_NONE, 'Deduplicated per-class summary (LLM-friendly): one row per counterpart class with edge kinds + count');
         $this->addOption('json', null, InputOption::VALUE_NONE, 'Output as JSON');
         $this->addOption('ndjson', null, InputOption::VALUE_NONE, 'Output as NDJSON');
@@ -76,58 +83,107 @@ final class ReviewGraphQueryCommand extends BaseCommand
         $ndjson = (bool) $input->getOption('ndjson');
 
         if ($json && $ndjson) {
-            $io->error('Use either --json or --ndjson, not both.');
-            return self::FAILURE;
+            return $this->refuse($output, $io, 'Use either --json or --ndjson, not both.', $json || $ndjson);
         }
 
-        if (is_string($usages) && $usages !== '') {
-            $nodeId = $this->resolveNodeId($storage, $usages);
-            if ($nodeId === null) {
-                $io->error('Node not found: ' . $usages);
-                return self::FAILURE;
+        // 0, -1, abc and 1.9 used to run silently as 1.
+        $rawDepth = (string) $input->getOption('depth');
+        if (!ctype_digit($rawDepth) || (int) $rawDepth < 1) {
+            return $this->refuse($output, $io, '--depth must be a whole number, at least 1.', $json || $ndjson);
+        }
+        $depth = (int) $rawDepth;
+
+        // An unknown module or type used to answer "nothing found" with exit 0.
+        $knownModules = null;
+        foreach (['module' => $module, 'from' => $input->getOption('from'), 'to' => $input->getOption('to')] as $option => $value) {
+            if ($value === null || $value === '') {
+                continue;
             }
-            $edges = $query->getUsages($nodeId, max(1, (int) $input->getOption('depth')));
+            $knownModules ??= $storage->nodes->distinctModules();
+            if (!is_string($value) || !in_array($value, $knownModules, true)) {
+                sort($knownModules);
+                return $this->refuse($output, $io, sprintf('--%s: no module "%s" in the graph. Known: %s.', $option, is_string($value) ? $value : '', implode(', ', $knownModules)), $json || $ndjson);
+            }
+        }
+        $module = is_string($module) && $module !== '' ? $module : null;
+        if (is_string($type) && $type !== '' && NodeType::tryFrom($type) === null) {
+            return $this->refuse($output, $io, sprintf('Unknown --type "%s". Known: %s.', $type, implode(', ', array_map(static fn (NodeType $t): string => $t->value, NodeType::cases()))), $json || $ndjson);
+        }
+        $resolver = new NodeResolver($storage, $this->getProjectRoot());
+
+        if ((is_string($usages) && $usages !== '') || (is_string($deps) && $deps !== '')) {
+            $usagesMode = is_string($usages) && $usages !== '';
+            $subject = (string) ($usagesMode ? $usages : $deps);
+            $node = $resolver->resolve($subject);
+            if ($node === null) {
+                return $this->refuse($output, $io, $resolver->notFound($subject), $json || $ndjson);
+            }
+            $nodeId = $node->getId();
+            $edges = $usagesMode ? $query->getUsages($nodeId, $depth) : $query->getDependencies($nodeId, $depth);
+            // The class at the far end of each edge: the user for usages, the
+            // dependency for dependencies — at any depth, not "the end that is
+            // not the anchor", which only holds at depth 1.
+            $far = static fn (Edge $e): string => $usagesMode ? $e->getSourceId() : $e->getTargetId();
+            if ($module !== null || (is_string($type) && $type !== '')) {
+                // --module (and --type) were ignored here: both narrow the far end.
+                $inModule = [];
+                foreach ($edges as $e) {
+                    $inModule[$far($e)] = true;
+                }
+                $nodesById = $storage->nodes->findByIds(array_keys($inModule));
+                $wantType = is_string($type) && $type !== '' ? $type : null;
+                $edges = array_values(array_filter($edges, static function (Edge $e) use ($nodesById, $far, $module, $wantType): bool {
+                    $node = $nodesById[$far($e)] ?? null;
+
+                    return $node !== null
+                        && ($module === null || $node->getModule() === $module)
+                        && ($wantType === null || $node->getType()->value === $wantType);
+                }));
+            }
             $coverage = (new CoverageReport($storage))->forNodes([$nodeId]);
             return $compact
-                ? $this->renderCompact($io, $edges, $query, $nodeId, $json, $coverage)
-                : $this->renderEdges($io, $edges, $query, $json, $ndjson, $coverage);
-        } elseif (is_string($deps) && $deps !== '') {
-            $nodeId = $this->resolveNodeId($storage, $deps);
-            if ($nodeId === null) {
-                $io->error('Node not found: ' . $deps);
-                return self::FAILURE;
-            }
-            $edges = $query->getDependencies($nodeId, max(1, (int) $input->getOption('depth')));
-            $coverage = (new CoverageReport($storage))->forNodes([$nodeId]);
-            return $compact
-                ? $this->renderCompact($io, $edges, $query, $nodeId, $json, $coverage)
+                ? $this->renderCompact($io, $edges, $storage, $far, $nodeId, $json, $ndjson, $coverage)
                 : $this->renderEdges($io, $edges, $query, $json, $ndjson, $coverage);
         } elseif ($crossModule) {
             $from = $input->getOption('from');
             $to = $input->getOption('to');
             if ($from !== null && !is_string($from)) {
-                $io->error('Option --from must be a string.');
-                return self::FAILURE;
+                return $this->refuse($output, $io, 'Option --from must be a string.', $json || $ndjson);
             }
             if ($to !== null && !is_string($to)) {
-                $io->error('Option --to must be a string.');
-                return self::FAILURE;
+                return $this->refuse($output, $io, 'Option --to must be a string.', $json || $ndjson);
             }
             $edges = $query->getCrossModuleEdges($from, $to);
             return $this->renderEdges($io, $edges, $query, $json, $ndjson);
         } elseif (is_string($search) && $search !== '') {
-            $nodes = $query->search($search);
-            return $this->renderNodes($io, $nodes, $json, $ndjson);
+            $rawLimit = (string) $input->getOption('limit');
+            if (!ctype_digit($rawLimit) || (int) $rawLimit < 1) {
+                return $this->refuse($output, $io, '--limit must be a whole number, at least 1.', $json || $ndjson);
+            }
+            $limit = (int) $rawLimit;
+            $nodes = $query->search($search, $limit + 1, $module, is_string($type) && $type !== '' ? $type : null);
+            $truncated = count($nodes) > $limit;
+            $nodes = array_slice($nodes, 0, $limit);
+            $result = $this->renderNodes($io, $nodes, $json, $ndjson);
+            // It stopped at 20 without a word.
+            if ($truncated) {
+                if ($ndjson) {
+                    $io->writeln((string) json_encode(['kind' => 'truncated', 'shown' => $limit], JSON_UNESCAPED_SLASHES), OutputInterface::OUTPUT_RAW);
+                } elseif ($json) {
+                    $io->getErrorStyle()->warning(sprintf('Showing the first %d matches; raise --limit for more.', $limit));
+                } else {
+                    $io->text(sprintf('Showing the first %d matches; raise --limit for more.', $limit));
+                }
+            }
+            return $result;
         } elseif (is_string($type) && $type !== '') {
             if ($module !== null && !is_string($module)) {
-                $io->error('Option --module must be a string.');
-                return self::FAILURE;
+                return $this->refuse($output, $io, 'Option --module must be a string.', $json || $ndjson);
             }
             $nodes = $query->findNodes(type: $type, module: $module);
             return $this->renderNodes($io, $nodes, $json, $ndjson);
         } else {
-            $io->error('No query specified. Use --usages, --dependencies, --cross-module, --search, or --type.');
-            return self::FAILURE;
+            return $this->refuse($output, $io, 'No query specified. Use --usages, --dependencies, --cross-module, --search, or --type.', $json || $ndjson);
         }
     }
 
@@ -140,43 +196,69 @@ final class ReviewGraphQueryCommand extends BaseCommand
      *
      * @param list<\Semitexa\ProjectGraph\Domain\Model\Edge> $edges
      */
-    /** @param ?array<string, mixed> $coverage */
-    private function renderCompact(SymfonyStyle $io, array $edges, GraphQueryService $query, string $anchorId, bool $json, ?array $coverage = null): int
+    /**
+     * @param list<Edge> $edges
+     * @param \Closure(Edge): string $far the counterpart of each edge
+     * @param ?array<string, mixed> $coverage
+     */
+    private function renderCompact(SymfonyStyle $io, array $edges, GraphStorage $storage, \Closure $far, string $anchorId, bool $json, bool $ndjson, ?array $coverage = null): int
     {
+        $ids = [];
+        foreach ($edges as $e) {
+            $ids[$far($e)] = true;
+        }
+        $nodes = $storage->nodes->findByIds(array_keys($ids));
+
         $groups = [];
         foreach ($edges as $e) {
-            $otherId = $e->getSourceId() === $anchorId ? $e->getTargetId() : $e->getSourceId();
-            $node = $query->getNode($otherId);
-            $label = $node ? $node->getFqcn() : $otherId;
+            $otherId = $far($e);
+            $node = $nodes[$otherId] ?? null;
+            // Synthetic nodes have no FQCN: three of them used to share the label "".
+            $label = $node === null ? $otherId : ($node->getFqcn() !== '' ? $node->getFqcn() : $otherId);
             $groups[$label]['kinds'][$e->getType()->value] = true;
             $groups[$label]['count'] = ($groups[$label]['count'] ?? 0) + 1;
         }
         ksort($groups);
 
+        $rows = [];
+        foreach ($groups as $label => $g) {
+            $kinds = array_keys($g['kinds']);
+            sort($kinds);
+            $rows[] = ['class' => (string) $label, 'kinds' => $kinds, 'edges' => $g['count']];
+        }
+
         if ($json) {
-            $out = [];
-            foreach ($groups as $fqcn => $g) {
-                $out[] = ['class' => $fqcn, 'kinds' => array_keys($g['kinds']), 'edges' => $g['count']];
-            }
-            $payload = ['anchor' => $anchorId, 'classes' => count($out), 'related' => $out];
+            $payload = ['anchor' => $anchorId, 'classes' => count($rows), 'related' => $rows];
             if ($coverage !== null) {
                 $payload['coverage'] = $coverage;
             }
-            $io->writeln((string) json_encode($payload, JSON_UNESCAPED_SLASHES));
+            $io->writeln((string) json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE), OutputInterface::OUTPUT_RAW);
 
             return self::SUCCESS;
         }
 
-        if ($groups === []) {
+        if ($ndjson) {
+            // --compact used to ignore --ndjson and print text.
+            foreach ($rows as $row) {
+                $io->writeln((string) json_encode(['kind' => 'related'] + $row, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE), OutputInterface::OUTPUT_RAW);
+            }
+            if ($coverage !== null) {
+                $io->writeln((string) json_encode(['kind' => 'coverage'] + $coverage, JSON_UNESCAPED_SLASHES), OutputInterface::OUTPUT_RAW);
+            }
+
+            return self::SUCCESS;
+        }
+
+        if ($rows === []) {
             $this->renderNoEdges($io, $coverage);
 
             return self::SUCCESS;
         }
 
-        foreach ($groups as $fqcn => $g) {
-            $io->text($fqcn . '  [' . implode(', ', array_keys($g['kinds'])) . '] ×' . $g['count']);
+        foreach ($rows as $row) {
+            $io->writeln('  ' . $row['class'] . '  [' . implode(', ', $row['kinds']) . '] ×' . $row['edges'], OutputInterface::OUTPUT_RAW);
         }
-        $io->text(count($groups) . ' related class(es).');
+        $io->text(count($rows) . ' related class(es).');
         $this->renderCoverageFooter($io, $coverage);
 
         return self::SUCCESS;
@@ -201,11 +283,10 @@ final class ReviewGraphQueryCommand extends BaseCommand
             ], $edges);
             $payload = json_encode($data, JSON_UNESCAPED_SLASHES);
             if ($payload === false) {
-                $io->error('Failed to encode JSON payload.');
-                return self::FAILURE;
+                return $this->refuse($io, $io, 'Failed to encode JSON payload.', $json || $ndjson);
             }
 
-            $io->writeln($payload);
+            $io->writeln($payload, OutputInterface::OUTPUT_RAW);
             return self::SUCCESS;
         }
 
@@ -219,14 +300,13 @@ final class ReviewGraphQueryCommand extends BaseCommand
                     'metadata' => $edge->getMetadata(),
                 ], JSON_UNESCAPED_SLASHES);
                 if ($line === false) {
-                    $io->error('Failed to encode NDJSON edge.');
-                    return self::FAILURE;
+                    return $this->refuse($io, $io, 'Failed to encode NDJSON edge.', $json || $ndjson);
                 }
 
-                $io->writeln($line);
+                $io->writeln($line, OutputInterface::OUTPUT_RAW);
             }
             if ($coverage !== null) {
-                $io->writeln((string) json_encode(['kind' => 'coverage'] + $coverage, JSON_UNESCAPED_SLASHES));
+                $io->writeln((string) json_encode(['kind' => 'coverage'] + $coverage, JSON_UNESCAPED_SLASHES), OutputInterface::OUTPUT_RAW);
             }
 
             return self::SUCCESS;
@@ -282,11 +362,10 @@ final class ReviewGraphQueryCommand extends BaseCommand
             ], $nodes);
             $payload = json_encode($data, JSON_UNESCAPED_SLASHES);
             if ($payload === false) {
-                $io->error('Failed to encode JSON payload.');
-                return self::FAILURE;
+                return $this->refuse($io, $io, 'Failed to encode JSON payload.', $json || $ndjson);
             }
 
-            $io->writeln($payload);
+            $io->writeln($payload, OutputInterface::OUTPUT_RAW);
             return self::SUCCESS;
         }
 
@@ -301,11 +380,10 @@ final class ReviewGraphQueryCommand extends BaseCommand
                     'module' => $node->getModule(),
                 ], JSON_UNESCAPED_SLASHES);
                 if ($line === false) {
-                    $io->error('Failed to encode NDJSON node.');
-                    return self::FAILURE;
+                    return $this->refuse($io, $io, 'Failed to encode NDJSON node.', $json || $ndjson);
                 }
 
-                $io->writeln($line);
+                $io->writeln($line, OutputInterface::OUTPUT_RAW);
             }
 
             return self::SUCCESS;
@@ -317,7 +395,7 @@ final class ReviewGraphQueryCommand extends BaseCommand
         }
 
         foreach ($nodes as $node) {
-            $io->text('[' . $node->getType()->value . '] ' . $node->getFqcn() . ' (' . $node->getModule() . ')');
+            $io->writeln(' [' . $node->getType()->value . '] ' . ($node->getFqcn() !== '' ? $node->getFqcn() : $node->getId()) . ' (' . $node->getModule() . ')', OutputInterface::OUTPUT_RAW);
         }
 
         return self::SUCCESS;
@@ -326,20 +404,5 @@ final class ReviewGraphQueryCommand extends BaseCommand
     private function createStorage(): GraphStorage
     {
         return $this->createProjectGraphStorage($this->connections);
-    }
-
-    private function resolveNodeId(GraphStorage $storage, string $target): ?string
-    {
-        $node = $storage->nodes->findById($target);
-        if ($node !== null) {
-            return $node->getId();
-        }
-
-        $node = $storage->nodes->findByFqcn($target);
-        if ($node !== null) {
-            return $node->getId();
-        }
-
-        return null;
     }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Service\Intelligence;
 
+use Semitexa\ProjectGraph\Application\Service\Query\NodeResolver;
 use Semitexa\ProjectGraph\Application\Service\Query\QueryInterface;
 
 final class NaturalLanguageQueryResolver
@@ -11,19 +12,31 @@ final class NaturalLanguageQueryResolver
     public function __construct(
         private readonly QueryInterface $query,
         private readonly IntelligenceLayer $intelligence,
+        private readonly ?NodeResolver $nodes = null,
     ) {}
+
+    /** The FQCN a person named ("UserSignedUp"), or the text as typed. */
+    private function fqcn(string $name): string
+    {
+        return $this->nodes?->resolve(trim($name, " \t?.!"))?->getFqcn() ?: trim($name);
+    }
+
+    private function id(string $name): string
+    {
+        return $this->nodes?->resolve(trim($name, " \t?.!"))?->getId() ?? trim($name);
+    }
 
     public function resolve(string $userQuery): mixed
     {
         $patterns = [
             '/how\s+does\s+(.+?)\s+work/i' => fn($m) => $this->intelligence->getExecutionFlow($m[1]),
-            '/what\s+happens\s+when\s+(.+?)\s+is\s+emitted/i' => fn($m) => $this->intelligence->getEventLifecycle($m[1]),
-            '/what\s+happens\s+when\s+(.+)/i' => fn($m) => $this->intelligence->getEventLifecycle($m[1]),
-            '/what\s+breaks\s+if\s+i\s+change\s+(.+)/i' => fn($m) => $this->query->getImpact([$m[1]]),
+            '/what\s+happens\s+when\s+(.+?)\s+is\s+emitted/i' => fn($m) => $this->intelligence->getEventLifecycle($this->fqcn($m[1])),
+            '/what\s+happens\s+when\s+(.+)/i' => fn($m) => $this->intelligence->getEventLifecycle($this->fqcn($m[1])),
+            '/what\s+breaks\s+if\s+i\s+change\s+(.+)/i' => fn($m) => $this->query->getImpact([$this->id($m[1])]),
             '/where\s+is\s+(.+?)\s+processed/i' => fn($m) => $this->query->search($m[1] . 'Handler'),
-            '/what\s+domain\s+(?:is|does)\s+(.+)/i' => fn($m) => $this->intelligence->getDomainContext($m[1]),
-            '/trace\s+(.+?)\s+lifecycle/i' => fn($m) => $this->intelligence->getEventLifecycle($m[1]),
-            '/show\s+(?:me\s+)?docs?\s+for\s+(.+)/i' => fn($m) => $this->intelligence->getIntent($m[1]),
+            '/what\s+domain\s+(?:is|does)\s+(.+)/i' => fn($m) => $this->intelligence->getDomainContext($this->id($m[1])),
+            '/trace\s+(.+?)\s+lifecycle/i' => fn($m) => $this->intelligence->getEventLifecycle($this->fqcn($m[1])),
+            '/show\s+(?:me\s+)?docs?\s+for\s+(.+)/i' => fn($m) => $this->intelligence->getIntent($this->id($m[1])),
             '/what\s+are\s+(?:the\s+)?(?:hotspots|critical\s+paths)/i' => fn() => $this->intelligence->getHotspots(),
             '/what\s+flows?\s+(?:exist|are)\s+in\s+(.+)/i' => fn($m) => $this->intelligence->getFlowsForModule($m[1]),
             '/what\s+nats\s+subjects?\s+does\s+(.+?)\s+publish/i' => fn($m) => $this->intelligence->getPublishedSubjects($m[1]),
@@ -32,8 +45,10 @@ final class NaturalLanguageQueryResolver
         ];
 
         foreach ($patterns as $pattern => $resolver) {
-            if (preg_match($pattern, $userQuery, $matches)) {
-                array_shift($matches);
+            // The whole match stays at [0]: every closure reads its capture
+            // at [1], and shifting the match off made each one read past the
+            // end — "Undefined array key 1", then a TypeError (round 2).
+            if (preg_match($pattern, $userQuery, $matches) === 1) {
                 return $resolver($matches);
             }
         }

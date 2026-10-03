@@ -38,6 +38,10 @@ final class ReviewGraphRenderer
         }
         $lines[] = '';
 
+        if ($view->truncated) {
+            $lines[] = sprintf('Showing the first %d nodes the walk reached — narrow it with --depth, --type or --module.', $view->totalNodes);
+            $lines[] = '';
+        }
         $lines[] = 'Nodes: ' . number_format($view->totalNodes);
         $typeLines = [];
         foreach ($view->nodeTypeCounts as $type => $count) {
@@ -93,7 +97,8 @@ final class ReviewGraphRenderer
             'total_nodes' => $view->totalNodes,
             'total_edges' => $view->totalEdges,
             'modules'     => $view->moduleCounts,
-        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+            'truncated'   => $view->truncated,
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
     }
 
     private function renderDot(GraphView $view): string
@@ -161,12 +166,13 @@ final class ReviewGraphRenderer
         };
     }
 
+    /**
+     * Inside a quoted DOT id only the backslash and the quote are special, and
+     * the backslash must go first: replacing the quote first turned `"` into
+     * `\"` and then `\\"`, which Graphviz rejects. FQCNs are full of backslashes.
+     */
     private function escapeDot(string $s): string
     {
-        return str_replace(
-            ['"', '\\', '<', '>', '&', '{', '}', '|', "\n"],
-            ['\\"', '\\\\', '\\<', '\\>', '\\&', '\\{', '\\}', '\\|', '\\n'],
-            $s,
-        );
+        return str_replace(['\\', '"', "\r", "\n"], ['\\\\', '\\"', '', '\\n'], $s);
     }
 }

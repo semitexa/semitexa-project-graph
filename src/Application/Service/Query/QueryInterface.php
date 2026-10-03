@@ -55,4 +55,19 @@ interface QueryInterface
     public function countSatisfiedContracts(?string $module = null): int;
 
     public function countCrossModuleEdges(): int;
+
+    /**
+     * How many edges point at each of these nodes, in one round trip.
+     *
+     * @param list<string> $nodeIds
+     * @return array<string, int>
+     */
+    public function inboundCounts(array $nodeIds): array;
+
+    /**
+     * The nodes that have an edge of $type leaving them, in one round trip.
+     *
+     * @return array<string, true>
+     */
+    public function sourcesOf(string $type): array;
 }

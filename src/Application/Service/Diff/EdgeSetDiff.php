@@ -26,10 +26,17 @@ final readonly class EdgeSetDiff
         public array $removed,
     ) {}
 
-    public static function between(GraphStorage $base, GraphStorage $head): self
+    /**
+     * $baseRoot / $headRoot: where each side was built. A `file:` node id
+     * carries the absolute path, so the same neon file read from the scratch
+     * export and from the working tree compared as two files — every class a
+     * config file names showed as removed and re-added, under a random
+     * directory name that changed on every run.
+     */
+    public static function between(GraphStorage $base, GraphStorage $head, string $baseRoot = '', string $headRoot = ''): self
     {
-        $baseEdges = self::edges($base);
-        $headEdges = self::edges($head);
+        $baseEdges = self::edges($base, $baseRoot);
+        $headEdges = self::edges($head, $headRoot);
 
         return new self(
             array_values(array_diff_key($headEdges, $baseEdges)),
@@ -43,10 +50,16 @@ final readonly class EdgeSetDiff
     }
 
     /** @return array<string, Edge> keyed by GraphDiff::edgeKey, sorted */
-    private static function edges(GraphStorage $storage): array
+    private static function edges(GraphStorage $storage, string $root): array
     {
+        $prefix = $root === '' ? null : 'file:' . rtrim($root, '/') . '/';
+        $local = static fn (string $id): string => $prefix !== null && str_starts_with($id, $prefix) ? 'file:' . substr($id, strlen($prefix)) : $id;
+
         $edges = [];
         foreach ($storage->edges->all() as $edge) {
+            if ($prefix !== null && (str_starts_with($edge->getSourceId(), $prefix) || str_starts_with($edge->getTargetId(), $prefix))) {
+                $edge = new Edge($local($edge->getSourceId()), $local($edge->getTargetId()), $edge->getType(), $edge->getMetadata());
+            }
             $edges[GraphDiff::edgeKey($edge)] = $edge;
         }
         ksort($edges);

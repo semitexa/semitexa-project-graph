@@ -6,8 +6,11 @@ namespace Semitexa\ProjectGraph\Application\Console\Command;
 
 use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageReport;
 use Semitexa\ProjectGraph\Application\Service\Diff\EdgeDiffMarkdown;
+use Semitexa\ProjectGraph\Application\Service\Diff\EdgeSetDiff;
+use Semitexa\ProjectGraph\Application\Service\Diff\MovedEdges;
 use Semitexa\ProjectGraph\Application\Service\Diff\OrphanedRemovals;
 use Semitexa\ProjectGraph\Application\Service\Diff\RefGraphDiff;
+use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Application\Service\Query\GraphQueryService;
@@ -25,6 +28,19 @@ use Symfony\Component\Console\Output\OutputInterface;
 final class GraphDiffCommand extends BaseCommand
 {
     private const META_KEY = 'graph_diff_last_scan';
+
+    private const FORMATS = ['text', 'json', 'markdown'];
+
+    private const JSON = JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR;
+
+    /** Wiring a reviewer reads as "still there" when none of it changed. */
+    private const UNCHANGED_WIRING = [
+        'serves_route' => 'routes',
+        'handles' => 'handlers',
+        'listens_to' => 'listeners',
+        'emits' => 'event emissions',
+        'satisfies_contract' => 'contract bindings',
+    ];
 
     use UsesProjectGraphConnection;
 
@@ -63,20 +79,36 @@ final class GraphDiffCommand extends BaseCommand
     {
         $format = $input->getOption('format') ?? 'text';
         $module = $input->getOption('module');
+        if (!in_array($format, self::FORMATS, true)) {
+            return $this->fail($output, 'text', sprintf('--format accepts %s; got "%s".', implode(', ', self::FORMATS), (string) $format));
+        }
 
         $base = $input->getOption('base');
-        if (is_string($base) && $base !== '') {
-            $path = $input->getOption('path');
-            $failOn = $input->getOption('fail-on');
+        $path = $input->getOption('path');
+        $failOn = $input->getOption('fail-on');
+        // A gate that silently fell back to the counts mode exited 0 on a real
+        // orphan whenever its --base came from an empty CI variable.
+        if ($path === '') {
+            return $this->fail($output, (string) $format, '--path is empty: pass a directory, or leave the option out to compare the project root.');
+        }
+        if (is_string($base) && is_string($module) && $module !== '') {
+            return $this->fail($output, (string) $format, '--module narrows the counts mode only; with --base, narrow by directory: --path=<dir>.');
+        }
+        if ($base === '' || (($failOn !== null || $path !== null) && $base === null)) {
+            return $this->fail($output, (string) $format, '--fail-on and --path compare against a git ref: pass a non-empty --base=<ref>.');
+        }
+        if (is_string($base)) {
             if ($failOn !== null && $failOn !== 'orphaned-removals') {
-                $output->writeln('<error>--fail-on accepts only "orphaned-removals".</error>');
-                return Command::FAILURE;
+                return $this->fail($output, (string) $format, '--fail-on accepts only "orphaned-removals".');
             }
 
             return $this->diffAgainstRef($output, $base, is_string($path) && $path !== '' ? $path : $this->getProjectRoot(), (string) $format, $failOn !== null);
         }
 
-        $previousStats = $this->loadPreviousStats();
+        // One baseline per scope: a --module run compared against, and then
+        // overwrote, the whole-graph baseline (43 modules "removed").
+        $metaKey = self::META_KEY . (is_string($module) && $module !== '' ? ':' . $module : '');
+        $previousStats = $this->loadPreviousStats($metaKey);
         $currentStats = $this->getCurrentStats($module);
 
         $diff = [
@@ -99,7 +131,9 @@ final class GraphDiffCommand extends BaseCommand
 
         if ($previousStats !== []) {
             $prevByType = $previousStats['by_type'] ?? [];
-            foreach ($currentStats['by_type'] as $type => $count) {
+            // Types that fell to zero are a change too.
+            foreach (array_keys($currentStats['by_type'] + $prevByType) as $type) {
+                $count = $currentStats['by_type'][$type] ?? 0;
                 $prevCount = $prevByType[$type] ?? 0;
                 if ($count !== $prevCount) {
                     $diff['by_type'][$type] = [
@@ -112,8 +146,8 @@ final class GraphDiffCommand extends BaseCommand
 
             $prevModules = $previousStats['modules'] ?? [];
             $currentModules = $currentStats['modules'] ?? [];
-            $diff['new_modules'] = array_diff($currentModules, $prevModules);
-            $diff['removed_modules'] = array_diff($prevModules, $currentModules);
+            $diff['new_modules'] = array_values(array_diff($currentModules, $prevModules));
+            $diff['removed_modules'] = array_values(array_diff($prevModules, $currentModules));
         } else {
             foreach ($currentStats['by_type'] as $type => $count) {
                 $diff['by_type'][$type] = ['previous' => 0, 'current' => $count, 'delta' => $count];
@@ -121,10 +155,12 @@ final class GraphDiffCommand extends BaseCommand
             $diff['new_modules'] = $currentStats['modules'] ?? [];
         }
 
-        $this->saveCurrentStats($currentStats);
+        $this->saveCurrentStats($metaKey, $currentStats);
 
         if ($format === 'json') {
-            $output->writeln(json_encode($diff, JSON_UNESCAPED_SLASHES));
+            ksort($diff['by_type']);
+            // Always an object, so a consumer reads one shape.
+            $output->writeln(json_encode(['by_type' => (object) $diff['by_type']] + $diff, self::JSON));
             return Command::SUCCESS;
         }
 
@@ -184,18 +220,33 @@ final class GraphDiffCommand extends BaseCommand
         try {
             $result = (new RefGraphDiff())->diff($path, $baseRef, $this->getProjectRoot() . '/var/tmp');
         } catch (\InvalidArgumentException | \RuntimeException $e) {
-            // A bad ref, a failed `git worktree add`, an unwritable var/: named, not a stack trace.
-            $output->writeln('<error>' . $e->getMessage() . '</error>');
-            return Command::FAILURE;
+            // A bad ref, a failed export, an unwritable var/: named, not a stack trace.
+            return $this->fail($output, $format, $e->getMessage());
         }
-        $diff = $result['diff'];
+        /** @var MovedEdges $moves */
+        $moves = $result['moves'];
+        // Moves are paired before the gate: only what is really gone can orphan.
+        $diff = $moves->remaining;
         $orphans = OrphanedRemovals::find($diff, $result['base'], $result['head']);
-        $unreadable = OrphanedRemovals::unreadableFiles($result['head']);
-        // A gate that could not read part of the code must not pass it.
-        $exit = $gate && ($orphans !== [] || $unreadable !== []) ? Command::FAILURE : Command::SUCCESS;
+        $headUnreadable = OrphanedRemovals::unreadableFiles($result['head']);
+        $unreadable = $this->relative($headUnreadable, $result['repository']);
+        // A file that was already unparseable at the base did not get worse in
+        // this change; gating on it kept the gate red forever. Compared by
+        // content, so `git mv` of a broken file is not "newly" broken either.
+        $newly = array_filter($headUnreadable, static function (string $file) use ($result): bool {
+            $hash = @hash_file('xxh3', $file);
+            return $hash === false || !isset($result['base_unreadable_hashes'][$hash]);
+        });
+        $newlyUnreadable = $this->relative(array_values($newly), $result['repository']);
+        $orphans = self::relativeOrphans($orphans, $result['repository']);
+        $exit = $gate && ($orphans !== [] || $newlyUnreadable !== []) ? Command::FAILURE : Command::SUCCESS;
+        $scopeNote = $result['scope_dir'] === ''
+            ? null
+            : sprintf('Scoped to %s: code elsewhere in %s that depends on it was not read, so a removal it still relies on is not caught here.', $result['scope_dir'], basename($result['repository']));
+        $unchanged = $this->unchangedWiring($diff, $result['base'], $result['head'], $moves);
 
         if ($format === 'markdown') {
-            $output->write(EdgeDiffMarkdown::render($diff, $baseRef, $result['scope'], (new CoverageReport($result['head']))->summary(), $orphans, $unreadable));
+            $output->write(EdgeDiffMarkdown::render($diff, $baseRef, $result['scope'], (new CoverageReport($result['head']))->summary(), $orphans, $unreadable, $moves, $unchanged, $scopeNote, $newlyUnreadable));
             return $exit;
         }
 
@@ -206,28 +257,50 @@ final class GraphDiffCommand extends BaseCommand
                 'source' => $e->getSourceId(),
                 'target' => $e->getTargetId(),
             ];
-            $output->writeln((string) json_encode([
-                'base'       => $baseRef,
-                'repository' => $result['repository'],
-                'scope'      => $result['scope'],
-                'added'      => array_map($edge, $diff->added),
-                'removed'    => array_map($edge, $diff->removed),
-                'orphans'    => $orphans,
-                'unreadable' => $unreadable,
-            ], JSON_UNESCAPED_SLASHES));
+            $output->writeln(json_encode([
+                'base'              => $baseRef,
+                'repository'        => $result['repository'],
+                'scope'             => $result['scope'],
+                'scope_note'        => $scopeNote,
+                'added'             => array_map($edge, $diff->added),
+                'removed'           => array_map($edge, $diff->removed),
+                'moved'             => $moves->movedNodes,
+                'moved_edges'       => count($moves->pairs),
+                'far_end_changed'   => array_map(static fn (array $p): array => ['removed' => $edge($p['removed']), 'added' => $edge($p['added'])], $moves->farEndChanged),
+                'replaced'          => array_map(static fn (array $p): array => ['removed' => $edge($p['removed']), 'added' => $edge($p['added'])], $moves->replaced),
+                'unchanged'         => $unchanged,
+                'orphans'           => $orphans,
+                'unreadable'        => $unreadable,
+                'newly_unreadable'  => $newlyUnreadable,
+            ], self::JSON));
 
             return $exit;
         }
 
         $output->writeln(sprintf('<comment>Graph diff: %s (%s) against %s</comment>', $result['scope'], $result['repository'], $baseRef));
+        if ($scopeNote !== null) {
+            $output->writeln($scopeNote);
+        }
         foreach ($orphans as $orphan) {
             $output->writeln(sprintf('<error>ORPHAN %s</error> %s — removed %s; still used by %s', $orphan['kind'], $orphan['subject'], $orphan['removed'], implode(', ', $orphan['still_used_by'])));
         }
         foreach ($unreadable as $file) {
-            $output->writeln('<error>UNREADABLE</error> ' . $file . ' — the graph could not parse it, so nothing about it is checked');
+            $output->writeln(sprintf('<error>UNREADABLE</error> %s — the graph could not parse it, so nothing about it is checked%s', $file, in_array($file, $newlyUnreadable, true) ? '' : ' (already unreadable at the base)'));
+        }
+        foreach ($moves->farEndChanged as $pair) {
+            $output->writeln(sprintf('<comment>MOVED AND REWIRED</comment> %s: - %s -> %s, + %s -> %s', $pair['removed']->getType()->value, $pair['removed']->getSourceId(), $pair['removed']->getTargetId(), $pair['added']->getSourceId(), $pair['added']->getTargetId()));
+        }
+        foreach ($moves->replaced as $pair) {
+            $output->writeln(sprintf('  replaced %s %s: %s -> %s', $pair['removed']->getType()->value, $pair['removed']->getTargetId(), $pair['removed']->getSourceId(), $pair['added']->getSourceId()));
+        }
+        foreach ($moves->movedNodes as $move) {
+            $output->writeln(sprintf('  moved %s -> %s%s', $move['from'], $move['to'], $move['kept'] === [] ? '' : ' (' . implode(', ', $move['kept']) . ' unchanged)'));
         }
         if ($diff->isEmpty()) {
-            $output->writeln('No structural change.');
+            $output->writeln($moves->movedNodes === [] ? 'No structural change.' : 'No structural change besides the moves above.');
+            if ($unchanged !== []) {
+                $output->writeln('Unchanged: ' . implode(', ', $unchanged) . '.');
+            }
             return $exit;
         }
         $output->writeln(sprintf('+%d / -%d edges', count($diff->added), count($diff->removed)));
@@ -236,20 +309,98 @@ final class GraphDiffCommand extends BaseCommand
                 $output->writeln(sprintf('  %s %s %s -> %s', $sign, $e->getType()->value, $e->getSourceId(), $e->getTargetId()));
             }
         }
+        if ($unchanged !== []) {
+            $output->writeln('Unchanged: ' . implode(', ', $unchanged) . '.');
+        }
 
         return $exit;
     }
 
-    /** The counts baseline lives in the graph itself, not in a temp file lost with the container. */
-    private function loadPreviousStats(): array
+    /**
+     * The wiring kinds present on either side that no remaining edge touches:
+     * "routes unchanged" is evidence a reviewer can rely on, not an assumption.
+     *
+     * @return list<string>
+     */
+    private function unchangedWiring(EdgeSetDiff $diff, GraphStorage $base, GraphStorage $head, ?MovedEdges $moves = null): array
     {
-        $content = $this->storage()->getMeta(self::META_KEY);
+        $changed = [];
+        // A replaced provider is a change of that wiring, though it is paired.
+        $replacedEdges = [];
+        foreach ($moves?->replaced ?? [] as $pair) {
+            $replacedEdges[] = $pair['removed'];
+            $replacedEdges[] = $pair['added'];
+        }
+        foreach ([...$diff->added, ...$diff->removed, ...$replacedEdges] as $edge) {
+            $changed[$edge->getType()->value] = true;
+        }
+        $unchanged = [];
+        foreach (self::UNCHANGED_WIRING as $type => $name) {
+            if (isset($changed[$type])) {
+                continue;
+            }
+            $kind = EdgeType::from($type);
+            if ($base->edges->findByType($kind, 1) !== [] || $head->edges->findByType($kind, 1) !== []) {
+                $unchanged[] = $name;
+            }
+        }
+
+        return $unchanged;
+    }
+
+    /**
+     * @param list<string> $files
+     * @return list<string> relative to $root (then to $scopeDir inside it), as a reviewer reads them
+     */
+    private function relative(array $files, string $root, string $scopeDir = ''): array
+    {
+        $prefix = rtrim($root, '/') . '/';
+        $out = array_map(
+            static fn (string $f): string => str_starts_with($f, $prefix) ? ltrim(($scopeDir === '' ? '' : $scopeDir . '/') . substr($f, strlen($prefix)), '/') : $f,
+            $files,
+        );
+        sort($out);
+
+        return array_values(array_unique($out));
+    }
+
+    /**
+     * @param list<array{kind: string, subject: string, removed: string, still_used_by: list<string>}> $orphans
+     * @return list<array{kind: string, subject: string, removed: string, still_used_by: list<string>}>
+     */
+    private static function relativeOrphans(array $orphans, string $repository): array
+    {
+        $prefix = 'file:' . rtrim($repository, '/') . '/';
+        $local = static fn (string $id): string => str_starts_with($id, $prefix) ? 'file:' . substr($id, strlen($prefix)) : $id;
+        foreach ($orphans as &$orphan) {
+            $orphan['subject'] = $local($orphan['subject']);
+            $orphan['still_used_by'] = array_map($local, $orphan['still_used_by']);
+        }
+
+        return $orphans;
+    }
+
+    private function fail(OutputInterface $output, string $format, string $message): int
+    {
+        if ($format === 'json') {
+            $output->writeln(json_encode(['error' => $message], self::JSON));
+        } else {
+            $output->writeln('<error>' . $message . '</error>');
+        }
+
+        return Command::FAILURE;
+    }
+
+    /** The counts baseline lives in the graph itself, not in a temp file lost with the container. */
+    private function loadPreviousStats(string $key): array
+    {
+        $content = $this->storage()->getMeta($key);
         $decoded = $content !== null ? json_decode($content, true) : null;
 
         return is_array($decoded) ? $decoded : [];
     }
 
-    private function saveCurrentStats(array $stats): void
+    private function saveCurrentStats(string $key, array $stats): void
     {
         $data = [
             'timestamp' => date('Y-m-d H:i:s'),
@@ -258,7 +409,7 @@ final class GraphDiffCommand extends BaseCommand
             'by_type' => $stats['by_type'],
             'modules' => $stats['modules'],
         ];
-        $this->storage()->setMeta(self::META_KEY, (string) json_encode($data));
+        $this->storage()->setMeta($key, (string) json_encode($data, JSON_INVALID_UTF8_SUBSTITUTE));
     }
 
     /**

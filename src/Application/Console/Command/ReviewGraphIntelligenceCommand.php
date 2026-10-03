@@ -7,12 +7,14 @@ namespace Semitexa\ProjectGraph\Application\Console\Command;
 use Semitexa\ProjectGraph\Application\Service\Intelligence\IntelligenceLayer;
 use Semitexa\ProjectGraph\Application\Service\Intelligence\NaturalLanguageQueryResolver;
 use Semitexa\ProjectGraph\Application\Service\Query\GraphQueryService;
+use Semitexa\ProjectGraph\Application\Service\Query\NodeResolver;
 use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
 use Semitexa\ProjectGraph\Application\Service\Support\UsesProjectGraphConnection;
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Formatter\OutputFormatter;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -55,7 +57,7 @@ final class ReviewGraphIntelligenceCommand extends BaseCommand
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $intelligence = new IntelligenceLayer($this->query());
-        $resolver = new NaturalLanguageQueryResolver($this->query(), $intelligence);
+        $resolver = new NaturalLanguageQueryResolver($this->query(), $intelligence, $this->resolver());
 
         if ($input->getOption('hotspots')) {
             $this->showHotspots($intelligence, $output);
@@ -68,18 +70,21 @@ final class ReviewGraphIntelligenceCommand extends BaseCommand
         }
 
         if ($input->getOption('flows') !== null) {
+            if (!in_array((string) $input->getOption('flows'), $this->query()->knownModules(), true)) {
+                $output->writeln('<error>' . OutputFormatter::escape(sprintf('No module "%s" in the graph.', (string) $input->getOption('flows'))) . '</error>');
+                return Command::FAILURE;
+            }
             $this->showFlows($intelligence, (string) $input->getOption('flows'), $output);
             return Command::SUCCESS;
         }
 
+        // Not found used to print an error and exit 0.
         if ($input->getOption('event-lifecycle') !== null) {
-            $this->showEventLifecycle($intelligence, (string) $input->getOption('event-lifecycle'), $output);
-            return Command::SUCCESS;
+            return $this->showEventLifecycle($intelligence, (string) $input->getOption('event-lifecycle'), $output) ? Command::SUCCESS : Command::FAILURE;
         }
 
         if ($input->getOption('intent') !== null) {
-            $this->showIntent($intelligence, (string) $input->getOption('intent'), $output);
-            return Command::SUCCESS;
+            return $this->showIntent($intelligence, (string) $input->getOption('intent'), $output) ? Command::SUCCESS : Command::FAILURE;
         }
 
         $userQuery = $input->getArgument('query');
@@ -98,6 +103,11 @@ final class ReviewGraphIntelligenceCommand extends BaseCommand
         $this->renderResult($result, $output);
 
         return Command::SUCCESS;
+    }
+
+    private function resolver(): NodeResolver
+    {
+        return $this->query()->resolver($this->getProjectRoot());
     }
 
     private function showHotspots(IntelligenceLayer $intelligence, OutputInterface $output): void
@@ -135,7 +145,7 @@ final class ReviewGraphIntelligenceCommand extends BaseCommand
 
         foreach (array_slice($gaps, 0, 20) as $gap) {
             $node = $gap['node'];
-            $output->writeln("[{$gap['score']}] {$node->fqcn} ({$node->getType()->value})");
+            $output->writeln("[{$gap['score']}] {$node->getFqcn()} ({$node->getType()->value})", OutputInterface::OUTPUT_RAW);
         }
 
         $output->writeln('');
@@ -158,32 +168,45 @@ final class ReviewGraphIntelligenceCommand extends BaseCommand
         }
     }
 
-    private function showEventLifecycle(IntelligenceLayer $intelligence, string $eventClass, OutputInterface $output): void
+    /**
+     * The help's own example, `--event-lifecycle DemoItemCreated`, failed:
+     * only the exact FQCN was understood. The shared resolver also takes a
+     * unique short name, any case and a leading backslash.
+     */
+    private function showEventLifecycle(IntelligenceLayer $intelligence, string $eventClass, OutputInterface $output): bool
     {
-        $lifecycle = $intelligence->getEventLifecycle($eventClass);
+        $resolver = $this->resolver();
+        $node = $resolver->resolve($eventClass);
+        $lifecycle = $node === null ? null : $intelligence->getEventLifecycle($node->getFqcn());
 
         if ($lifecycle === null) {
-            $output->writeln("<error>Event not found: {$eventClass}</error>");
-            return;
+            $output->writeln('<error>' . OutputFormatter::escape($node === null ? $resolver->notFound($eventClass) : 'Not an event: ' . $node->getFqcn()) . '</error>');
+            return false;
         }
 
         $output->writeln('<comment>=== Event Lifecycle ===</comment>');
         $output->writeln('');
-        $output->write($lifecycle->toMarkdown());
+        $output->write($lifecycle->toMarkdown(), false, OutputInterface::OUTPUT_RAW);
+
+        return true;
     }
 
-    private function showIntent(IntelligenceLayer $intelligence, string $nodeId, OutputInterface $output): void
+    private function showIntent(IntelligenceLayer $intelligence, string $target, OutputInterface $output): bool
     {
-        $intent = $intelligence->getIntent($nodeId);
+        $resolver = $this->resolver();
+        $node = $resolver->resolve($target);
+        $intent = $node === null ? null : $intelligence->getIntent($node->getId());
 
         if ($intent === null) {
-            $output->writeln("<error>No intent inference for: {$nodeId}</error>");
-            return;
+            $output->writeln('<error>' . OutputFormatter::escape($node === null ? $resolver->notFound($target) : 'No intent inference for: ' . $node->getId()) . '</error>');
+            return false;
         }
 
         $output->writeln('<comment>=== Intent Inference ===</comment>');
         $output->writeln('');
-        $output->write($intent->toMarkdown());
+        $output->write($intent->toMarkdown(), false, OutputInterface::OUTPUT_RAW);
+
+        return true;
     }
 
     private function renderResult(mixed $result, OutputInterface $output): void
@@ -199,17 +222,42 @@ final class ReviewGraphIntelligenceCommand extends BaseCommand
         }
 
         if (is_array($result)) {
+            if ($result === []) {
+                $output->writeln('<comment>No results found.</comment>');
+                return;
+            }
             foreach ($result as $item) {
-                if (is_object($item) && method_exists($item, 'toMarkdown')) {
-                    $output->write($item->toMarkdown());
-                    $output->writeln('');
-                } else {
-                    $output->writeln(print_r($item, true));
-                }
+                $output->writeln(self::line($item), OutputInterface::OUTPUT_RAW);
             }
             return;
         }
 
-        $output->writeln(print_r($result, true));
+        $output->writeln(self::line($result), OutputInterface::OUTPUT_RAW);
+    }
+
+    /**
+     * One readable line per result. Search results are Node objects, which
+     * were print_r()'d — a page of private properties per match.
+     */
+    private static function line(mixed $item): string
+    {
+        return match (true) {
+            is_object($item) && method_exists($item, 'toMarkdown') => rtrim($item->toMarkdown()) . "\n",
+            $item instanceof \Semitexa\ProjectGraph\Application\Service\Query\ImpactResult => sprintf(
+                "Changing %s reaches %d node(s):\n%s",
+                implode(', ', $item->changed),
+                count($item->impacted),
+                implode("\n", array_map(
+                    static fn (string $id, $n): string => sprintf('- [%d] %s', $n->distance, $id),
+                    array_keys($item->impacted),
+                    $item->impacted,
+                )),
+            ),
+            $item instanceof \Semitexa\ProjectGraph\Domain\Model\Node => sprintf('- %s (%s%s)', $item->getFqcn() !== '' ? $item->getFqcn() : $item->getId(), $item->getType()->value, $item->getModule() !== '' ? ', ' . $item->getModule() : ''),
+            is_array($item) && isset($item['node']) && $item['node'] instanceof \Semitexa\ProjectGraph\Domain\Model\Node => sprintf('- %s (score %s)', $item['node']->getFqcn(), (string) ($item['score'] ?? '')),
+            is_array($item) && isset($item['name']) => sprintf('- %s%s', (string) $item['name'], isset($item['entry_point']) ? ' (entry: ' . $item['entry_point'] . ')' : ''),
+            is_scalar($item) => (string) $item,
+            default => (string) json_encode($item, JSON_UNESCAPED_SLASHES | JSON_PARTIAL_OUTPUT_ON_ERROR),
+        };
     }
 }

@@ -68,18 +68,26 @@ final class HandlerExtractor implements ExtractorInterface
                 // file only says what ROLE it plays, so the node is a
                 // placeholder: it must not claim the class for this file — that
                 // made re-indexing the handler remove the resource, and kept the
-                // resource's own declaration out of the graph.
-                $declaredHere = in_array($resourceClass, array_map(static fn ($c): string => $c->fqcn, $file->getClasses()), true);
+                // resource's own declaration out of the graph. Declared here, it
+                // is the resource's OWN declaration that gives the lines: the
+                // handler's were used (reproduced 2026-10-02), and the resource
+                // node won the merge with them.
+                $declaration = null;
+                foreach ($file->getClasses() as $declared) {
+                    if ($declared->fqcn === $resourceClass) {
+                        $declaration = $declared;
+                    }
+                }
                 $resourceNode = new Node(
                     id:            NodeId::forClass($resourceClass),
                     type:          NodeType::Resource,
                     fqcn:          $resourceClass,
-                    file:          $declaredHere ? $file->path : '',
-                    line:          $declaredHere ? $classInfo->startLine : 0,
-                    endLine:       $declaredHere ? $classInfo->endLine : 0,
-                    module:        $declaredHere ? $file->module : '',
+                    file:          $declaration !== null ? $file->path : '',
+                    line:          $declaration?->startLine ?? 0,
+                    endLine:       $declaration?->endLine ?? 0,
+                    module:        $declaration !== null ? $file->module : '',
                     metadata:      [],
-                    isPlaceholder: !$declaredHere,
+                    isPlaceholder: $declaration === null,
                 );
                 $result->addNode($resourceNode);
 

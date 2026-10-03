@@ -41,7 +41,7 @@ final readonly class ClassInfo
      */
     public static function fromAst(ClassLike $stmt, string $file, ?AttributeArgumentEvaluator $evaluator = null): self
     {
-        $evaluator ??= new AttributeArgumentEvaluator();
+        $evaluator ??= new AttributeArgumentEvaluator(null, $file);
         $fqcn = $stmt->namespacedName ? $stmt->namespacedName->toString() : ($stmt->name ? $stmt->name->toString() : 'Unknown');
 
         $interfaces = [];

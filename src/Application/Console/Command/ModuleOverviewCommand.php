@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Console\Command;
 
+use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
+use Semitexa\ProjectGraph\Application\Service\Intelligence\DomainContext;
 use Semitexa\ProjectGraph\Application\Service\Intelligence\IntelligenceLayer;
 use Semitexa\ProjectGraph\Application\Service\Query\GraphQueryService;
 use Semitexa\Core\Attribute\AsCommand;
@@ -56,10 +58,26 @@ final class ModuleOverviewCommand extends BaseCommand
         $includeEvents = $input->getOption('include-events');
         $includeFlows = $input->getOption('include-flows');
 
+        if (!in_array($format, ['text', 'json'], true)) {
+            $output->writeln('<error>--format accepts text or json.</error>');
+            return Command::FAILURE;
+        }
+        // An unknown module printed all zeros with exit 0.
+        if (!in_array($module, $this->query()->knownModules(), true)) {
+            $known = $this->query()->knownModules();
+            sort($known);
+            $message = sprintf('No module "%s" in the graph. Known: %s.', (string) $module, implode(', ', $known));
+            // A caller that asked for JSON parses stdout: the <error> text failed the parse.
+            $format === 'json'
+                ? $output->writeln((string) json_encode(['error' => $message], JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE), OutputInterface::OUTPUT_RAW)
+                : $output->writeln('<error>' . \Symfony\Component\Console\Formatter\OutputFormatter::escape($message) . '</error>');
+            return Command::FAILURE;
+        }
+
         $overview = $this->buildOverview($module, $includeEvents, $includeFlows);
 
         if ($format === 'json') {
-            $output->writeln(json_encode($overview, JSON_UNESCAPED_SLASHES));
+            $output->writeln((string) json_encode($overview, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE), OutputInterface::OUTPUT_RAW);
             return Command::SUCCESS;
         }
 
@@ -86,8 +104,8 @@ final class ModuleOverviewCommand extends BaseCommand
             $output->writeln('<info>Execution Flows:</info>');
             foreach ($overview['flows'] as $flow) {
                 $output->writeln("  → {$flow['name']} (entry: {$flow['entry_point']})");
-                foreach ($flow['steps'] as $step) {
-                    $output->writeln("    {$step['order']}. {$step['node']} ({$step['role']})");
+                foreach ($flow['steps'] ?? [] as $i => $step) {
+                    $output->writeln(sprintf('    %s. %s (%s)', $step['order'] ?? $i + 1, $step['node'] ?? '?', $step['role'] ?? ''), OutputInterface::OUTPUT_RAW);
                 }
             }
             $output->writeln('');
@@ -157,7 +175,10 @@ final class ModuleOverviewCommand extends BaseCommand
             };
         }
 
-        $domainContext = $intelligence->getDomainContext('module:' . $module);
+        // The module's own domain node, `domain:<Module>`. This asked for the
+        // domain of a `module:<Module>` node, which does not exist: always null.
+        $domainNode = $this->query()->getNode(NodeId::forDomain($module));
+        $domainContext = $domainNode === null ? null : DomainContext::fromNode($domainNode);
         if ($domainContext !== null) {
             $overview['domain_context'] = [
                 'name' => $domainContext->name,
@@ -198,16 +219,18 @@ final class ModuleOverviewCommand extends BaseCommand
         }
 
         $crossModuleEdges = $this->query()->getCrossModuleEdges($module);
+        $external = [];
         foreach ($crossModuleEdges as $edge) {
             $overview['cross_module_deps'][] = [
                 'source' => $edge->getSourceId(),
                 'target' => $edge->getTargetId(),
                 'type' => $edge->getType()->value,
             ];
-            if (!str_starts_with($edge->getTargetId(), 'module:') && !str_starts_with($edge->getTargetId(), 'class:')) {
-                $overview['summary']['external_deps']++;
-            }
+            // Distinct things in other modules this one depends on. It counted
+            // only targets that were neither classes nor modules: always 0.
+            $external[$edge->getTargetId()] = true;
         }
+        $overview['summary']['external_deps'] = count($external);
 
         return $overview;
     }

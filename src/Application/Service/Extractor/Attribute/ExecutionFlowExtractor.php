@@ -58,14 +58,25 @@ final class ExecutionFlowExtractor implements ExtractorInterface
 
             if ($path === '') continue;
 
-            $routeId = NodeId::forRoute(implode(',', (array)$methods), $path);
+            // One route per method, as PayloadExtractor makes them. The methods
+            // used to be joined into one id: 37 phantom route:GET,POST:/x
+            // nodes on the workspace (measured 2026-10-02) that no request
+            // can match, and the flow's entry point was one of them.
+            $routeIds = [];
+            foreach ((array) $methods as $method) {
+                $routeIds[] = NodeId::forRoute((string) $method, $path);
+            }
+            if ($routeIds === []) continue;
+            $routeId = $routeIds[0];
             $payloadId = NodeId::forClass($payload->fqcn);
 
-            $result->addEdge(new Edge(
-                sourceId: $payloadId,
-                targetId: $routeId,
-                type: EdgeType::ServesRoute,
-            ));
+            foreach ($routeIds as $methodRouteId) {
+                $result->addEdge(new Edge(
+                    sourceId: $payloadId,
+                    targetId: $methodRouteId,
+                    type: EdgeType::ServesRoute,
+                ));
+            }
 
             $flowName = $this->deriveFlowName($payload->fqcn, $path);
             $flowId = NodeId::forFlow($flowName);
@@ -81,6 +92,7 @@ final class ExecutionFlowExtractor implements ExtractorInterface
                 metadata: [
                     'name' => $flowName,
                     'entry_point' => $routeId,
+                    'entry_points' => $routeIds,
                     'steps' => [
                         ['order' => 1, 'node' => $payloadId, 'role' => 'payload'],
                     ],

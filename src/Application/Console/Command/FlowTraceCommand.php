@@ -12,6 +12,7 @@ use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
 use Semitexa\ProjectGraph\Application\Service\Support\UsesProjectGraphConnection;
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Formatter\OutputFormatter;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -55,13 +56,15 @@ final class FlowTraceCommand extends BaseCommand
 
         $flowName = $this->resolveFlowName($flowArg);
         if ($flowName === null) {
-            $output->writeln("<error>Flow not found: {$flowArg}</error>");
+            $output->writeln('<error>' . OutputFormatter::escape(sprintf('No single flow matches "%s".', (string) $flowArg)) . '</error>');
             $output->writeln('');
-            $output->writeln('Available flows:');
+            // The matches when there are some — all 330 flows were listed for "Sitemap".
             $flows = $this->query()->findNodes(type: 'execution_flow');
-            foreach ($flows as $node) {
-                $name = $node->getMetadata()['name'] ?? $node->getId();
-                $output->writeln("  - {$name}");
+            $names = array_map(static fn ($node): string => (string) ($node->getMetadata()['name'] ?? $node->getId()), $flows);
+            $matching = array_values(array_filter($names, static fn (string $n): bool => trim((string) $flowArg) !== '' && stripos($n, trim((string) $flowArg)) !== false));
+            $output->writeln($matching !== [] ? 'Flows matching it:' : 'Available flows:');
+            foreach ($matching !== [] ? $matching : $names as $name) {
+                $output->writeln('  - ' . $name, OutputInterface::OUTPUT_RAW);
             }
             return Command::FAILURE;
         }
@@ -140,25 +143,52 @@ final class FlowTraceCommand extends BaseCommand
         return Command::SUCCESS;
     }
 
+    /**
+     * The flow a person meant, or null. `stripos($name, '')` is 0, so an empty
+     * argument matched the first flow; any substring took the first hit in
+     * table order; and a miss was turned into "<arg>Flow" and passed on, so
+     * "Available flows" could never be shown. A payload class — documented as
+     * an input — never matched, because flows are entered by route, not class.
+     */
     private function resolveFlowName(string $flowArg): ?string
     {
-        $flows = $this->query()->findNodes(type: 'execution_flow');
-        foreach ($flows as $node) {
-            $name = $node->getMetadata()['name'] ?? '';
-            if (stripos($name, $flowArg) !== false) {
-                return $name;
-            }
-            $entryPoint = $node->getMetadata()['entry_point'] ?? '';
-            if (stripos($entryPoint, $flowArg) !== false) {
-                return $name;
+        $flowArg = trim($flowArg);
+        if (str_starts_with($flowArg, 'flow:')) {
+            $flowArg = substr($flowArg, 5); // the node id, as the graph and the viewer show it
+        }
+        if ($flowArg === '') {
+            return null;
+        }
+        $flows = [];
+        foreach ($this->query()->findNodes(type: 'execution_flow') as $node) {
+            $flows[] = ['name' => (string) ($node->getMetadata()['name'] ?? ''), 'entry' => (string) ($node->getMetadata()['entry_point'] ?? ''), 'steps' => (array) ($node->getMetadata()['steps'] ?? [])];
+        }
+
+        foreach ($flows as $flow) {
+            if (strcasecmp($flow['name'], $flowArg) === 0 || strcasecmp($flow['name'], $flowArg . 'Flow') === 0 || strcasecmp($flow['entry'], $flowArg) === 0) {
+                return $flow['name'];
             }
         }
 
-        if (stripos($flowArg, 'Flow') !== false) {
-            return $flowArg;
+        // A class in the flow (its payload or handler), by any name the resolver accepts.
+        $node = $this->query()->resolver($this->getProjectRoot())->resolve($flowArg);
+        if ($node !== null) {
+            $hits = array_values(array_filter($flows, static function (array $flow) use ($node): bool {
+                foreach ($flow['steps'] as $step) {
+                    if (is_array($step) && ($step['node'] ?? null) === $node->getId()) {
+                        return true;
+                    }
+                }
+                return false;
+            }));
+            if (count($hits) === 1) {
+                return $hits[0]['name'];
+            }
         }
 
-        return $flowArg . 'Flow';
+        $partial = array_values(array_filter($flows, static fn (array $f): bool => stripos($f['name'], $flowArg) !== false));
+
+        return count($partial) === 1 ? $partial[0]['name'] : null;
     }
 
     private function shortName(string $fqcn): string

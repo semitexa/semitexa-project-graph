@@ -118,6 +118,16 @@ final class GraphFixture
         unlink($this->path($relative));
     }
 
+    /**
+     * Where a test's ref diff exports its base: one directory per user. A
+     * shared one, created 0755 by a root run (ai:verify in the container),
+     * failed every later diff test run as the host user.
+     */
+    public static function diffScratch(): string
+    {
+        return sys_get_temp_dir() . '/semitexa-graph-diff-scratch-' . (function_exists('posix_geteuid') ? posix_geteuid() : getmyuid());
+    }
+
     /** Node id of a fixture class, from its name relative to the fixture namespace ('Cycle\\Ping'). */
     public static function classId(string $relativeClass): string
     {

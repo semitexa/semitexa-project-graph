@@ -25,7 +25,7 @@ final class GraphQueryService implements QueryInterface
     public function findNodes(?string $type = null, ?string $module = null, ?string $namePattern = null): array
     {
         if ($namePattern !== null) {
-            $results = $this->storage->nodes->searchFull($namePattern);
+            $results = $this->storage->nodes->searchText($namePattern, 20, [], $module);
             if ($type !== null) {
                 $results = array_filter($results, fn(Node $n) => $n->getType()->value === $type);
             }
@@ -179,94 +179,129 @@ final class GraphQueryService implements QueryInterface
             EdgeType::Emits,
         ];
 
-        $crossModule = [];
-        foreach ($edgeTypes as $edgeType) {
-            $edges = $this->storage->edges->findByType($edgeType);
-            foreach ($edges as $edge) {
-                $source = $this->storage->nodes->findById($edge->getSourceId());
-                $target = $this->storage->nodes->findById($edge->getTargetId());
-                if ($source !== null && $target !== null
-                    && $source->getModule() !== '' && $target->getModule() !== ''
-                    && $source->getModule() !== $target->getModule()
-                ) {
-                    if ($moduleA !== null && $source->getModule() !== $moduleA) {
-                        continue;
-                    }
-                    if ($moduleB !== null && $target->getModule() !== $moduleB) {
-                        continue;
-                    }
-                    $crossModule[] = $edge;
-                }
-            }
-        }
+        // One join instead of two node lookups per edge: --doc-gaps asked this
+        // once per module and took 36 s (round 2).
+        $crossModule = $this->storage->edges->crossModule(
+            array_map(static fn (EdgeType $t): string => $t->value, $edgeTypes),
+            $moduleA,
+            $moduleB,
+        );
 
         return $crossModule;
     }
 
-    public function search(string $query, int $limit = 20): array
+    /**
+     * Name and FQCN containing $query, literally — `%` and `_` used to be
+     * LIKE wildcards here — exact-prefix names first, scoped to $module in
+     * the query itself (filtering after the limit lost real matches).
+     *
+     * @return list<Node>
+     */
+    public function search(string $query, int $limit = 20, ?string $module = null, ?string $type = null): array
     {
-        return $this->storage->nodes->searchFull($query, $limit);
+        return $this->storage->nodes->searchText($query, max(1, $limit), [], $module, $type);
     }
 
+    /** A view larger than this is cut and says so; the walk used to run out of memory instead. */
+    public const VIEW_MAX_NODES = 2500;
+
+    /**
+     * $focus is a node id or FQCN; the caller resolves what a person typed
+     * ({@see NodeResolver}). The walk follows wiring and code references, not
+     * imports, domains, flows or attributes: walked undirected through those
+     * hubs, depth 4 on GraphStorage reached the whole graph and exhausted 128M
+     * (measured 2026-10-02). Edges are deduplicated as they are found and nodes
+     * loaded in batches — it used to load both ends of every edge one query at
+     * a time, twice.
+     */
     public function buildView(?string $module = null, ?array $types = null, ?string $focus = null, int $depth = 3): GraphView
     {
+        /** @var array<string, Node> $nodes */
         $nodes = [];
+        /** @var array<string, Edge> $edges keyed by type|source|target */
         $edges = [];
+        $truncated = false;
+        $noise = array_flip(GraphBrowser::NOISE_EDGES);
+        $hidden = array_flip(GraphBrowser::HIDDEN_NODES);
+        $reversed = array_flip(['serves_route', 'handles']);
+
+        $typeSet = $types === null ? null : array_flip($types);
+        $fits = static fn (Node $n): bool => ($typeSet === null || isset($typeSet[$n->getType()->value]))
+            && ($module === null || $n->getModule() === $module);
 
         if ($focus !== null) {
             $focusNode = $this->getNode($focus);
             if ($focusNode !== null) {
+                // Directed the way the Observatory and the HTML export walk —
+                // what the focus depends on, plus route ← payload ← handler —
+                // so `show` and the viewer agree (round 2: 19 vs 5 nodes at
+                // depth 1). --type and --module narrow the walk instead of
+                // being ignored.
                 $nodes[$focusNode->getId()] = $focusNode;
-                $visited = [$focusNode->getId() => true];
-                $currentLevel = [$focusNode->getId()];
-
-                for ($d = 0; $d < $depth; $d++) {
-                    $nextLevel = [];
-                    foreach ($currentLevel as $nodeId) {
-                        $nodeEdges = $this->storage->edges->findByNode($nodeId);
-                        foreach ($nodeEdges as $edge) {
-                            $edges[] = $edge;
-                            foreach ([$edge->getSourceId(), $edge->getTargetId()] as $neighborId) {
-                                if (!isset($visited[$neighborId])) {
-                                    $visited[$neighborId] = true;
-                                    $nextLevel[] = $neighborId;
-                                    $neighbor = $this->storage->nodes->findById($neighborId);
-                                    if ($neighbor !== null) {
-                                        $nodes[$neighborId] = $neighbor;
-                                    }
-                                }
+                $frontier = [$focusNode->getId()];
+                for ($d = 0; $d < $depth && $frontier !== [] && !$truncated; $d++) {
+                    $found = [];
+                    foreach (array_chunk($frontier, 500) as $chunk) {
+                        foreach ($this->storage->edges->findBySourceIds($chunk) as $edge) {
+                            if (isset($noise[$edge->getType()->value]) || isset($reversed[$edge->getType()->value])) {
+                                continue;
                             }
+                            $edges[$edge->getType()->value . '|' . $edge->getSourceId() . '|' . $edge->getTargetId()] = $edge;
+                            $found[$edge->getTargetId()] = true;
+                        }
+                        foreach ($this->storage->edges->findByTargetIds($chunk) as $edge) {
+                            if (!isset($reversed[$edge->getType()->value])) {
+                                continue;
+                            }
+                            $edges[$edge->getType()->value . '|' . $edge->getSourceId() . '|' . $edge->getTargetId()] = $edge;
+                            $found[$edge->getSourceId()] = true;
                         }
                     }
-                    $currentLevel = $nextLevel;
+                    $frontier = [];
+                    foreach ($this->storage->nodes->findByIds(array_keys(array_diff_key($found, $nodes))) as $id => $neighbor) {
+                        if (isset($hidden[$neighbor->getType()->value]) || !$fits($neighbor)) {
+                            continue;
+                        }
+                        if (count($nodes) >= self::VIEW_MAX_NODES) {
+                            $truncated = true;
+                            break;
+                        }
+                        $nodes[$id] = $neighbor;
+                        $frontier[] = $id;
+                    }
                 }
+                // Only edges whose both ends made it into the view.
+                $edges = array_filter($edges, static fn (Edge $e): bool => isset($nodes[$e->getSourceId()], $nodes[$e->getTargetId()]));
             }
-        } elseif ($module !== null || $types !== null) {
+        } else {
+            if ($types === null && $module === null) {
+                return $this->wholeGraphCensus();
+            }
+            $candidates = [];
             if ($types !== null) {
                 foreach ($types as $type) {
-                    $typeNodes = $this->storage->nodes->findByType($type, $module);
-                    foreach ($typeNodes as $node) {
-                        $nodes[$node->getId()] = $node;
+                    foreach ($this->storage->nodes->findByType($type, $module) as $node) {
+                        $candidates[$node->getId()] = $node;
                     }
                 }
             } else {
                 foreach ($this->storage->nodes->findByModule($module) as $node) {
-                    $nodes[$node->getId()] = $node;
+                    $candidates[$node->getId()] = $node;
                 }
             }
-        } else {
-            $allNodes = $this->storage->nodes->findByType('class');
-            foreach ($allNodes as $node) {
-                $nodes[$node->getId()] = $node;
+            // The same cap as a walk: `--type=class` held 4000 classes and
+            // their edges and ran out of memory (round 2).
+            ksort($candidates);
+            if (count($candidates) > self::VIEW_MAX_NODES) {
+                $truncated = true;
+                $candidates = array_slice($candidates, 0, self::VIEW_MAX_NODES, true);
             }
-        }
-
-        if (empty($focus) && !empty($nodes)) {
-            foreach ($nodes as $nodeId => $node) {
-                $nodeEdges = $this->storage->edges->findByNode($nodeId);
-                foreach ($nodeEdges as $edge) {
-                    if (isset($nodes[$edge->getSourceId()]) && isset($nodes[$edge->getTargetId()])) {
-                        $edges[] = $edge;
+            $nodes = $candidates;
+            // The edges leaving the view's nodes, in batches, instead of a query per node.
+            foreach (array_chunk(array_keys($nodes), 500) as $chunk) {
+                foreach ($this->storage->edges->findBySourceIds($chunk) as $edge) {
+                    if (isset($nodes[$edge->getTargetId()])) {
+                        $edges[$edge->getType()->value . '|' . $edge->getSourceId() . '|' . $edge->getTargetId()] = $edge;
                     }
                 }
             }
@@ -274,62 +309,110 @@ final class GraphQueryService implements QueryInterface
 
         $nodeTypeCounts = [];
         $moduleCounts = [];
+        $placeholders = 0;
         foreach ($nodes as $node) {
             $nodeTypeCounts[$node->getType()->value] = ($nodeTypeCounts[$node->getType()->value] ?? 0) + 1;
             if ($node->getModule() !== '') {
                 $moduleCounts[$node->getModule()] = ($moduleCounts[$node->getModule()] ?? 0) + 1;
             }
+            if ($node->getIsPlaceholder()) {
+                $placeholders++;
+            }
         }
+        arsort($nodeTypeCounts);
+        arsort($moduleCounts);
 
+        // Counted once per edge: the type counts used to be taken before deduplication, so every type read double.
         $edgeTypeCounts = [];
         $crossModule = 0;
-        $placeholders = 0;
-        $orphans = 0;
-        $uniqueEdges = [];
-        $edgeIdSet = [];
+        $touched = [];
         foreach ($edges as $edge) {
             $edgeTypeCounts[$edge->getType()->value] = ($edgeTypeCounts[$edge->getType()->value] ?? 0) + 1;
-            $edgeKey = $edge->getSourceId() . '|' . $edge->getTargetId() . '|' . $edge->getType()->value;
-            if (!isset($edgeIdSet[$edgeKey])) {
-                $edgeIdSet[$edgeKey] = true;
-                $uniqueEdges[] = $edge;
-            }
-            $source = $this->storage->nodes->findById($edge->getSourceId());
-            $target = $this->storage->nodes->findById($edge->getTargetId());
+            $source = $nodes[$edge->getSourceId()] ?? null;
+            $target = $nodes[$edge->getTargetId()] ?? null;
             if ($source !== null && $target !== null
                 && $source->getModule() !== '' && $target->getModule() !== ''
                 && $source->getModule() !== $target->getModule()
             ) {
                 $crossModule++;
             }
+            $touched[$edge->getSourceId()] = true;
+            $touched[$edge->getTargetId()] = true;
         }
+        arsort($edgeTypeCounts);
 
-        $edgeIdLookup = [];
-        foreach ($uniqueEdges as $edge) {
-            $edgeIdLookup[$edge->getSourceId()] = true;
-            $edgeIdLookup[$edge->getTargetId()] = true;
-        }
-
+        $orphans = 0;
         foreach ($nodes as $node) {
-            if ($node->getIsPlaceholder()) {
-                $placeholders++;
-            }
-            if (!isset($edgeIdLookup[$node->getId()]) && $node->getType() !== NodeType::Route) {
+            if (!isset($touched[$node->getId()]) && $node->getType() !== NodeType::Route) {
                 $orphans++;
             }
         }
 
         return new GraphView(
             nodes:            array_values($nodes),
-            edges:            $uniqueEdges,
+            edges:            array_values($edges),
             nodeTypeCounts:   $nodeTypeCounts,
             edgeTypeCounts:   $edgeTypeCounts,
             totalNodes:       count($nodes),
-            totalEdges:       count($uniqueEdges),
+            totalEdges:       count($edges),
             crossModuleEdges: $crossModule,
             orphanNodes:      $orphans,
             placeholderNodes: $placeholders,
             moduleCounts:     $moduleCounts,
+            truncated:        $truncated,
+        );
+    }
+
+    /**
+     * @param list<string> $nodeIds
+     * @return array<string, int>
+     */
+    public function inboundCounts(array $nodeIds): array
+    {
+        return $this->storage->edges->countInboundByTarget($nodeIds);
+    }
+
+    /** @return array<string, true> */
+    public function sourcesOf(string $type): array
+    {
+        $sources = [];
+        foreach ($this->storage->edges->findByType(EdgeType::from($type)) as $edge) {
+            $sources[$edge->getSourceId()] = true;
+        }
+
+        return $sources;
+    }
+
+    public function resolver(string $projectRoot): NodeResolver
+    {
+        return new NodeResolver($this->storage, $projectRoot);
+    }
+
+    /** @return list<string> */
+    public function knownModules(): array
+    {
+        return $this->storage->nodes->distinctModules();
+    }
+
+    /**
+     * The unfiltered view: counts of everything (as `stats` reports them — the
+     * view used to count classes only), and no node or edge lists.
+     */
+    public function wholeGraphCensus(): GraphView
+    {
+        $census = $this->storage->lookup->census();
+
+        return new GraphView(
+            nodes:            [],
+            edges:            [],
+            nodeTypeCounts:   $census['node_types'],
+            edgeTypeCounts:   $census['edge_types'],
+            totalNodes:       array_sum($census['node_types']),
+            totalEdges:       array_sum($census['edge_types']),
+            crossModuleEdges: $census['cross_module'],
+            orphanNodes:      $census['orphans'],
+            placeholderNodes: $census['placeholders'],
+            moduleCounts:     $census['modules'],
         );
     }
 

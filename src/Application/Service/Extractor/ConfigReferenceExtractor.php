@@ -6,9 +6,7 @@ namespace Semitexa\ProjectGraph\Application\Service\Extractor;
 
 use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
-use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
-use Semitexa\ProjectGraph\Domain\Model\Node;
 
 /**
  * Classes named in configuration files: a PHPStan rule registered in
@@ -22,11 +20,23 @@ use Semitexa\ProjectGraph\Domain\Model\Node;
  * name count, never a guess. A namespace prefix ("Semitexa\\Orm\\" in an
  * autoload map) is not a class and is skipped. Each file becomes a `file:`
  * node with a references edge (via: config) to every class it names.
+ *
+ * Only where the file WIRES a class, though. Measured 2026-10-02: PHPStan's
+ * baseline ("Class X is never used", "Call to X::y()") made every class it
+ * reports on used — hiding real dead code, the Orm traits HasUuid, Seedable,
+ * SoftDeletes and FilterableTrait among it — and a comment in
+ * docker-compose.yml ("Tasks\…\Server\TaskTickTimerListener") made a phantom
+ * class:Server\TaskTickTimerListener. So a baseline is not read at all, and
+ * in NEON/YAML comments, error messages and regex patterns are dropped before
+ * matching; XML comments likewise.
  */
 final class ConfigReferenceExtractor
 {
     /** File names (or suffixes) whose class names are references. */
     public const FILES = ['.neon', '.neon.dist', '.yaml', '.yml', 'composer.json', 'phpunit.xml', 'phpunit.xml.dist'];
+
+    /** NEON/YAML keys whose value is text ABOUT code, never a wiring. */
+    private const MESSAGE_KEYS = 'message|messages|rawMessage|rawMessages';
 
     public static function handles(string $path): bool
     {
@@ -42,8 +52,18 @@ final class ConfigReferenceExtractor
     public function extract(string $path, string $contents, string $module): ExtractionResult
     {
         $result = new ExtractionResult();
+        if (self::isBaseline($path)) {
+            return $result;
+        }
+
+        $text = match (true) {
+            str_ends_with($path, '.neon'), str_ends_with($path, '.neon.dist'),
+            str_ends_with($path, '.yaml'), str_ends_with($path, '.yml') => self::wiringOnly($contents),
+            str_ends_with($path, '.xml'), str_ends_with($path, '.xml.dist') => (string) preg_replace('/<!--.*?-->/s', '', $contents),
+            default => $contents,
+        };
         // JSON escapes the separator: Semitexa\\Core\\X.
-        $text = str_replace('\\\\', '\\', $contents);
+        $text = str_replace('\\\\', '\\', $text);
 
         preg_match_all('/(?<![\w\\\\])\\\\?((?:[A-Z][A-Za-z0-9_]*\\\\)+[A-Z][A-Za-z0-9_]*)(?![\w\\\\])/', $text, $matches);
         $classes = array_values(array_unique($matches[1]));
@@ -51,20 +71,11 @@ final class ConfigReferenceExtractor
             return $result;
         }
 
-        $fileNode = NodeId::forFile($path);
-        $result->addNode(new Node(
-            id:       $fileNode,
-            type:     NodeType::File,
-            fqcn:     basename($path),
-            file:     $path,
-            line:     1,
-            endLine:  substr_count($contents, "\n") + 1,
-            module:   $module,
-            metadata: ['config' => true],
-        ));
+        $fileNode = FileNode::of($path, $contents, $module, ['config' => true]);
+        $result->addNode($fileNode);
         foreach ($classes as $class) {
             $result->addEdge(new Edge(
-                sourceId: $fileNode,
+                sourceId: $fileNode->getId(),
                 targetId: NodeId::forClass($class),
                 type:     EdgeType::References,
                 metadata: ['via' => 'config'],
@@ -72,5 +83,55 @@ final class ConfigReferenceExtractor
         }
 
         return $result;
+    }
+
+    /** phpstan-baseline.neon and its variants: a list of errors, nothing in it is wired. */
+    private static function isBaseline(string $path): bool
+    {
+        $name = strtolower(basename($path));
+
+        return str_contains($name, 'baseline') && (str_ends_with($name, '.neon') || str_ends_with($name, '.neon.dist'));
+    }
+
+    /**
+     * NEON/YAML with what cannot be a wiring removed, line by line: comments
+     * (a # at the start or after whitespace, outside quotes), the values of
+     * error-message keys, and quoted regex patterns ('#...#', '~...~' — how
+     * ignoreErrors entries are written).
+     */
+    private static function wiringOnly(string $contents): string
+    {
+        $lines = [];
+        foreach (preg_split('/\R/', $contents) ?: [] as $line) {
+            $line = self::withoutComment($line);
+            $line = (string) preg_replace('/^(\s*(?:-\s+)?(?:' . self::MESSAGE_KEYS . ')\s*:).*$/', '$1', $line);
+            $lines[] = (string) preg_replace('/\'[#~][^\']*\'|"[#~](?:[^"\\\\]|\\\\.)*"/', "''", $line);
+        }
+
+        return implode("\n", $lines);
+    }
+
+    private static function withoutComment(string $line): string
+    {
+        $quote = null;
+        $length = strlen($line);
+        for ($i = 0; $i < $length; $i++) {
+            $char = $line[$i];
+            if ($quote !== null) {
+                if ($quote === '"' && $char === '\\') {
+                    $i++;
+                } elseif ($char === $quote) {
+                    $quote = null;
+                }
+                continue;
+            }
+            if ($char === '"' || $char === "'") {
+                $quote = $char;
+            } elseif ($char === '#' && ($i === 0 || ctype_space($line[$i - 1]))) {
+                return substr($line, 0, $i);
+            }
+        }
+
+        return $line;
     }
 }

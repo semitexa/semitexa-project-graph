@@ -11,6 +11,7 @@ use Semitexa\ProjectGraph\Application\Service\Diff\EdgeDiffMarkdown;
 use Semitexa\ProjectGraph\Application\Service\Diff\EdgeSetDiff;
 use Semitexa\ProjectGraph\Application\Service\Diff\RefGraphDiff;
 use Semitexa\ProjectGraph\Tests\Support\GitFixtureRepo;
+use Semitexa\ProjectGraph\Tests\Support\GraphFixture;
 
 /**
  * The pull-request comment, against a golden file. To accept a deliberate
@@ -34,7 +35,7 @@ final class EdgeDiffMarkdownTest extends TestCase
             $repo->read('Orders/PlaceOrderHandler.php'),
         ));
 
-        $result = (new RefGraphDiff())->diff($repo->root, 'HEAD', sys_get_temp_dir() . '/semitexa-graph-diff-scratch');
+        $result = (new RefGraphDiff())->diff($repo->root, 'HEAD', GraphFixture::diffScratch());
         $markdown = EdgeDiffMarkdown::render($result['diff'], 'main', 'fixture', (new CoverageReport($result['head']))->summary());
 
         if (getenv('SEMITEXA_UPDATE_GOLDEN') === '1') {

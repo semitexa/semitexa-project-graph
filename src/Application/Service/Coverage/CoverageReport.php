@@ -18,8 +18,15 @@ use Semitexa\ProjectGraph\Domain\Model\CoverageGap;
  * given set of nodes, which gaps could hide an edge to or from them:
  *
  * - parse_error and extraction_failed anywhere: they hide arbitrary edges;
- * - dynamic_reference in the same module as a node: runtime class names
- *   near the code are the likeliest hidden callers;
+ * - dynamic_reference, ignored and duplicate_class — code the graph did not
+ *   read — in the node's own module or in any module that depends on it
+ *   (UnreadCode): a runtime class name, a #[GraphIgnore]'d class or the
+ *   dropped copy of a duplicate there may name the node. Measured
+ *   2026-10-02: a runtime name built in packages/beta, the only user of a
+ *   class held by an ignored class, and the only reference of a shadowed
+ *   duplicate each left a class with absence_is_proof=true, because only
+ *   the node's own module (dynamic) or the node itself (ignored, duplicate)
+ *   was consulted — and module '' was never consulted at all;
  * - ignored and duplicate_class about the node itself;
  * - unresolved references in the node's namespace: a class-typed placeholder
  *   whose namespace also has declared classes is probably a project class
@@ -29,6 +36,9 @@ use Semitexa\ProjectGraph\Domain\Model\CoverageGap;
 final class CoverageReport
 {
     private const RELEVANT_CAP = 20;
+
+    /** Built on first need: reading module dependencies is one pass over every edge. */
+    private ?UnreadCode $unread = null;
 
     public function __construct(
         private readonly GraphStorage $storage,
@@ -84,26 +94,26 @@ final class CoverageReport
     public function relevantGaps(array $nodeIds): array
     {
         $fqcns = [];
-        $modules = [];
+        $nodeFiles = [];
         $namespaces = [];
         foreach ($nodeIds as $id) {
             $node = $this->storage->nodes->findById($id);
             $fqcn = $node?->getFqcn() ?? NodeId::extractFqcn($id);
             $fqcns[$fqcn] = true;
-            if ($node !== null && $node->getModule() !== '') {
-                $modules[$node->getModule()] = true;
+            if ($node !== null && $node->getFile() !== '') {
+                $nodeFiles[$node->getFile()] = true;
             }
             $namespaces[self::namespaceOf($fqcn)] = true;
         }
 
-        $moduleOfFile = [];
+        $modules = null;
         $relevant = [];
         foreach ($this->storage->gaps->findAll() as $gap) {
             $keep = match ($gap->getKind()) {
                 CoverageGapKind::ParseError, CoverageGapKind::ExtractionFailed => true,
-                CoverageGapKind::Ignored, CoverageGapKind::DuplicateClass => isset($fqcns[$gap->getSubject()]),
-                CoverageGapKind::DynamicReference => isset($modules[$moduleOfFile[$gap->getFile()] ??= $this->moduleOfFile($gap->getFile())]),
                 CoverageGapKind::UnresolvedReference => false,
+                CoverageGapKind::Ignored, CoverageGapKind::DuplicateClass, CoverageGapKind::DynamicReference => isset($fqcns[$gap->getSubject()])
+                    || $this->reachesAny($gap->getFile(), $modules ??= $this->modulesOf($nodeIds, array_keys($nodeFiles))),
             };
             if ($keep) {
                 $relevant[] = $gap;
@@ -201,15 +211,46 @@ final class CoverageReport
         return is_array($decoded) ? $decoded : [];
     }
 
-    private function moduleOfFile(string $file): string
+    /**
+     * Module keys of the given nodes: a declared class's own, otherwise the
+     * module of the file the node sits in.
+     *
+     * @param list<string> $nodeIds
+     * @param list<string> $files
+     * @return list<string>
+     */
+    private function modulesOf(array $nodeIds, array $files): array
     {
-        foreach ($this->storage->nodes->findByFile($file) as $node) {
-            if ($node->getModule() !== '') {
-                return $node->getModule();
+        $this->unread ??= UnreadCode::of($this->storage);
+        $modules = [];
+        foreach ($nodeIds as $id) {
+            $key = $this->unread->keyOfClass($id);
+            if ($key !== null) {
+                $modules[$key] = true;
+            }
+        }
+        foreach ($files as $file) {
+            $modules[$this->unread->keyOfFile($file)] = true;
+        }
+
+        return array_keys($modules);
+    }
+
+    /** @param list<string> $modules */
+    private function reachesAny(string $gapFile, array $modules): bool
+    {
+        if ($modules === []) {
+            return false;
+        }
+        $this->unread ??= UnreadCode::of($this->storage);
+        $from = $this->unread->keyOfFile($gapFile);
+        foreach ($modules as $module) {
+            if ($this->unread->reaches($from, $module)) {
+                return true;
             }
         }
 
-        return '';
+        return false;
     }
 
     private static function namespaceOf(string $fqcn): string

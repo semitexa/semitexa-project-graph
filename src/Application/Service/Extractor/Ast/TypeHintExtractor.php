@@ -13,6 +13,15 @@ use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
 use Semitexa\ProjectGraph\Application\Service\Parser\ParsedFile;
 
+/**
+ * Declared types: what a class accepts (parameters, properties) and returns.
+ *
+ * Only method signatures used to be read. A class typed only on a property,
+ * a closure or arrow-function parameter, a property-hook parameter or a
+ * function made no edge and looked unused. A property type is an `accepts`:
+ * the class takes an instance of it in, the same as a promoted constructor
+ * parameter (which was always read, as a method parameter).
+ */
 final class TypeHintExtractor implements ExtractorInterface
 {
     public function supports(ParsedFile $file): bool
@@ -25,44 +34,74 @@ final class TypeHintExtractor implements ExtractorInterface
         $result = new ExtractionResult();
 
         $visitor = new class($file, $result) extends NodeVisitorAbstract {
-            private string $currentClass = '';
-            private ?string $parentClass = null;
+            private readonly ClassScope $scope;
 
             public function __construct(
-                private readonly ParsedFile $file,
+                ParsedFile $file,
                 private readonly ExtractionResult $result,
-            ) {}
+            ) {
+                $this->scope = new ClassScope($file);
+            }
 
             public function enterNode(AstNode $node): ?int
             {
-                if ($node instanceof AstNode\Stmt\ClassLike && $node->namespacedName !== null) {
-                    $this->currentClass = $node->namespacedName->toString();
-                    $this->parentClass = $node instanceof AstNode\Stmt\Class_ ? $node->extends?->toString() : null;
+                if ($node instanceof AstNode\Stmt\ClassLike) {
+                    $this->scope->enter($node);
                 }
 
-                if ($node instanceof AstNode\Stmt\ClassMethod && $this->currentClass !== '') {
-                    foreach ($node->getParams() as $param) {
-                        foreach (ClassNames::inType($param->type, $this->parentClass) as $typeFqcn) {
-                            $this->result->addEdge(new Edge(
-                                sourceId: NodeId::forClass($this->currentClass),
-                                targetId: NodeId::forClass($typeFqcn),
-                                type:     EdgeType::Accepts,
-                                metadata: ['param' => $param->var->name ?? ''],
-                            ));
-                        }
-                    }
+                if ($node instanceof AstNode\Stmt\ClassMethod
+                    || $node instanceof AstNode\Stmt\Function_
+                    || $node instanceof AstNode\Expr\Closure
+                    || $node instanceof AstNode\Expr\ArrowFunction
+                ) {
+                    $this->params($node->getParams());
+                    $name = $node instanceof AstNode\Stmt\ClassMethod || $node instanceof AstNode\Stmt\Function_
+                        ? $node->name->toString()
+                        : '{closure}';
+                    $this->edges($node->getReturnType(), EdgeType::Returns, [$node instanceof AstNode\Stmt\Function_ ? 'function' : 'method' => $name]);
+                }
 
-                    foreach (ClassNames::inType($node->returnType, $this->parentClass) as $returnFqcn) {
-                        $this->result->addEdge(new Edge(
-                            sourceId: NodeId::forClass($this->currentClass),
-                            targetId: NodeId::forClass($returnFqcn),
-                            type:     EdgeType::Returns,
-                            metadata: ['method' => $node->name->toString()],
-                        ));
+                if ($node instanceof AstNode\PropertyHook) {
+                    $this->params($node->params);
+                }
+
+                if ($node instanceof AstNode\Stmt\Property) {
+                    foreach ($node->props as $prop) {
+                        $this->edges($node->type, EdgeType::Accepts, ['property' => $prop->name->toString()]);
                     }
                 }
 
                 return null;
+            }
+
+            public function leaveNode(AstNode $node): ?int
+            {
+                if ($node instanceof AstNode\Stmt\ClassLike) {
+                    $this->scope->leave($node);
+                }
+
+                return null;
+            }
+
+            /** @param array<AstNode\Param> $params */
+            private function params(array $params): void
+            {
+                foreach ($params as $param) {
+                    $this->edges($param->type, EdgeType::Accepts, ['param' => $param->var instanceof AstNode\Expr\Variable && is_string($param->var->name) ? $param->var->name : '']);
+                }
+            }
+
+            /** @param array<string, string> $metadata */
+            private function edges(?AstNode $type, EdgeType $edgeType, array $metadata): void
+            {
+                foreach (ClassNames::inType($type, $this->scope->parentClass()) as $typeFqcn) {
+                    $this->result->addEdge(new Edge(
+                        sourceId: $this->scope->sourceIn($this->result),
+                        targetId: NodeId::forClass($typeFqcn),
+                        type:     $edgeType,
+                        metadata: $metadata,
+                    ));
+                }
             }
         };
 

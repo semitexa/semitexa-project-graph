@@ -296,27 +296,38 @@ final class GraphBrowser
      *
      * @return list<array<string, mixed>>
      */
+    /** @return list<array<string, mixed>> */
     public function search(string $query): array
+    {
+        return $this->searchPage($query)['hits'];
+    }
+
+    /**
+     * The first SEARCH_LIMIT matches, and whether there were more: a list cut
+     * at fifty used to look exactly like a list of fifty.
+     *
+     * @return array{hits: list<array<string, mixed>>, truncated: bool}
+     */
+    public function searchPage(string $query): array
     {
         $query = trim($query);
         if (mb_strlen($query) < 2) {
-            return [];
+            return ['hits' => [], 'truncated' => false];
         }
 
         $hits = [];
-        foreach ($this->storage->nodes->searchText($query, self::SEARCH_LIMIT) as $node) {
-            if (in_array($node->getType()->value, self::HIDDEN_NODES, true)) {
-                continue;
-            }
+        foreach ($this->storage->nodes->searchText($query, self::SEARCH_LIMIT + 1, self::HIDDEN_NODES) as $node) {
             $hits[] = $this->node($node);
         }
+        $truncated = count($hits) > self::SEARCH_LIMIT;
+        $hits = array_slice($hits, 0, self::SEARCH_LIMIT);
 
         usort($hits, static function (array $a, array $b) use ($query): int {
             return [$a['placeholder'], !str_starts_with(strtolower($a['name']), strtolower($query)), $a['name']]
                 <=> [$b['placeholder'], !str_starts_with(strtolower($b['name']), strtolower($query)), $b['name']];
         });
 
-        return $hits;
+        return ['hits' => $hits, 'truncated' => $truncated];
     }
 
     /**

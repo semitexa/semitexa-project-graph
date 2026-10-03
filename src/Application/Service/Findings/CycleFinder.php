@@ -17,7 +17,7 @@ use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
  * the concrete loop a person can read and break.
  *
  * Only real dependencies count: code references and injection. Imports (a
- * `use` line is not a dependency on its own), attribute annotations and the
+ * `use` line is not a dependency on its own), a bare Foo::class, attribute annotations and the
  * inferred and structural edges are left out; so are placeholders and test
  * code. This replaces CycleDetector, which walked every edge type from plain
  * class nodes only, one query per node, and was never called.
@@ -43,7 +43,7 @@ final class CycleFinder
         foreach (array_keys($nodes) as $id) {
             $targets = [];
             foreach ($index->outOf($id) as $edge) {
-                if (isset($nodes[$edge['target']]) && $edge['target'] !== $id && self::isDependency($edge['type'])) {
+                if (isset($nodes[$edge['target']]) && $edge['target'] !== $id && self::isDependency($edge['type'], $edge['via'])) {
                     $targets[$edge['target']] = true;
                 }
             }
@@ -64,10 +64,22 @@ final class CycleFinder
         return $cycles;
     }
 
-    private static function isDependency(EdgeType $type): bool
+    /**
+     * A bare Foo::class (a `references` edge whose strongest via is
+     * class_name) is a name, not a dependency: `const OTHER = N::class` in M
+     * and `const OTHER = M::class` in N were reported as a loop while
+     * UnusedClassFinder called both "named only as a class name" (measured
+     * 2026-10-02). Both finders now read it one way — a name is neither a use
+     * nor a dependency — the reading the unused finder already had. The
+     * storage keeps the strongest via of merged references as the edge's own
+     * (GraphEdgeRepository::mergeMetadata), so `N::make(); N::class` still
+     * reads as a static call here.
+     */
+    private static function isDependency(EdgeType $type, ?string $via = null): bool
     {
         return $type !== EdgeType::Imports
             && $type !== EdgeType::AnnotatedWith
+            && !($type === EdgeType::References && $via === 'class_name')
             && match ($type->edgeClass()) {
                 EdgeClass::CodeReference => true,
                 EdgeClass::Wiring => in_array($type, [EdgeType::InjectsReadonly, EdgeType::InjectsMutable, EdgeType::InjectsFactory], true),

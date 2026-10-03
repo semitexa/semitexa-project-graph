@@ -60,7 +60,13 @@ final class ReviewGraphGenerateCommand extends BaseCommand
         $coverage = (new CoverageReport($storage))->summary();
 
         if ($input->getOption('json')) {
-            $output->writeln(json_encode($result->toArray() + ['coverage' => $coverage], JSON_UNESCAPED_SLASHES));
+            // One shape whatever the counts: `gaps` and `exclusions` were [] when empty and {} otherwise.
+            foreach (['gaps', 'exclusions'] as $key) {
+                if (isset($coverage[$key]) && is_array($coverage[$key])) {
+                    $coverage[$key] = (object) $coverage[$key];
+                }
+            }
+            $output->writeln((string) json_encode($result->toArray() + ['coverage' => $coverage], JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
             return self::SUCCESS;
         }
 

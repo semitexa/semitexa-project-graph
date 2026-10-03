@@ -59,6 +59,8 @@ final class ContextPacker
             edges:       $edges,
             totalTokens: $tokens,
             changed:     $impact->changed,
+            // 4 of 92 impacted nodes used to arrive with no word about the rest.
+            omitted:     max(0, count($impact->impacted) - count($nodes)),
         );
     }
 }
