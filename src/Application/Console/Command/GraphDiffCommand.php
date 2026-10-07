@@ -160,7 +160,7 @@ final class GraphDiffCommand extends BaseCommand
         if ($format === 'json') {
             ksort($diff['by_type']);
             // Always an object, so a consumer reads one shape.
-            $output->writeln(json_encode(['by_type' => (object) $diff['by_type']] + $diff, self::JSON));
+            $output->writeln(json_encode(['by_type' => (object) $diff['by_type']] + $diff, self::JSON), OutputInterface::OUTPUT_RAW);
             return Command::SUCCESS;
         }
 
@@ -272,7 +272,7 @@ final class GraphDiffCommand extends BaseCommand
                 'orphans'           => $orphans,
                 'unreadable'        => $unreadable,
                 'newly_unreadable'  => $newlyUnreadable,
-            ], self::JSON));
+            ], self::JSON), OutputInterface::OUTPUT_RAW);
 
             return $exit;
         }
@@ -383,7 +383,7 @@ final class GraphDiffCommand extends BaseCommand
     private function fail(OutputInterface $output, string $format, string $message): int
     {
         if ($format === 'json') {
-            $output->writeln(json_encode(['error' => $message], self::JSON));
+            $output->writeln(json_encode(['error' => $message], self::JSON), OutputInterface::OUTPUT_RAW);
         } else {
             $output->writeln('<error>' . $message . '</error>');
         }

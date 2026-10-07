@@ -108,10 +108,16 @@ final class EmitsPrecisionTest extends TestCase
             }
         }
 
-        #[\Semitexa\Ssr\Attribute\AsComponent(name: 'widget', event: \Campaign\Ev2\Clicked::class)]
-        final class Widget {}
+        #[\Semitexa\Ssr\Attribute\AsComponent(name: 'widget')]
+        final class Widget
+        {
+            public function onClick(): \Campaign\Lib2\Result
+            {
+                return \Campaign\Lib2\Result::ack()->dispatching(new \Campaign\Ev2\Clicked(), new \Campaign\Ev2\Opened());
+            }
+        }
 
-        #[\Semitexa\Ssr\Attribute\AsComponent(name: 'button', event: 'click')]
+        #[\Semitexa\Ssr\Attribute\AsComponent(name: 'button')]
         final class Button {}
         PHP;
 
@@ -133,7 +139,8 @@ final class EmitsPrecisionTest extends TestCase
             'class:Campaign\\Ev2\\TernaryB',
         ], $from('Arena'));
         self::assertSame(['class:Campaign\\Ev2\\ConflictDetected'], $from('Announcer'));
-        self::assertSame(['class:Campaign\\Ev2\\Clicked'], $from('Widget'));
-        self::assertSame([], $from('Button'), "a DOM event name is not a class");
+        // verify:accept-test-change #[AsComponent(event:)] is retired (one component model); a component emits through its UI handler's dispatching() instead
+        self::assertSame(['class:Campaign\\Ev2\\Clicked', 'class:Campaign\\Ev2\\Opened'], $from('Widget'), 'a UI handler emits what it dispatching()s');
+        self::assertSame([], $from('Button'), 'a component without a handler emits nothing');
     }
 }

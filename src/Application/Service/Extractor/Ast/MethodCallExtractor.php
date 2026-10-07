@@ -173,6 +173,18 @@ final class MethodCallExtractor implements ExtractorInterface
                     return;
                 }
 
+                // A UI handler's domain events: UiInteractionResult::dispatching(new X, …)
+                // — the component emits X once its interaction succeeds.
+                if ($method === 'dispatching') {
+                    foreach ($node->args as $arg) {
+                        if ($arg instanceof AstNode\Arg) {
+                            $this->emit($this->classesOf($arg->value), $node->name->toString());
+                        }
+                    }
+
+                    return;
+                }
+
                 if (!in_array($method, MethodCallExtractor::dispatchMethods(), true) || count($node->args) !== 1) {
                     return;
                 }

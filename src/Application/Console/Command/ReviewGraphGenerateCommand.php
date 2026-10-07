@@ -66,7 +66,7 @@ final class ReviewGraphGenerateCommand extends BaseCommand
                     $coverage[$key] = (object) $coverage[$key];
                 }
             }
-            $output->writeln((string) json_encode($result->toArray() + ['coverage' => $coverage], JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
+            $output->writeln((string) json_encode($result->toArray() + ['coverage' => $coverage], JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE), OutputInterface::OUTPUT_RAW);
             return self::SUCCESS;
         }
 

@@ -99,7 +99,7 @@ final class EventTraceCommand extends BaseCommand
                 'retry_config' => $lifecycle->retryConfig,
                 'idempotency_key' => $lifecycle->idempotencyKey,
             ];
-            $output->writeln(json_encode($data, JSON_UNESCAPED_SLASHES));
+            $output->writeln(json_encode($data, JSON_UNESCAPED_SLASHES), OutputInterface::OUTPUT_RAW);
             return Command::SUCCESS;
         }
 
