@@ -55,6 +55,19 @@ final class MethodCallExtractor implements ExtractorInterface
 {
     private const DISPATCH_METHODS = ['dispatch', 'emit', 'publish'];
 
+    /** The UI handler result whose dispatching() names the events a component emits. */
+    private const UI_RESULT = 'uiinteractionresult';
+
+    /** @internal for the visitor: does this name or type mean UiInteractionResult? */
+    public static function isUiResultType(?AstNode $type): bool
+    {
+        if ($type instanceof AstNode\NullableType) {
+            $type = $type->type;
+        }
+
+        return $type instanceof AstNode\Name && strtolower($type->getLast()) === self::UI_RESULT;
+    }
+
     /** Static factories that return an instance of the class they are called on. */
     private const FACTORY_METHODS = ['of', 'from', 'create', 'new'];
 
@@ -87,6 +100,14 @@ final class MethodCallExtractor implements ExtractorInterface
              */
             private array $classes = [];
 
+            /**
+             * Per function being visited: whether it declares that it returns a
+             * UiInteractionResult, so `$result->dispatching(..)` inside it counts.
+             *
+             * @var list<bool>
+             */
+            private array $returns = [];
+
             public function __construct(
                 ParsedFile $file,
                 private readonly ExtractionResult $result,
@@ -99,6 +120,10 @@ final class MethodCallExtractor implements ExtractorInterface
                 if ($node instanceof AstNode\Stmt\ClassLike) {
                     $this->scope->enter($node);
                     $this->classes[] = self::analyse($node);
+                }
+
+                if ($node instanceof AstNode\FunctionLike) {
+                    $this->returns[] = MethodCallExtractor::isUiResultType($node->getReturnType());
                 }
 
                 if ($node instanceof AstNode\Stmt\ClassMethod || $node instanceof AstNode\Stmt\Function_) {
@@ -151,6 +176,9 @@ final class MethodCallExtractor implements ExtractorInterface
                 ) {
                     array_pop($this->variables);
                 }
+                if ($node instanceof AstNode\FunctionLike) {
+                    array_pop($this->returns);
+                }
                 if ($node instanceof AstNode\Stmt\ClassLike) {
                     $this->scope->leave($node);
                     array_pop($this->classes);
@@ -174,8 +202,13 @@ final class MethodCallExtractor implements ExtractorInterface
                 }
 
                 // A UI handler's domain events: UiInteractionResult::dispatching(new X, …)
-                // — the component emits X once its interaction succeeds.
+                // — the component emits X once its interaction succeeds. The method
+                // name alone proves nothing, so the receiver must be that result:
+                // built in the same chain, or returned by the enclosing function.
                 if ($method === 'dispatching') {
+                    if (!$this->isUiResult($node)) {
+                        return;
+                    }
                     foreach ($node->args as $arg) {
                         if ($arg instanceof AstNode\Arg) {
                             $this->emit($this->classesOf($arg->value), $node->name->toString());
@@ -192,6 +225,22 @@ final class MethodCallExtractor implements ExtractorInterface
                 if ($first instanceof AstNode\Arg) {
                     $this->emit($this->classesOf($first->value), $node->name->toString());
                 }
+            }
+
+            /** Is the receiver of this `dispatching()` call a UiInteractionResult? */
+            private function isUiResult(AstNode\Expr\MethodCall|AstNode\Expr\NullsafeMethodCall|AstNode\Expr\StaticCall $node): bool
+            {
+                $root = $node;
+                while ($root instanceof AstNode\Expr\MethodCall || $root instanceof AstNode\Expr\NullsafeMethodCall) {
+                    $root = $root->var;
+                }
+                if (($root instanceof AstNode\Expr\StaticCall || $root instanceof AstNode\Expr\New_)
+                    && $root->class instanceof AstNode\Name
+                ) {
+                    return MethodCallExtractor::isUiResultType($root->class);
+                }
+
+                return $this->returns !== [] && $this->returns[array_key_last($this->returns)];
             }
 
             /** @param list<string> $events */
