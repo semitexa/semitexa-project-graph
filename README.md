@@ -4,6 +4,10 @@ Project graph package for fast AI and developer understanding of a Semitexa code
 
 Scans PHP source files, extracts semantic information via attributes and AST analysis, and stores it as a directed graph of nodes and edges. Enables LLMs and developers to understand a codebase in minutes instead of hours.
 
+## Install
+
+Included in every project created by the installer (https://semitexa.com/install.sh).
+
 ## Quick Start
 
 ```bash
@@ -16,10 +20,11 @@ bin/semitexa ai:review-graph:stats
 
 ## Full Documentation
 
-- [Architecture](docs/ARCHITECTURE.md) — Graph data model, node/edge types, extractors, storage
-- [Commands](docs/COMMANDS.md) — Complete CLI reference with examples
-- [AI Integration](docs/AI_INTEGRATION.md) — How AI agents consume the graph
-- [Intelligence Layer](docs/INTELLIGENCE.md) — Domains, flows, events, hotspots, intent inference
+- [Overview](https://semitexa.com/docs/project-graph/overview) — What the graph is and when to reach for it
+- [Architecture](https://semitexa.com/docs/project-graph/architecture) — Graph data model, node/edge types, extractors, storage
+- [Commands](https://semitexa.com/docs/project-graph/commands) — Complete CLI reference with examples
+- [AI Integration](https://semitexa.com/docs/project-graph/ai-integration) — How AI agents consume the graph
+- [Intelligence Layer](https://semitexa.com/docs/project-graph/intelligence) — Domains, flows, events, hotspots, intent inference
 
 ## Primary Workflow
 
@@ -46,8 +51,8 @@ bin/semitexa ai:review-graph:flow-trace CheckoutFlow
 # Get context for a development task
 bin/semitexa ai:review-graph:context "adding payment method"
 
-# Analyze impact of changing a component
-bin/semitexa ai:review-graph:impact PaymentService
+# Analyze impact of changing a component (class FQCN, file path or node id)
+bin/semitexa ai:review-graph:impact 'App\Modules\Ordering\Application\Service\PaymentService'
 
 # Module overview with domain, flows, events, hotspots
 bin/semitexa ai:review-graph:module Ordering --include-events --include-flows
@@ -59,7 +64,7 @@ bin/semitexa ai:review-graph:diff
 bin/semitexa ai:review-graph:watch
 ```
 
-All commands support `--format=json` for programmatic consumption by AI agents.
+For JSON output, `generate`, `stats`, `query`, `impact` and `capabilities` take `--json`; `context`, `event-trace`, `flow-trace`, `module`, `diff`, `show` and `findings` take `--format=json`. `intelligence` offers text or markdown only, and `watch` has no JSON mode.
 
 ## Storage
 
@@ -67,7 +72,7 @@ The graph uses its own named ORM connection: `project_graph`.
 
 - Preferred configuration: `DB_PROJECT_GRAPH_*`
 - Default fallback: dedicated SQLite database
-- Local CLI fallback path: `var/tmp/project-graph.sqlite`
+- Default SQLite paths: `var/storage/project-graph.sqlite` or `var/tmp/project-graph.sqlite` (whichever this process can write; the most recently written graph wins)
 
 This keeps graph storage separate from the application's primary database.
 
@@ -93,4 +98,6 @@ This keeps graph storage separate from the application's primary database.
 | `ai:review-graph:module` | Module overview with full context |
 | `ai:review-graph:diff` | Show graph changes since last scan |
 | `ai:review-graph:watch` | Watch for file changes and auto-update |
+| `ai:review-graph:findings` | Unused classes graded by confidence, and class dependency loops |
+| `ai:review-graph:intelligence` | Query the intelligence layer |
 | `ai:review-graph:capabilities` | List all available commands |
