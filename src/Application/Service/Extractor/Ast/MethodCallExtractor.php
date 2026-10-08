@@ -102,11 +102,28 @@ final class MethodCallExtractor implements ExtractorInterface
 
             /**
              * Per function being visited: whether it declares that it returns a
-             * UiInteractionResult, so `$result->dispatching(..)` inside it counts.
+             * UiInteractionResult, so the dispatching() call it returns counts.
              *
              * @var list<bool>
              */
             private array $returns = [];
+
+            /**
+             * Per function scope, parallel to $variables: the local variables
+             * known to hold a UiInteractionResult — a parameter typed so, or a
+             * variable assigned from a chain rooted in one.
+             *
+             * @var list<array<string, true>>
+             */
+            private array $uiResults = [[]];
+
+            /**
+             * The dispatching() calls whose value a function declared to return
+             * a UiInteractionResult returns — `return $x->dispatching(..)`.
+             *
+             * @var array<int, true>
+             */
+            private array $returned = [];
 
             public function __construct(
                 ParsedFile $file,
@@ -128,19 +145,49 @@ final class MethodCallExtractor implements ExtractorInterface
 
                 if ($node instanceof AstNode\Stmt\ClassMethod || $node instanceof AstNode\Stmt\Function_) {
                     $this->variables[] = [];
+                    $this->uiResults[] = [];
                 } elseif ($node instanceof AstNode\Expr\Closure) {
                     // A closure sees only what it captures.
                     $outer = $this->variables[array_key_last($this->variables)];
+                    $outerUi = $this->uiResults[array_key_last($this->uiResults)];
                     $captured = [];
+                    $capturedUi = [];
                     foreach ($node->uses as $use) {
                         if (is_string($use->var->name) && isset($outer[$use->var->name])) {
                             $captured[$use->var->name] = $outer[$use->var->name];
                         }
+                        if (is_string($use->var->name) && isset($outerUi[$use->var->name])) {
+                            $capturedUi[$use->var->name] = true;
+                        }
                     }
                     $this->variables[] = $captured;
+                    $this->uiResults[] = $capturedUi;
                 } elseif ($node instanceof AstNode\Expr\ArrowFunction) {
                     // An arrow function sees the enclosing scope by value.
                     $this->variables[] = $this->variables[array_key_last($this->variables)];
+                    $this->uiResults[] = $this->uiResults[array_key_last($this->uiResults)];
+                }
+
+                if ($node instanceof AstNode\FunctionLike) {
+                    $frame = array_key_last($this->uiResults);
+                    foreach ($node->getParams() as $param) {
+                        if ($param->var instanceof AstNode\Expr\Variable && is_string($param->var->name)) {
+                            if (MethodCallExtractor::isUiResultType($param->type)) {
+                                $this->uiResults[$frame][$param->var->name] = true;
+                            } else {
+                                unset($this->uiResults[$frame][$param->var->name]);
+                            }
+                        }
+                    }
+                }
+
+                // What a function declared to return a UiInteractionResult returns is one.
+                if ($this->returns !== [] && $this->returns[array_key_last($this->returns)]) {
+                    if ($node instanceof AstNode\Stmt\Return_ && $node->expr !== null) {
+                        $this->markReturned($node->expr);
+                    } elseif ($node instanceof AstNode\Expr\ArrowFunction) {
+                        $this->markReturned($node->expr);
+                    }
                 }
 
                 if ($node instanceof AstNode\Expr\Assign
@@ -153,6 +200,12 @@ final class MethodCallExtractor implements ExtractorInterface
                         $this->variables[$frame][$node->var->name] = $classes;
                     } else {
                         unset($this->variables[$frame][$node->var->name]);
+                    }
+                    $uiFrame = array_key_last($this->uiResults);
+                    if ($this->isUiResultExpr($node->expr)) {
+                        $this->uiResults[$uiFrame][$node->var->name] = true;
+                    } else {
+                        unset($this->uiResults[$uiFrame][$node->var->name]);
                     }
                 }
 
@@ -175,6 +228,7 @@ final class MethodCallExtractor implements ExtractorInterface
                     || $node instanceof AstNode\Expr\ArrowFunction
                 ) {
                     array_pop($this->variables);
+                    array_pop($this->uiResults);
                 }
                 if ($node instanceof AstNode\FunctionLike) {
                     array_pop($this->returns);
@@ -204,7 +258,9 @@ final class MethodCallExtractor implements ExtractorInterface
                 // A UI handler's domain events: UiInteractionResult::dispatching(new X, …)
                 // — the component emits X once its interaction succeeds. The method
                 // name alone proves nothing, so the receiver must be that result:
-                // built in the same chain, or returned by the enclosing function.
+                // a chain rooted in UiInteractionResult::…() / new, a parameter typed
+                // UiInteractionResult, a variable assigned one, or the very value a
+                // function declared to return UiInteractionResult returns.
                 if ($method === 'dispatching') {
                     if (!$this->isUiResult($node)) {
                         return;
@@ -230,17 +286,48 @@ final class MethodCallExtractor implements ExtractorInterface
             /** Is the receiver of this `dispatching()` call a UiInteractionResult? */
             private function isUiResult(AstNode\Expr\MethodCall|AstNode\Expr\NullsafeMethodCall|AstNode\Expr\StaticCall $node): bool
             {
-                $root = $node;
-                while ($root instanceof AstNode\Expr\MethodCall || $root instanceof AstNode\Expr\NullsafeMethodCall) {
-                    $root = $root->var;
-                }
-                if (($root instanceof AstNode\Expr\StaticCall || $root instanceof AstNode\Expr\New_)
-                    && $root->class instanceof AstNode\Name
-                ) {
-                    return MethodCallExtractor::isUiResultType($root->class);
+                if ($node instanceof AstNode\Expr\StaticCall) {
+                    return false;
                 }
 
-                return $this->returns !== [] && $this->returns[array_key_last($this->returns)];
+                return isset($this->returned[spl_object_id($node)]) || $this->isUiResultExpr($node->var);
+            }
+
+            /**
+             * Does this expression evaluate to a UiInteractionResult? A static
+             * call or `new` on the class, a variable known to hold one, followed
+             * only by dispatching() calls (which return the result itself).
+             */
+            private function isUiResultExpr(AstNode\Expr $expr): bool
+            {
+                while (($expr instanceof AstNode\Expr\MethodCall || $expr instanceof AstNode\Expr\NullsafeMethodCall)
+                    && $expr->name instanceof AstNode\Identifier
+                    && $expr->name->toLowerString() === 'dispatching'
+                ) {
+                    $expr = $expr->var;
+                }
+                if (($expr instanceof AstNode\Expr\StaticCall || $expr instanceof AstNode\Expr\New_)
+                    && $expr->class instanceof AstNode\Name
+                ) {
+                    return MethodCallExtractor::isUiResultType($expr->class);
+                }
+                if ($expr instanceof AstNode\Expr\Variable && is_string($expr->name)) {
+                    return isset($this->uiResults[array_key_last($this->uiResults)][$expr->name]);
+                }
+
+                return false;
+            }
+
+            /** The returned dispatching() chain: every link of it yields the returned result. */
+            private function markReturned(AstNode\Expr $expr): void
+            {
+                while (($expr instanceof AstNode\Expr\MethodCall || $expr instanceof AstNode\Expr\NullsafeMethodCall)
+                    && $expr->name instanceof AstNode\Identifier
+                    && $expr->name->toLowerString() === 'dispatching'
+                ) {
+                    $this->returned[spl_object_id($expr)] = true;
+                    $expr = $expr->var;
+                }
             }
 
             /** @param list<string> $events */

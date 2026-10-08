@@ -120,6 +120,31 @@ final class EmitsPrecisionTest extends TestCase
             {
                 return $result->dispatching(new \Campaign\Ev2\Closed());
             }
+
+            public function onOpen(): \Campaign\Lib2\UiInteractionResult
+            {
+                $result = \Campaign\Lib2\UiInteractionResult::ack();
+                $result = $result->dispatching(new \Campaign\Ev2\Shown());
+
+                return $this->later()->dispatching(new \Campaign\Ev2\Returned());
+            }
+        }
+
+        final class QueueingHandler
+        {
+            private $queue;
+            public function onSave($queue): \Campaign\Lib2\UiInteractionResult
+            {
+                $queue->dispatching(new \Campaign\Ev2\QueuedJob());
+                $this->queue->dispatching(new \Campaign\Ev2\QueuedJobToo());
+                $jobs = \Campaign\Lib2\Jobs::make();
+                $jobs->dispatching(new \Campaign\Ev2\BatchedJob());
+                $result = \Campaign\Lib2\UiInteractionResult::ack();
+                $result = new \Campaign\Lib2\Jobs();
+                $result->dispatching(new \Campaign\Ev2\ReassignedJob());
+
+                return \Campaign\Lib2\UiInteractionResult::ack();
+            }
         }
 
         final class Scheduler
@@ -155,7 +180,14 @@ final class EmitsPrecisionTest extends TestCase
         ], $from('Arena'));
         self::assertSame(['class:Campaign\\Ev2\\ConflictDetected'], $from('Announcer'));
         // verify:accept-test-change #[AsComponent(event:)] is retired (one component model); a component emits through its UI handler's dispatching() instead
-        self::assertSame(['class:Campaign\\Ev2\\Clicked', 'class:Campaign\\Ev2\\Closed', 'class:Campaign\\Ev2\\Opened'], $from('Widget'), 'a UI handler emits what it dispatching()s');
+        self::assertSame([
+            'class:Campaign\\Ev2\\Clicked',
+            'class:Campaign\\Ev2\\Closed',
+            'class:Campaign\\Ev2\\Opened',
+            'class:Campaign\\Ev2\\Returned',
+            'class:Campaign\\Ev2\\Shown',
+        ], $from('Widget'), 'a UI handler emits what it dispatching()s');
+        self::assertSame([], $from('QueueingHandler'), 'a UiInteractionResult return type does not make every receiver in the function one');
         self::assertSame([], $from('Scheduler'), 'dispatching() on anything but a UiInteractionResult emits nothing');
         self::assertSame([], $from('Button'), 'a component without a handler emits nothing');
     }
