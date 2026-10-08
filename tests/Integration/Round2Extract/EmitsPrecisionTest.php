@@ -108,10 +108,56 @@ final class EmitsPrecisionTest extends TestCase
             }
         }
 
-        #[\Semitexa\Ssr\Attribute\AsComponent(name: 'widget', event: \Campaign\Ev2\Clicked::class)]
-        final class Widget {}
+        #[\Semitexa\Ssr\Attribute\AsComponent(name: 'widget')]
+        final class Widget
+        {
+            public function onClick(): \Campaign\Lib2\Result
+            {
+                return \Campaign\Lib2\UiInteractionResult::ack()->dispatching(new \Campaign\Ev2\Clicked(), new \Campaign\Ev2\Opened());
+            }
 
-        #[\Semitexa\Ssr\Attribute\AsComponent(name: 'button', event: 'click')]
+            public function onClose(\Campaign\Lib2\UiInteractionResult $result): \Campaign\Lib2\UiInteractionResult
+            {
+                return $result->dispatching(new \Campaign\Ev2\Closed());
+            }
+
+            public function onOpen(): \Campaign\Lib2\UiInteractionResult
+            {
+                $result = \Campaign\Lib2\UiInteractionResult::ack();
+                $result = $result->dispatching(new \Campaign\Ev2\Shown());
+
+                return $this->later()->dispatching(new \Campaign\Ev2\Returned());
+            }
+        }
+
+        final class QueueingHandler
+        {
+            private $queue;
+            public function onSave($queue): \Campaign\Lib2\UiInteractionResult
+            {
+                $queue->dispatching(new \Campaign\Ev2\QueuedJob());
+                $this->queue->dispatching(new \Campaign\Ev2\QueuedJobToo());
+                $jobs = \Campaign\Lib2\Jobs::make();
+                $jobs->dispatching(new \Campaign\Ev2\BatchedJob());
+                $result = \Campaign\Lib2\UiInteractionResult::ack();
+                $result = new \Campaign\Lib2\Jobs();
+                $result->dispatching(new \Campaign\Ev2\ReassignedJob());
+
+                return \Campaign\Lib2\UiInteractionResult::ack();
+            }
+        }
+
+        final class Scheduler
+        {
+            private $queue;
+            public function f(): void
+            {
+                $this->queue->dispatching(new \Campaign\Ev2\NotAUiEvent());
+                \Campaign\Lib2\Jobs::make()->dispatching(new \Campaign\Ev2\NotAUiEventEither());
+            }
+        }
+
+        #[\Semitexa\Ssr\Attribute\AsComponent(name: 'button')]
         final class Button {}
         PHP;
 
@@ -133,7 +179,16 @@ final class EmitsPrecisionTest extends TestCase
             'class:Campaign\\Ev2\\TernaryB',
         ], $from('Arena'));
         self::assertSame(['class:Campaign\\Ev2\\ConflictDetected'], $from('Announcer'));
-        self::assertSame(['class:Campaign\\Ev2\\Clicked'], $from('Widget'));
-        self::assertSame([], $from('Button'), "a DOM event name is not a class");
+        // verify:accept-test-change #[AsComponent(event:)] is retired (one component model); a component emits through its UI handler's dispatching() instead
+        self::assertSame([
+            'class:Campaign\\Ev2\\Clicked',
+            'class:Campaign\\Ev2\\Closed',
+            'class:Campaign\\Ev2\\Opened',
+            'class:Campaign\\Ev2\\Returned',
+            'class:Campaign\\Ev2\\Shown',
+        ], $from('Widget'), 'a UI handler emits what it dispatching()s');
+        self::assertSame([], $from('QueueingHandler'), 'a UiInteractionResult return type does not make every receiver in the function one');
+        self::assertSame([], $from('Scheduler'), 'dispatching() on anything but a UiInteractionResult emits nothing');
+        self::assertSame([], $from('Button'), 'a component without a handler emits nothing');
     }
 }

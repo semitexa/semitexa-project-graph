@@ -81,7 +81,7 @@ final class ReviewGraphCapabilitiesCommand extends BaseCommand
                 ['cmd' => 'ai:ask', 'args' => ['capabilities', '--json'], 'why' => 'curated (non-graph) capability list — same fields, no project context'],
                 ['cmd' => 'ai:ask', 'args' => ['project', '--json'], 'why' => 'module-level structural overview'],
             ];
-            $output->writeln(json_encode($payload, JSON_UNESCAPED_SLASHES));
+            $output->writeln(json_encode($payload, JSON_UNESCAPED_SLASHES), OutputInterface::OUTPUT_RAW);
             return self::SUCCESS;
         }
 

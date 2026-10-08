@@ -109,7 +109,7 @@ final class ReviewGraphFindingsCommand extends BaseCommand
      */
     private function json(OutputInterface $output, array $unused, array $cycles, array $coverage): int
     {
-        $output->writeln((string) json_encode(['unused' => $unused, 'cycles' => $cycles, 'coverage' => $coverage], JSON_UNESCAPED_SLASHES));
+        $output->writeln((string) json_encode(['unused' => $unused, 'cycles' => $cycles, 'coverage' => $coverage], JSON_UNESCAPED_SLASHES), OutputInterface::OUTPUT_RAW);
 
         return self::SUCCESS;
     }
@@ -121,9 +121,9 @@ final class ReviewGraphFindingsCommand extends BaseCommand
      */
     private function ndjson(OutputInterface $output, array $unused, array $cycles, array $coverage): int
     {
-        $output->writeln((string) json_encode(['kind' => 'summary', 'unused' => count($unused), 'cycles' => count($cycles), 'coverage' => $coverage], JSON_UNESCAPED_SLASHES));
+        $output->writeln((string) json_encode(['kind' => 'summary', 'unused' => count($unused), 'cycles' => count($cycles), 'coverage' => $coverage], JSON_UNESCAPED_SLASHES), OutputInterface::OUTPUT_RAW);
         foreach ([...$unused, ...$cycles] as $finding) {
-            $output->writeln((string) json_encode($finding, JSON_UNESCAPED_SLASHES));
+            $output->writeln((string) json_encode($finding, JSON_UNESCAPED_SLASHES), OutputInterface::OUTPUT_RAW);
         }
 
         return self::SUCCESS;

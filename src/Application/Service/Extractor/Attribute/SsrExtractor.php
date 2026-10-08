@@ -43,25 +43,6 @@ final class SsrExtractor implements ExtractorInterface
                     module:   $file->module,
                     metadata: [],
                 ));
-
-                // #[AsComponent(event: X::class)] names the event the component
-                // raises: it emits X, though no dispatch() call says so (round
-                // 2, 2026-10-02: DisclosurePromptComponent emitting
-                // DemoDisclosureExpanded was missing from "who emits X"). A
-                // plain DOM event name ('click') is not a class: only a
-                // namespaced name counts.
-                $arguments = $classInfo->getAttribute(AsComponent::class)?->unreadableReason() === null
-                    ? $classInfo->getAttribute(AsComponent::class)?->getArguments() ?? []
-                    : [];
-                $event = $arguments['event'] ?? $arguments[4] ?? null;
-                if (is_string($event) && str_contains(ltrim($event, '\\'), '\\')) {
-                    $result->addEdge(new Edge(
-                        sourceId: NodeId::forClass($classInfo->fqcn),
-                        targetId: NodeId::forClass(ltrim($event, '\\')),
-                        type:     EdgeType::Emits,
-                        metadata: ['via' => 'component'],
-                    ));
-                }
             }
 
             if ($classInfo->hasAttribute(AsSlotHandler::class)) {
