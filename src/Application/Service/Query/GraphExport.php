@@ -41,6 +41,11 @@ final class GraphExport
     {
         $browser = new GraphBrowser($this->storage, $this->projectRoot);
 
+        // First, while nothing else is held: the finders index every edge, and
+        // built after the nodes, edges and rows below the two peaks added up
+        // past 128M on the workspace (78k edges, 2026-10-16).
+        $findings = $browser->findings();
+
         $focusId = null;
         if ($focus !== null && $focus !== '') {
             $node = $this->storage->nodes->findById($focus) ?? $this->storage->nodes->findByFqcn($focus);
@@ -83,6 +88,13 @@ final class GraphExport
 
         $edges = [];
         $fanIn = [];
+        // Every row brings its own copy of each string; the edges share the
+        // node keys' instead (workspace, 2026-10-16: 104.6M -> 97.1M after this loop).
+        $shared = [];
+        foreach (array_keys($nodes) as $id) {
+            $shared[$id] = $id;
+        }
+        $labels = [];
         // Paged rows, not Edge objects: ~70k of those do not fit a 128M CLI.
         foreach ($this->storage->edges->withSources() as $edge) {
             $kind = $edge['type'];
@@ -91,10 +103,12 @@ final class GraphExport
                 continue;
             }
             $fanIn[$edge['target_id']] = ($fanIn[$edge['target_id']] ?? 0) + 1;
-            if (isset($nodes[$edge['source_id']], $nodes[$edge['target_id']])) {
-                $edges[] = ['s' => $edge['source_id'], 't' => $edge['target_id'], 'k' => $kind, 'c' => $type->edgeClass()->value];
+            if (isset($shared[$edge['source_id']], $shared[$edge['target_id']])) {
+                $class = $type->edgeClass()->value;
+                $edges[] = ['s' => $shared[$edge['source_id']], 't' => $shared[$edge['target_id']], 'k' => $labels[$kind] ??= $kind, 'c' => $labels[$class] ??= $class];
             }
         }
+        unset($shared, $labels);
 
         $rows = [];
         $gaps = [];
@@ -115,7 +129,6 @@ final class GraphExport
         }
         unset($list);
 
-        $findings = $browser->findings();
         $findings['unused'] = array_values(array_filter($findings['unused'], static fn (array $u): bool => isset($nodes[$u['node']['id']])));
         // A loop that crosses the slice's edge keeps the members inside it —
         // the viewer focuses members[0], and one outside the file cannot load.
