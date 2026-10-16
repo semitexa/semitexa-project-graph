@@ -74,6 +74,7 @@ final class PayloadExtractor implements ExtractorInterface
                     module:   $file->module,
                     metadata: [
                         'path'          => $instance->path ?? '',
+                        'name'          => is_string($instance->name ?? null) ? $instance->name : '',
                         'methods'       => $instance->methods ?? ['GET'],
                         'responseClass' => $instance->responseWith ?? null,
                         'produces'      => $instance->produces ?? ['text/html'],
@@ -82,7 +83,9 @@ final class PayloadExtractor implements ExtractorInterface
                 );
                 $result->addNode($payloadNode);
 
-                $methods = $instance->methods ?? ['GET'];
+                // A payload addressed by name over HUG/KISS has no path: it made
+                // route:GET: — an empty route no request can match (2026-10-16).
+                $methods = ($instance->path ?? '') !== '' ? ($instance->methods ?? ['GET']) : [];
                 foreach ($methods as $method) {
                     $routeNode = new Node(
                         id:       NodeId::forRoute($method, $instance->path ?? ''),
