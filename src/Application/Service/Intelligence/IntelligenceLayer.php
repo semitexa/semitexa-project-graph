@@ -32,39 +32,31 @@ final class IntelligenceLayer
         return DomainContext::fromNode($domainNode);
     }
 
-    public function getExecutionFlow(string $flowName): ?ExecutionFlow
+    /**
+     * A flow by its id (`flow:<payload class>`) or by its name when only one
+     * flow carries it. Two modules may both have a GetCustomerFlow; a name
+     * that matches both is answered with null rather than with either.
+     */
+    public function getExecutionFlow(string $flow): ?ExecutionFlow
     {
-        $flowId = NodeId::forFlow($flowName);
-        $flowNode = $this->query->getNode($flowId);
-        if ($flowNode === null) {
-            return null;
+        $node = $this->findFlowNode($flow);
+
+        return $node !== null ? (new FlowTracer($this->query))->trace($node) : null;
+    }
+
+    public function findFlowNode(string $flow): ?Node
+    {
+        if (str_starts_with($flow, 'flow:')) {
+            $node = $this->query->getNode($flow);
+            return $node?->getType() === NodeType::ExecutionFlow ? $node : null;
         }
 
-        $steps = $flowNode->getMetadata()['steps'] ?? [];
-        $eventsEmitted = $flowNode->getMetadata()['events_emitted'] ?? [];
+        $hits = array_values(array_filter(
+            $this->query->findNodes(type: NodeType::ExecutionFlow->value),
+            static fn (Node $node): bool => in_array(strtolower((string) ($node->getMetadata()['name'] ?? '')), [strtolower($flow), strtolower($flow . 'Flow')], true),
+        ));
 
-        $stepNodes = [];
-        foreach ($steps as $step) {
-            $node = $this->query->getNode($step['node'] ?? '');
-            if ($node !== null) {
-                $stepNodes[] = [
-                    'order' => $step['order'] ?? 0,
-                    'node' => $node->getFqcn() ?: $step['node'],
-                    'role' => $step['role'] ?? '',
-                ];
-            }
-        }
-
-        return new ExecutionFlow(
-            id: $flowId,
-            name: $flowName,
-            entryPoint: $flowNode->getMetadata()['entry_point'] ?? '',
-            steps: $stepNodes,
-            storageTouches: $flowNode->getMetadata()['storage_touches'] ?? [],
-            externalCalls: $flowNode->getMetadata()['external_calls'] ?? [],
-            syncBoundary: $flowNode->getMetadata()['sync_boundary'] ?? null,
-            eventsEmitted: $eventsEmitted,
-        );
+        return count($hits) === 1 ? $hits[0] : null;
     }
 
     public function getEventLifecycle(string $eventClass): ?EventLifecycle

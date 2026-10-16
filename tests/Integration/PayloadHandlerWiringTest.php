@@ -78,7 +78,7 @@ final class PayloadHandlerWiringTest extends TestCase
             self::assertStringNotContainsString('GET,POST', $line);
         }
 
-        $flow = $fixture->storage->nodes->findById('flow:MultiFlow');
+        $flow = $fixture->storage->nodes->findById('flow:Campaign\\Flow\\MultiPayload');
         self::assertNotNull($flow);
         self::assertNotNull($fixture->storage->nodes->findById((string) $flow->getMetadata()['entry_point']), 'the flow starts at a route that exists');
     }

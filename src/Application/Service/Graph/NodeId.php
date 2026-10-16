@@ -51,16 +51,6 @@ final class NodeId
         return 'flow:' . $name;
     }
 
-    public static function forEventFlow(string $name): string
-    {
-        return 'event_flow:' . $name;
-    }
-
-    public static function forLifecycle(string $name): string
-    {
-        return 'lifecycle:' . $name;
-    }
-
     public static function forBoundary(string $name): string
     {
         return 'boundary:' . $name;

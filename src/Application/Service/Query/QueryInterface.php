@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Service\Query;
 
+use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageGapKind;
+use Semitexa\ProjectGraph\Domain\Model\CoverageGap;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Domain\Model\Node;
 
@@ -70,4 +72,11 @@ interface QueryInterface
      * @return array<string, true>
      */
     public function sourcesOf(string $type): array;
+
+    /**
+     * The recorded coverage gaps, of one kind or all.
+     *
+     * @return list<CoverageGap>
+     */
+    public function coverageGaps(?CoverageGapKind $kind = null): array;
 }

@@ -215,7 +215,7 @@ final class ContextBuilderCommand extends BaseCommand
             }
         }
         foreach (array_slice(array_keys($flowIds), 0, 10) as $flowId) {
-            $flow = $intelligence->getExecutionFlow(str_starts_with($flowId, 'flow:') ? substr($flowId, 5) : $flowId);
+            $flow = $intelligence->getExecutionFlow($flowId);
             if ($flow !== null) {
                 $context['related_flows'][] = [
                     'name' => $flow->name,

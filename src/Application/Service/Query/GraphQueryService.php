@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Application\Service\Query;
 
+use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageGapKind;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
@@ -529,5 +530,10 @@ final class GraphQueryService implements QueryInterface
         }
 
         return $allEdges;
+    }
+
+    public function coverageGaps(?CoverageGapKind $kind = null): array
+    {
+        return $this->storage->gaps->findAll($kind);
     }
 }

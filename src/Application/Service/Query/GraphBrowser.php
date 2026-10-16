@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Service\Query;
 
 use Semitexa\ProjectGraph\Application\Service\Findings\FindingsReport;
+use Semitexa\ProjectGraph\Application\Service\Findings\TestCode;
 use Semitexa\ProjectGraph\Application\Service\Findings\UnusedClassFinder;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
+use Semitexa\ProjectGraph\Application\Service\Intelligence\FlowTracer;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Domain\Model\Node;
 
@@ -354,6 +356,69 @@ final class GraphBrowser
             'line' => $node->getLine(),
             'placeholder' => $node->getIsPlaceholder(),
             'gaps' => $gaps,
+        ];
+    }
+
+    /**
+     * Every execution flow, cheap: read off the flow nodes, nothing traced.
+     * Tracing all of them takes ~40 s on the workspace (2026-10-16), so the
+     * view lists them and traces the one that is opened.
+     *
+     * @return list<array{id: string, name: string, module: string, entry_point: string, test: bool}>
+     */
+    public function flows(): array
+    {
+        $tests = TestCode::of($this->storage);
+        $flows = [];
+        foreach ($this->storage->nodes->findByType(NodeType::ExecutionFlow->value) as $node) {
+            // Named only by a handler: of an abstract feed base, or of stdClass. No request enters there.
+            if ($node->getIsPlaceholder()) {
+                continue;
+            }
+            $flows[] = [
+                'id' => $node->getId(),
+                'name' => (string) ($node->getMetadata()['name'] ?? $node->getId()),
+                'module' => $node->getModule(),
+                'entry_point' => (string) ($node->getMetadata()['entry_point'] ?? ''),
+                'test' => $tests->contains($node->getFile()),
+            ];
+        }
+        usort($flows, static fn (array $a, array $b): int => [$a['test'], $a['module'], $a['name']] <=> [$b['test'], $b['module'], $b['name']]);
+
+        return $flows;
+    }
+
+    /**
+     * One flow traced, with the node of each step and of each gap resolved
+     * for the view; null when there is no such flow.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function flow(string $id): ?array
+    {
+        $node = $this->storage->nodes->findById($id);
+        if ($node === null || $node->getType() !== NodeType::ExecutionFlow) {
+            return null;
+        }
+        $flow = (new FlowTracer(new GraphQueryService($this->storage)))->trace($node);
+        $resolve = function (string $id): ?array {
+            $found = $this->storage->nodes->findById($id) ?? $this->storage->nodes->findById('class:' . $id);
+
+            return $found !== null ? $this->node($found) : null;
+        };
+
+        return [
+            'id' => $flow->id,
+            'name' => $flow->name,
+            'module' => $node->getModule(),
+            'entry_point' => $flow->entryPoint,
+            'steps' => array_map(static fn (array $step): array => $step + ['ref' => $resolve((string) $step['node'])], $flow->steps),
+            'sync_boundary' => $flow->syncBoundary,
+            'events_emitted' => $flow->eventsEmitted,
+            'storage_touches' => $flow->storageTouches,
+            'infrastructure' => $flow->infrastructure,
+            'complete' => $flow->isComplete(),
+            'gaps' => array_map(static fn (array $gap): array => $gap + ['ref' => $resolve($gap['at'])], $flow->gaps),
         ];
     }
 
