@@ -49,8 +49,6 @@ enum EdgeType: string
 
     case BelongsToDomain    = 'belongs_to_domain';
     case ParticipatesInFlow = 'participates_in_flow';
-    case TriggersFlow       = 'triggers_flow';
-    case PrecedesInFlow     = 'precedes_in_flow';
     case CrossesBoundary    = 'crosses_boundary';
     case IsHotspot          = 'is_hotspot';
     case CoupledTo          = 'coupled_to';
@@ -93,7 +91,7 @@ enum EdgeType: string
             self::Calls, self::Instantiates, self::Returns, self::Accepts, self::References, self::AnnotatedWith, self::Emits, self::Tests
                 => EdgeClass::CodeReference,
 
-            self::BelongsToDomain, self::ParticipatesInFlow, self::TriggersFlow, self::PrecedesInFlow,
+            self::BelongsToDomain, self::ParticipatesInFlow,
             self::CrossesBoundary, self::IsHotspot, self::CoupledTo, self::IntentFor
                 => EdgeClass::Inferred,
 

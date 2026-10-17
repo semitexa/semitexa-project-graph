@@ -14,6 +14,7 @@ use Semitexa\ProjectGraph\Application\Service\Extractor\SafeAttributeResolver;
 use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
+use Semitexa\ProjectGraph\Application\Service\Parser\ClassInfo;
 use Semitexa\ProjectGraph\Application\Service\Parser\ParsedFile;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Domain\Model\Node;
@@ -55,7 +56,15 @@ final class ExecutionFlowExtractor implements ExtractorInterface
 
             $path = $instance->path ?? '';
             $methods = $instance->methods ?? ['GET'];
+            $name = is_string($instance->name ?? null) ? $instance->name : '';
 
+            // A payload addressed by name over HUG/KISS has no path but is an
+            // entry point all the same: it was skipped, so its handler joined a
+            // flow node nobody wrote (platform-ui.form-doc, 2026-10-16).
+            if ($path === '' && $name !== '') {
+                $this->addFlow($result, $file, $payload, 'hug:' . $name, ['hug:' . $name]);
+                continue;
+            }
             if ($path === '') continue;
 
             // One route per method, as PayloadExtractor makes them. The methods
@@ -78,35 +87,7 @@ final class ExecutionFlowExtractor implements ExtractorInterface
                 ));
             }
 
-            $flowName = $this->deriveFlowName($payload->fqcn, $path);
-            $flowId = NodeId::forFlow($flowName);
-
-            $flowNode = new Node(
-                id: $flowId,
-                type: NodeType::ExecutionFlow,
-                fqcn: '',
-                file: $file->path,
-                line: $payload->startLine,
-                endLine: $payload->endLine,
-                module: $file->module,
-                metadata: [
-                    'name' => $flowName,
-                    'entry_point' => $routeId,
-                    'entry_points' => $routeIds,
-                    'steps' => [
-                        ['order' => 1, 'node' => $payloadId, 'role' => 'payload'],
-                    ],
-                    'events_emitted' => [],
-                ],
-            );
-            $result->addNode($flowNode);
-
-            $result->addEdge(new Edge(
-                sourceId: $payloadId,
-                targetId: $flowId,
-                type: EdgeType::ParticipatesInFlow,
-                metadata: ['role' => 'entry'],
-            ));
+            $this->addFlow($result, $file, $payload, $routeId, $routeIds);
         }
         }
 
@@ -130,8 +111,7 @@ final class ExecutionFlowExtractor implements ExtractorInterface
                     metadata: ['execution' => $execution],
                 ));
 
-                $flowName = $this->deriveFlowName($payloadClass, null);
-                $flowId = NodeId::forFlow($flowName);
+                $flowId = NodeId::forFlow($payloadClass);
 
                 $result->addEdge(new Edge(
                     sourceId: $handlerId,
@@ -153,7 +133,46 @@ final class ExecutionFlowExtractor implements ExtractorInterface
         return $result;
     }
 
-    private function deriveFlowName(string $fqcn, ?string $path): string
+    /** @param list<string> $entryPoints */
+    private function addFlow(ExtractionResult $result, ParsedFile $file, ClassInfo $payload, string $entryPoint, array $entryPoints): void
+    {
+        $payloadId = NodeId::forClass($payload->fqcn);
+        $flowId = NodeId::forFlow($payload->fqcn);
+
+        $result->addNode(new Node(
+            id: $flowId,
+            type: NodeType::ExecutionFlow,
+            fqcn: '',
+            file: $file->path,
+            line: $payload->startLine,
+            endLine: $payload->endLine,
+            module: $file->module,
+            metadata: [
+                'name' => $this->deriveFlowName($payload->fqcn),
+                'entry_point' => $entryPoint,
+                'entry_points' => $entryPoints,
+                'steps' => [
+                    ['order' => 1, 'node' => $payloadId, 'role' => 'payload'],
+                ],
+                'events_emitted' => [],
+            ],
+        ));
+
+        $result->addEdge(new Edge(
+            sourceId: $payloadId,
+            targetId: $flowId,
+            type: EdgeType::ParticipatesInFlow,
+            metadata: ['role' => 'entry'],
+        ));
+    }
+
+    /**
+     * The name a person reads; never the id. The id was this short name, so two
+     * modules with a GetCustomerPayload shared one flow node: 9 on the workspace
+     * (measured 2026-10-16), the later file's payload overwrote the other's and
+     * both handlers joined whichever flow survived.
+     */
+    private function deriveFlowName(string $fqcn): string
     {
         $shortName = array_slice(explode('\\', $fqcn), -1)[0] ?? 'Unknown';
         $base = preg_replace('/(Payload|Request|Command)$/', '', $shortName) ?? $shortName;

@@ -50,8 +50,6 @@ enum NodeType: string
 
     case DomainContext    = 'domain_context';
     case ExecutionFlow    = 'execution_flow';
-    case EventFlow        = 'event_flow';
-    case DataLifecycle    = 'data_lifecycle';
     case SystemBoundary   = 'system_boundary';
     case Hotspot          = 'hotspot';
 
@@ -87,9 +85,7 @@ enum NodeType: string
             'pipeline'     => self::PipelinePhase,
             'auth'         => self::AuthHandler,
             'flow'         => self::ExecutionFlow,
-            'event_flow'   => self::EventFlow,
             'domain'       => self::DomainContext,
-            'lifecycle'    => self::DataLifecycle,
             'boundary'     => self::SystemBoundary,
             'hotspot'      => self::Hotspot,
             'stream'       => self::JetStream,

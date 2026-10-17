@@ -5,7 +5,8 @@
  * `ai:review-graph:show --format=html` writes, which carries the graph inside
  * it. The difference is a DATA SOURCE — an object with summary(), node(),
  * subgraph(), path(), search() and findings(), each returning a Promise — so
- * the views are written once and cannot drift apart.
+ * the views are written once and cannot drift apart. flows() and flow() are
+ * live only: a flow is traced on demand, which a file cannot do.
  *
  * Plain hand-written JS like the rest of the dev tools: no bundler, no
  * framework. No inline style either — the Observatory runs under a strict
@@ -18,7 +19,9 @@
  *   - a DAG of the focused node's neighbourhood where every class appears
  *     once and fan-in is drawn as weight;
  *   - a detail panel with every edge, both directions;
- *   - FINDINGS, each focusing its node.
+ *   - FINDINGS, each focusing its node;
+ *   - FLOWS (live only): every business flow, and the opened one traced
+ *     step by step with the places the graph stops seeing it.
  */
 (() => {
 'use strict';
@@ -59,6 +62,8 @@ function fetchSource(endpoint) {
     search: q => get({view: 'search', q}).then(b => { const hits = b.hits; hits.truncated = b.truncated === true; return hits; }),
     findings: () => get({view: 'findings'}),
     traces: id => get({view: 'traces', id}).then(b => b.traces),
+    flows: () => get({view: 'flows'}).then(b => b.flows),
+    flow: id => get({view: 'flow', id}),
   };
 }
 
@@ -180,12 +185,14 @@ function mount(root, source, options = {}) {
   const tabTree = el('button', 'on', 'Entry points'); tabTree.type = 'button';
   const tabFind = el('button', '', 'Findings'); tabFind.type = 'button';
   const findBadge = el('b'); findBadge.hidden = true; tabFind.append(findBadge);
-  tabs.append(tabTree, tabFind);
+  const tabFlow = el('button', '', 'Flows'); tabFlow.type = 'button'; tabFlow.hidden = !source.flows;
+  tabs.append(tabTree, tabFind, tabFlow);
   const treeScroll = el('div', 'gv-scroll');
   const tree = el('div', 'gv-tree'); tree.setAttribute('role', 'tree'); tree.tabIndex = 0;
   treeScroll.append(tree);
   const findScroll = el('div', 'gv-scroll'); findScroll.hidden = true;
-  side.append(tabs, treeScroll, findScroll);
+  const flowScroll = el('div', 'gv-scroll'); flowScroll.hidden = true;
+  side.append(tabs, treeScroll, findScroll, flowScroll);
 
   const main = el('section', 'gv-pane gv-main');
   const mainHead = el('h2'); const mainTitle = el('span', '', 'Focus');
@@ -482,19 +489,21 @@ function mount(root, source, options = {}) {
 
   /* ---- tabs ---- */
   function showTab(which) {
-    tabTree.classList.toggle('on', which === 'tree'); tabFind.classList.toggle('on', which === 'find');
-    treeScroll.hidden = which !== 'tree'; findScroll.hidden = which !== 'find';
+    tabTree.classList.toggle('on', which === 'tree'); tabFind.classList.toggle('on', which === 'find'); tabFlow.classList.toggle('on', which === 'flow');
+    treeScroll.hidden = which !== 'tree'; findScroll.hidden = which !== 'find'; flowScroll.hidden = which !== 'flow';
     if (which === 'find' && api.loadFindings) api.loadFindings();
+    if (which === 'flow' && api.loadFlows) api.loadFlows();
   }
   tabTree.addEventListener('click', () => showTab('tree'));
   tabFind.addEventListener('click', () => showTab('find'));
+  tabFlow.addEventListener('click', () => showTab('flow'));
 
   /* ---- focus graph (DAG), filled in by the DAG module below ---- */
   function focusGraph(id) { S.focus = id; if (api.drawFocus) api.drawFocus(id); }
 
   const api = {
     S, source, root, select, reveal, showTab,
-    parts: {bar, ctl, wrap, mainEmpty, mainTitle, findScroll, findBadge, detailBody},
+    parts: {bar, ctl, wrap, mainEmpty, mainTitle, findScroll, findBadge, flowScroll, detailBody},
     helpers: {el, dot, moduleClass, fail, kindRank, ENTRY_REVERSED},
     focusSearch: () => input.focus(),
   };
@@ -930,6 +939,147 @@ const ext = api => {
       }
     }
     box.append(list);
+  }
+};
+window.SemitexaGraphView = window.SemitexaGraphView || {};
+(window.SemitexaGraphView.extensions = window.SemitexaGraphView.extensions || []).push(ext);
+})();
+
+/* ======================================================================
+ * Flows: a request's business path — payload, handler, the tables it
+ * touches, the events it fires and who hears them — traced on demand.
+ *
+ * The list is cheap (read off the flow nodes); one flow is traced when it
+ * is opened. A trace is only as good as what the graph saw, so the places it
+ * stopped seeing come first and a flow is called complete only without them.
+ * ====================================================================== */
+(() => {
+'use strict';
+const GAP_LABEL = {
+  no_handler: 'no handler',
+  ambiguous_contract: 'which class?',
+  unbound_contract: 'no implementation',
+  depth_limit: 'not followed further',
+  dynamic_reference: 'runtime class',
+  event_without_listener: 'nobody listens',
+  conditional_listener: 'may act',
+};
+const ext = api => {
+  const {source, parts, helpers} = api;
+  const {el, dot, fail} = helpers;
+  if (!source.flows) return;
+  const L = {list: null, loading: null, filter: '', tests: false, open: null};
+  const short = s => String(s).replace(/^(class|flow):/, '').split('\\').pop();
+
+  api.loadFlows = () => {
+    if (L.loading) return L.loading;
+    parts.flowScroll.replaceChildren(el('div', 'gv-empty', 'Reading the flows…'));
+    L.loading = source.flows().then(list => { L.list = list; renderList(); }).catch(err => { L.loading = null; fail(parts.flowScroll, err); });
+    return L.loading;
+  };
+
+  function renderList() {
+    const box = parts.flowScroll; box.replaceChildren(); L.open = null;
+    const head = el('div', 'gv-sec');
+    const input = el('input', 'gv-flow-filter'); input.type = 'search'; input.placeholder = 'Filter flows by name, module or route…'; input.value = L.filter;
+    input.setAttribute('aria-label', 'Filter flows');
+    const seg = el('div', 'gv-seg');
+    const business = el('button', L.tests ? '' : 'on', 'business'); business.type = 'button';
+    const tests = el('button', L.tests ? 'on' : '', 'tests too'); tests.type = 'button';
+    business.addEventListener('click', () => { L.tests = false; renderList(); });
+    tests.addEventListener('click', () => { L.tests = true; renderList(); });
+    seg.append(business, tests);
+    head.append(input, seg);
+    const list = el('div', 'gv-sec');
+    box.append(head, list);
+    const fill = () => {
+      list.replaceChildren();
+      const needle = L.filter.trim().toLowerCase();
+      const rows = L.list.filter(f => (L.tests || !f.test) && (!needle || (f.name + ' ' + f.module + ' ' + f.entry_point).toLowerCase().includes(needle)));
+      if (!rows.length) list.append(el('div', 'gv-empty', 'No flow matches.'));
+      for (const f of rows.slice(0, 300)) {
+        const b = el('button', 'gv-find'); b.type = 'button';
+        const t = el('span', 'gv-ft'); t.append(dot({module: f.module}), ' ', f.name);
+        b.append(el('span', 'gv-fc gv-low', f.module || '—'), t, el('span', 'gv-fe', f.entry_point.replace(/^route:/, '') + (f.test ? ' · test' : '')));
+        b.addEventListener('click', () => openFlow(f.id));
+        list.append(b);
+      }
+      if (rows.length > 300) list.append(el('div', 'gv-empty', (rows.length - 300) + ' more — narrow the filter.'));
+    };
+    input.addEventListener('input', () => { L.filter = input.value; fill(); });
+    fill();
+  }
+
+  function openFlow(id) {
+    L.open = id;
+    const box = parts.flowScroll;
+    box.replaceChildren(el('div', 'gv-empty', 'Tracing the flow…'));
+    source.flow(id).then(f => { if (L.open === id) renderFlow(f); }).catch(err => fail(box, err));
+  }
+
+  function nodeButton(ref, label, note, badge, badgeClass) {
+    const b = el('button', 'gv-find'); b.type = 'button';
+    const t = el('span', 'gv-ft'); if (ref) t.append(dot(ref), ' '); t.append(label);
+    b.append(el('span', 'gv-fc ' + (badgeClass || 'gv-low'), badge), t);
+    if (note) b.append(el('span', 'gv-fe', note));
+    if (ref) b.addEventListener('click', () => api.select(ref.id)); else b.disabled = true;
+    return b;
+  }
+
+  function section(title, count) {
+    const sec = el('div', 'gv-sec'); const h = el('h4', '', title);
+    if (count !== undefined) h.append(el('span', '', String(count)));
+    sec.append(h); return sec;
+  }
+
+  function renderFlow(f) {
+    const box = parts.flowScroll; box.replaceChildren();
+    const top = el('div', 'gv-sec');
+    const back = el('button', 'gv-btn gv-flow-back', '‹ all flows'); back.type = 'button';
+    back.addEventListener('click', renderList);
+    top.append(back, el('div', 'gv-flow-name', f.name), el('div', 'gv-fe', f.entry_point.replace(/^route:/, '') + ' · ' + (f.module || 'no module')));
+    box.append(top);
+
+    const verdict = el('div', 'gv-gap gv-flow-verdict');
+    if (f.complete) { verdict.classList.add('gv-flow-complete'); verdict.append(el('b', '', 'Complete'), ' — the graph saw every step of this flow.'); }
+    else verdict.append(el('b', '', f.gaps.length + ' place' + (f.gaps.length === 1 ? '' : 's') + ' the graph stops seeing'), ' — what follows is what it could see, not all the flow does.');
+    verdict.append(el('div', 'gv-fe', 'Tables and events below are what its classes can reach, not what one request does: the graph holds no method calls.'));
+    box.append(verdict);
+
+    const steps = section('Steps', f.steps.length);
+    f.steps.forEach((st, i) => {
+      const async = f.sync_boundary !== null && i >= f.sync_boundary;
+      const notes = [];
+      if (st.event) notes.push('hears ' + short(st.event));
+      if (async) notes.push(st.execution || 'async');
+      if (st.certain === false) notes.push('may act — decides at runtime');
+      steps.append(nodeButton(st.ref, short(st.node), notes.join(' · '), st.role, st.certain === false ? 'gv-medium' : 'gv-low'));
+    });
+    box.append(steps);
+
+    if (f.storage_touches.length) {
+      const s = section('Tables it can reach', f.storage_touches.length);
+      s.append(el('div', 'gv-fe gv-flow-list', f.storage_touches.join(', ')));
+      box.append(s);
+    }
+    if (f.events_emitted.length) {
+      const s = section('Events it may fire', f.events_emitted.length);
+      s.append(el('div', 'gv-fe gv-flow-list', f.events_emitted.map(short).join(', ')));
+      box.append(s);
+    }
+    if (f.gaps.length) {
+      const g = section('Where it stops', f.gaps.length);
+      for (const gap of f.gaps) {
+        const note = gap.detail + (gap.candidates ? ' — ' + gap.candidates.map(short).join(', ') : '');
+        g.append(nodeButton(gap.ref, short(gap.at), note, GAP_LABEL[gap.kind] || gap.kind, 'gv-medium'));
+      }
+      box.append(g);
+    }
+    if (f.infrastructure.length) {
+      const s = section('Through the framework', f.infrastructure.length);
+      s.append(el('div', 'gv-fe gv-flow-list', 'Followed for the events it fires only: ' + f.infrastructure.map(short).join(', ')));
+      box.append(s);
+    }
   }
 };
 window.SemitexaGraphView = window.SemitexaGraphView || {};

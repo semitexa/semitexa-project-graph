@@ -55,8 +55,8 @@ final class EdgeDiffScenariosTest extends TestCase
             "imports {$payload} class:Semitexa\\Core\\Attribute\\AsPublicPayload",
             "intent_for {$handler} doc:{$handler}",
             "intent_for {$payload} doc:{$payload}",
-            "participates_in_flow {$handler} flow:CancelOrderFlow",
-            "participates_in_flow {$payload} flow:CancelOrderFlow",
+            "participates_in_flow {$handler} flow:" . substr($payload, strlen('class:')),
+            "participates_in_flow {$payload} flow:" . substr($payload, strlen('class:')),
             "produces {$handler} " . GraphFixture::classId('Orders\\OrderResource'),
             "serves_route {$payload} route:POST:/orders/cancel",
         ], $added);

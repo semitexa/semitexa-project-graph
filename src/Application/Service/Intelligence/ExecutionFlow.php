@@ -15,7 +15,26 @@ final readonly class ExecutionFlow
         public array   $externalCalls,
         public ?int    $syncBoundary,
         public array   $eventsEmitted,
+        /**
+         * Where the walk could not vouch for what comes next (FlowTracer::GAP_*).
+         *
+         * @var list<array{kind: string, at: string, detail: string, candidates?: list<string>}>
+         */
+        public array   $gaps = [],
+        /**
+         * Framework classes the flow passes through and is not followed into
+         * for tables or gaps (FlowTracer::INFRASTRUCTURE_FAN_IN).
+         *
+         * @var list<string>
+         */
+        public array   $infrastructure = [],
     ) {}
+
+    /** True only when nothing on the way was out of the graph's sight. */
+    public function isComplete(): bool
+    {
+        return $this->gaps === [];
+    }
 
     public function toMarkdown(): string
     {
@@ -50,10 +69,20 @@ final readonly class ExecutionFlow
         $md .= "```\n\n";
 
         if ($this->storageTouches !== []) {
-            $md .= "**Storage:** " . implode(', ', $this->storageTouches) . "\n\n";
+            $md .= "**Tables it can reach:** " . implode(', ', $this->storageTouches) . "\n\n";
         }
         if ($this->externalCalls !== []) {
             $md .= "**External:** " . implode(', ', $this->externalCalls) . "\n\n";
+        }
+        if ($this->infrastructure !== []) {
+            $md .= "**Through framework infrastructure** (followed for events only): " . implode(', ', array_map(fn (string $c): string => $this->shortName($c), $this->infrastructure)) . "\n\n";
+        }
+        if ($this->gaps !== []) {
+            $md .= "**Not seen past:**\n\n";
+            foreach ($this->gaps as $gap) {
+                $md .= "- `{$gap['kind']}` at `{$gap['at']}`: {$gap['detail']}\n";
+            }
+            $md .= "\n";
         }
 
         return $md;

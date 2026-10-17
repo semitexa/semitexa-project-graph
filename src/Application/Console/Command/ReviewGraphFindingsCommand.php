@@ -10,8 +10,11 @@ use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
 use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageReport;
 use Semitexa\ProjectGraph\Application\Service\Findings\FindingsReport;
+use Semitexa\ProjectGraph\Application\Service\Findings\FlowGapReport;
+use Semitexa\ProjectGraph\Application\Service\Findings\TestCode;
 use Semitexa\ProjectGraph\Application\Service\Findings\UnusedClassFinder;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
+use Semitexa\ProjectGraph\Application\Service\Query\GraphQueryService;
 use Semitexa\ProjectGraph\Application\Service\Support\AutoRefreshesProjectGraph;
 use Semitexa\ProjectGraph\Application\Service\Support\RefusesInMachineFormat;
 use Semitexa\ProjectGraph\Application\Service\Support\UsesProjectGraphConnection;
@@ -46,7 +49,7 @@ final class ReviewGraphFindingsCommand extends BaseCommand
 
     protected function configure(): void
     {
-        $this->addOption('kind', null, InputOption::VALUE_REQUIRED, 'unused, cycles, or all', 'all');
+        $this->addOption('kind', null, InputOption::VALUE_REQUIRED, 'unused, cycles, all, or flows (where the graph stops seeing a business flow; not part of all)', 'all');
         $this->addOption('min-confidence', null, InputOption::VALUE_REQUIRED, 'Unused classes at or above: high, medium, low', UnusedClassFinder::MEDIUM);
         $this->addOption('module', 'm', InputOption::VALUE_REQUIRED, 'Only unused classes of this module, and loops that touch it');
         $this->addOption('format', null, InputOption::VALUE_REQUIRED, 'text, json, ndjson, markdown', 'text');
@@ -63,7 +66,7 @@ final class ReviewGraphFindingsCommand extends BaseCommand
 
         $machine = in_array($format, ['json', 'ndjson'], true);
         $error = match (true) {
-            !in_array($kind, ['unused', 'cycles', 'all'], true) => '--kind must be unused, cycles or all.',
+            !in_array($kind, ['unused', 'cycles', 'all', 'flows'], true) => '--kind must be unused, cycles, all or flows.',
             !isset(self::CONFIDENCE_RANK[$minConfidence])      => '--min-confidence must be high, medium or low.',
             !in_array($format, ['text', 'json', 'ndjson', 'markdown'], true) => '--format must be text, json, ndjson or markdown.',
             default => null,
@@ -89,7 +92,12 @@ final class ReviewGraphFindingsCommand extends BaseCommand
             return $this->fail($io, $output, $machine, sprintf('No module "%s" in the graph. Known: %s.', $module, implode(', ', $known)));
         }
 
-        $report = (new FindingsReport())->collect($storage, $kind, $minConfidence, is_string($module) && $module !== '' ? $module : null);
+        $module = is_string($module) && $module !== '' ? $module : null;
+        if ($kind === 'flows') {
+            return $this->flows($output, $io, $format, (new FlowGapReport())->collect(new GraphQueryService($storage), $module, TestCode::of($storage)), (new CoverageReport($storage))->summary());
+        }
+
+        $report = (new FindingsReport())->collect($storage, $kind, $minConfidence, $module);
         $unused = $report['unused'];
         $cycles = $report['cycles'];
         $coverage = $report['coverage'];
@@ -100,6 +108,55 @@ final class ReviewGraphFindingsCommand extends BaseCommand
             'markdown' => $this->markdown($output, $unused, $cycles, $coverage),
             default    => $this->text($io, $unused, $cycles, $coverage),
         };
+    }
+
+    /**
+     * @param array{findings: list<array<string, mixed>>, flows: array{total: int, complete: int, incomplete: int, by_gap: array<string, int>, test_flows_skipped: int}} $report
+     * @param array<string, mixed> $coverage
+     */
+    private function flows(OutputInterface $output, SymfonyStyle $io, string $format, array $report, array $coverage): int
+    {
+        $findings = $report['findings'];
+        $flows = $report['flows'];
+        if ($format === 'json') {
+            $output->writeln((string) json_encode(['flow_gaps' => $findings, 'flows' => $flows, 'coverage' => $coverage], JSON_UNESCAPED_SLASHES), OutputInterface::OUTPUT_RAW);
+            return self::SUCCESS;
+        }
+        if ($format === 'ndjson') {
+            $output->writeln((string) json_encode(['kind' => 'summary', 'flow_gaps' => count($findings), 'flows' => $flows, 'coverage' => $coverage], JSON_UNESCAPED_SLASHES), OutputInterface::OUTPUT_RAW);
+            foreach ($findings as $finding) {
+                $output->writeln((string) json_encode($finding, JSON_UNESCAPED_SLASHES), OutputInterface::OUTPUT_RAW);
+            }
+            return self::SUCCESS;
+        }
+
+        $headline = sprintf('%d of %d flows complete: the graph sees every step; %d stop somewhere. (%d flows of test code left out.)', $flows['complete'], $flows['total'], $flows['incomplete'], $flows['test_flows_skipped']);
+        if ($format === 'markdown') {
+            $lines = ['### Flow gaps', '', $headline, ''];
+            if ($findings !== []) {
+                $lines[] = '| Flows | Gap | At | Why |';
+                $lines[] = '|---|---|---|---|';
+                foreach ($findings as $f) {
+                    $lines[] = sprintf('| %d | %s | `%s` | %s |', $f['flow_count'], $f['gap'], self::shortName($f['at']), str_replace('|', '\\|', $f['detail']));
+                }
+            }
+            $output->writeln(implode("\n", $lines), OutputInterface::OUTPUT_RAW);
+            return self::SUCCESS;
+        }
+
+        $io->text($headline);
+        foreach ($flows['by_gap'] as $gap => $count) {
+            $io->text(sprintf('  %-24s %d flows', $gap, $count));
+        }
+        if ($findings !== []) {
+            $io->section(sprintf('Where flows stop (%d places, most flows first)', count($findings)));
+            foreach ($findings as $f) {
+                $output->writeln(sprintf('%4d  %-24s %s', $f['flow_count'], $f['gap'], self::shortName($f['at'])), OutputInterface::OUTPUT_RAW);
+                $output->writeln('      ' . $f['detail'], OutputInterface::OUTPUT_RAW);
+            }
+        }
+
+        return self::SUCCESS;
     }
 
     /**

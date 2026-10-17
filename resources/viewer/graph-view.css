@@ -130,3 +130,10 @@
 .gv-find .gv-fc.gv-low{color:var(--gv-dim);border:1px solid var(--gv-line-2)}
 .gv-find .gv-ft{font-size:12px;min-width:0;overflow-wrap:anywhere}
 .gv-find .gv-fe{grid-column:2;font:10.5px/1.35 var(--gv-mono);color:var(--gv-faint);word-break:break-word}
+/* flows */
+.gv-flow-filter{width:100%;margin:0 0 6px;padding:6px 8px;border-radius:8px;border:1px solid var(--gv-line-2);background:var(--gv-panel-2);color:var(--gv-text);font:12px/1.2 var(--gv-mono)}
+.gv-flow-back{margin:0 0 6px}
+.gv-flow-verdict.gv-flow-complete{border-color:color-mix(in srgb,var(--gv-ok) 55%,transparent)}
+.gv-flow-verdict.gv-flow-complete b{color:var(--gv-ok)}
+.gv-flow-list{padding:0 4px 6px}
+.gv-flow-name{font:600 13px/1.3 var(--gv-mono);color:var(--gv-text);margin:2px 4px 2px;overflow-wrap:anywhere}

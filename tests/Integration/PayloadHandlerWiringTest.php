@@ -78,9 +78,33 @@ final class PayloadHandlerWiringTest extends TestCase
             self::assertStringNotContainsString('GET,POST', $line);
         }
 
-        $flow = $fixture->storage->nodes->findById('flow:MultiFlow');
+        $flow = $fixture->storage->nodes->findById('flow:Campaign\\Flow\\MultiPayload');
         self::assertNotNull($flow);
         self::assertNotNull($fixture->storage->nodes->findById((string) $flow->getMetadata()['entry_point']), 'the flow starts at a route that exists');
+    }
+
+    /**
+     * A payload addressed by name over HUG has no path. It made route:GET:,
+     * an empty route no request can match, and the payload looked routed.
+     */
+    #[Test]
+    public function a_payload_addressed_by_name_serves_no_route_and_keeps_its_name(): void
+    {
+        $fixture = self::graphOf(['Flow/Feed.php' => <<<'PHP'
+            <?php
+            namespace Campaign\Feed;
+
+            use Semitexa\Core\Attribute\AsPublicPayload;
+
+            #[AsPublicPayload(name: 'campaign.feed', methods: ['GET'])]
+            final class FeedPayload {}
+            PHP]);
+
+        self::assertSame([], self::targetsFrom($fixture, 'class:Campaign\\Feed\\FeedPayload', EdgeType::ServesRoute));
+        self::assertNull($fixture->storage->nodes->findById('route:GET:'));
+        $payload = $fixture->storage->nodes->findById('class:Campaign\\Feed\\FeedPayload');
+        self::assertNotNull($payload);
+        self::assertSame('campaign.feed', $payload->getMetadata()['name']);
     }
 
     #[Test]
