@@ -47,7 +47,7 @@ final class HandlerExtractor implements ExtractorInterface
                 endLine:  $classInfo->endLine,
                 module:   $file->module,
                 metadata: [
-                    'execution' => $asHandler->execution ?? 'sync',
+                    'execution' => $this->handlerExecution($asHandler),
                 ],
             );
             $result->addNode($handlerNode);
