@@ -119,6 +119,54 @@ final class PayloadHandlerWiringTest extends TestCase
     }
 
     /**
+     * The graph kept `execution` as written, so 'queue' (which the runtime
+     * reads as queued) was neither queued nor sync, and FlowTracer drew any
+     * value but the exact string 'sync' as an async boundary
+     * (tk-graph-handler-execution-normalized).
+     */
+    #[Test]
+    public function a_handler_execution_is_stored_as_the_runtime_reads_it(): void
+    {
+        $fixture = self::graphOf(['Exec/Exec.php' => <<<'PHP'
+            <?php
+            namespace Campaign\Exec;
+
+            use Semitexa\Core\Attribute\AsPayloadHandler;
+            use Semitexa\Core\Queue\HandlerExecution;
+
+            final class P {}
+            final class R {}
+
+            #[AsPayloadHandler(payload: P::class, resource: R::class, execution: 'queue')]
+            final class QueueWord {}
+
+            #[AsPayloadHandler(payload: P::class, resource: R::class, execution: 'Async')]
+            final class CapitalAsync {}
+
+            #[AsPayloadHandler(payload: P::class, resource: R::class, execution: HandlerExecution::Queued)]
+            final class EnumQueued {}
+
+            #[AsPayloadHandler(payload: P::class, resource: R::class, execution: '')]
+            final class EmptyWord {}
+
+            #[AsPayloadHandler(payload: P::class, resource: R::class)]
+            final class Unset_ {}
+            PHP]);
+
+        $expected = ['QueueWord' => 'queued', 'CapitalAsync' => 'async', 'EnumQueued' => 'queued', 'EmptyWord' => 'sync', 'Unset_' => 'sync'];
+        foreach ($expected as $handler => $execution) {
+            $id = 'class:Campaign\\Exec\\' . $handler;
+            $node = $fixture->storage->nodes->findById($id);
+            self::assertNotNull($node, $handler);
+            self::assertSame($execution, $node->getMetadata()['execution'] ?? null, "{$handler} node");
+
+            $flow = self::edgeBetween($fixture, EdgeType::ParticipatesInFlow, $id, 'flow:Campaign\\Exec\\P');
+            self::assertNotNull($flow, $handler);
+            self::assertSame($execution, $flow->getMetadata()['execution'] ?? null, "{$handler} flow edge");
+        }
+    }
+
+    /**
      * A union-typed injection pointed at unknown:<property>, so two unrelated
      * classes injecting `A|B $events` became neighbours through one shared
      * unknown:events node.

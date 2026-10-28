@@ -99,7 +99,7 @@ final class ExecutionFlowExtractor implements ExtractorInterface
 
             $payloadClass = $instance->payload ?? null;
             $resourceClass = $instance->resource ?? null;
-            $execution = $instance->execution ?? 'sync';
+            $execution = $this->handlerExecution($instance);
 
             $handlerId = NodeId::forClass($handler->fqcn);
 
