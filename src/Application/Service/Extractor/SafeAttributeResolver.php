@@ -31,6 +31,7 @@ trait SafeAttributeResolver
         return HandlerExecution::normalize(is_string($value) ? $value : null)->value;
     }
 
+    /** @return array<int|string, mixed> */
     protected function getAttributeArguments(ParsedAttribute $attr): array
     {
         try {

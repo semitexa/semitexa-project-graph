@@ -9,14 +9,14 @@ use PhpParser\Node\Stmt\ClassLike;
 
 final class ParsedFile
 {
-    /** @var array<int, mixed> */
+    /** @var array<\PhpParser\Node> */
     private readonly array $ast;
     private readonly string $code;
     /** @var array<string, ClassInfo>|null */
     private ?array $classInfoCache = null;
 
     /**
-     * @param array<int, mixed> $ast
+     * @param array<\PhpParser\Node> $ast
      */
     public function __construct(
         public readonly string $path,
@@ -28,7 +28,7 @@ final class ParsedFile
         $this->code = $code;
     }
 
-    /** @return array<int, mixed> */
+    /** @return array<\PhpParser\Node> */
     public function ast(): array
     {
         return $this->ast;

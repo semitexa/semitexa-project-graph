@@ -64,6 +64,11 @@ enum NodeType: string
     case UsageExample     = 'usage_example';
     case ArchitecturalDecision = 'architectural_decision';
 
+    // The UI graph (ep-ui-navigation-graph): what a user sees and does.
+    case Screen           = 'screen';
+    case UiAction         = 'ui_action';
+    case NavGroup         = 'nav_group';
+
     /**
      * The type of a node known only by its id — a placeholder an edge points
      * at. Every placeholder used to be typed "class", so config keys, tables,
@@ -95,6 +100,9 @@ enum NodeType: string
             'aggregate'    => self::AggregateRoot,
             'replay'       => self::ReplayPath,
             'doc'          => self::DocNode,
+            'screen'       => self::Screen,
+            'uiaction'     => self::UiAction,
+            'nav'          => self::NavGroup,
             'example'      => self::UsageExample,
             'adr'          => self::ArchitecturalDecision,
             'module'       => self::Module,
