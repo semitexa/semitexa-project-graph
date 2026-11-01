@@ -14,6 +14,7 @@ use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
 use Semitexa\ProjectGraph\Application\Service\Parser\ClassInfo;
 use Semitexa\ProjectGraph\Application\Service\Parser\ParsedFile;
+use Semitexa\ProjectGraph\Attribute\GraphIgnore;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Domain\Model\Node;
 
@@ -65,8 +66,10 @@ final class UiNavigationExtractor implements ExtractorInterface
 
     public function supports(ParsedFile $file): bool
     {
-        // A class declaring a CRUD screen's actions() carries no attribute.
-        if ($file->hasAttribute(self::AS_CRUD) || str_contains($file->code(), 'CrudAction::')) {
+        // A class declaring a CRUD screen's actions() carries no attribute. Its
+        // file names CrudAction, in the call or in the import an alias stands
+        // for; the calls are matched by resolved name, so an alias is read too.
+        if ($file->hasAttribute(self::AS_CRUD) || str_contains($file->code(), 'CrudAction')) {
             return true;
         }
         foreach (array_keys(self::ACTIONS) as $attribute) {
@@ -81,8 +84,12 @@ final class UiNavigationExtractor implements ExtractorInterface
     public function extract(ParsedFile $file): ExtractionResult
     {
         $result = new ExtractionResult();
+        // An ignored class draws nothing: the pipeline drops what is sourced by
+        // the class itself, not the screens and actions named after it.
         foreach ($file->getClassesWithAttribute(self::AS_CRUD) as $class) {
-            $this->crudScreen($file, $class, $result);
+            if (!self::ignored($class)) {
+                $this->crudScreen($file, $class, $result);
+            }
         }
         // One edge per (source, target, type) is all the graph keeps: a class's
         // actions are one way to crud.run carrying them all, and each handler
@@ -106,7 +113,9 @@ final class UiNavigationExtractor implements ExtractorInterface
         }
         foreach (self::ACTIONS as $attribute => [$argument, $kind]) {
             foreach ($file->getClassesWithAttribute($attribute) as $class) {
-                $this->action($file, $class, $attribute, $argument, $kind, $result);
+                if (!self::ignored($class)) {
+                    $this->action($file, $class, $attribute, $argument, $kind, $result);
+                }
             }
         }
 
@@ -202,15 +211,16 @@ final class UiNavigationExtractor implements ExtractorInterface
                 if ($call->name->toString() !== 'of') {
                     continue;
                 }
+                // of(string $id, string $label, string $handler), by position or by name.
                 $args = [];
-                foreach ($call->args as $arg) {
+                foreach ($call->args as $position => $arg) {
                     if ($arg instanceof Ast\Arg) {
-                        $args[] = $arg->value;
+                        $args[$arg->name?->toString() ?? ['id', 'label', 'handler'][$position] ?? ''] = $arg->value;
                     }
                 }
-                $actionId = ($args[0] ?? null) instanceof Ast\Scalar\String_ ? $args[0]->value : null;
-                $label = ($args[1] ?? null) instanceof Ast\Scalar\String_ ? $args[1]->value : null;
-                $handlerArg = $args[2] ?? null;
+                $actionId = ($args['id'] ?? null) instanceof Ast\Scalar\String_ ? $args['id']->value : null;
+                $label = ($args['label'] ?? null) instanceof Ast\Scalar\String_ ? $args['label']->value : null;
+                $handlerArg = $args['handler'] ?? null;
                 $handler = $handlerArg instanceof Ast\Expr\ClassConstFetch && $handlerArg->class instanceof Ast\Name ? $handlerArg->class->toString() : null;
                 if ($actionId !== null) {
                     $actions[] = [$actionId, $label ?? $actionId, $handler, $requires[spl_object_id($call)] ?? 'edit'];
@@ -235,6 +245,11 @@ final class UiNavigationExtractor implements ExtractorInterface
         $id = NodeId::forUiAction($kind . ':' . $name);
         $result->addNode(new Node(id: $id, type: NodeType::UiAction, fqcn: $kind . ':' . $name, file: $file->path, line: $class->startLine, endLine: $class->endLine, module: $file->module, metadata: ['kind' => $kind, 'name' => $name]));
         $result->addEdge(new Edge($id, NodeId::forClass($class->fqcn), EdgeType::ImplementedBy, []));
+    }
+
+    private static function ignored(ClassInfo $class): bool
+    {
+        return $class->getAttribute(GraphIgnore::class) !== null;
     }
 
     private function screen(ParsedFile $file, ClassInfo $class, string $id, string $label, string $kind, string $path, ExtractionResult $result): string

@@ -198,6 +198,58 @@ final class UiNavigationGraphTest extends TestCase
         self::assertSame([], self::danglingSources($fixture));
     }
 
+    private const ALIASED = <<<'PHP'
+        <?php
+        namespace Campaign\Ui;
+
+        use Semitexa\Crud\Domain\Model\CrudAction as Action;
+
+        abstract class AliasedCrud
+        {
+            public function actions(): array
+            {
+                return [Action::of(handler: ArchiveProducts::class, label: 'Archive', id: 'archive')];
+            }
+        }
+        PHP;
+
+    private const IGNORED = <<<'PHP'
+        <?php
+        namespace Campaign\Ui;
+
+        use Semitexa\Crud\Attribute\AsCrud;
+        use Semitexa\PlatformUi\Attribute\AsGridAction;
+
+        #[\Semitexa\ProjectGraph\Attribute\GraphIgnore('a fixture')]
+        #[AsCrud(id: 'admin.hidden', path: '/admin/hidden', model: HiddenModel::class, label: 'Hidden', nav: 'Catalog')]
+        final class HiddenCrud {}
+
+        #[\Semitexa\ProjectGraph\Attribute\GraphIgnore('a fixture')]
+        #[AsGridAction('campaign.hidden')]
+        final class HiddenGridAction {}
+        PHP;
+
+    #[Test]
+    public function an_aliased_crud_action_with_named_arguments_is_read(): void
+    {
+        $fixture = self::graphOf(['Ui/AliasedCrud.php' => self::ALIASED]);
+
+        $run = self::edgeBetween($fixture, EdgeType::SubmitsTo, 'class:Campaign\\Ui\\AliasedCrud', 'uiaction:grid:crud.run');
+        self::assertSame([['action' => 'archive', 'trigger' => 'Archive', 'operation' => 'edit', 'permission' => null]], $run?->getMetadata()['actions'] ?? null);
+        self::assertSame(['class:Campaign\\Ui\\ArchiveProducts'], self::targetsFrom($fixture, 'class:Campaign\\Ui\\AliasedCrud', EdgeType::Calls));
+    }
+
+    #[Test]
+    public function an_ignored_class_draws_no_screen_menu_item_or_action(): void
+    {
+        $fixture = self::graphOf(['Ui/Hidden.php' => self::IGNORED]);
+
+        foreach (['screen:admin.hidden', 'screen:admin.hidden?edit', 'nav:Catalog/admin.hidden', 'uiaction:grid:campaign.hidden'] as $id) {
+            self::assertNull($fixture->storage->nodes->findById($id), $id);
+            self::assertSame([], self::edgesFrom($fixture, $id), $id);
+        }
+    }
+
     #[Test]
     public function a_named_grid_action_is_a_ui_action_implemented_by_its_class(): void
     {
