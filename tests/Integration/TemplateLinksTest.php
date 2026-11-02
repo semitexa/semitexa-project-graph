@@ -27,7 +27,7 @@ final class TemplateLinksTest extends TestCase
             <a href="/orders">Orders</a>
             <a class="x" href='/orders?status=open#top'>Open orders</a>
             <a href="{{ row.href }}">Row</a>
-            <a href="{{ url('admin.users', {id: 1}) }}">Users</a>
+            <a href="{{ url('admin.users', {id: 1, filter: {status: 'open'}}) }}">Users</a>
             <a href="https://example.com/">Elsewhere</a>
             <a href="mailto:a@b.c">Mail</a>
             <a href="#section">Down</a>
@@ -99,7 +99,9 @@ final class TemplateLinksTest extends TestCase
     {
         $fixture = self::graphOf(['Ui/traps.html.twig' => self::TRAPS]);
 
-        self::assertArrayNotHasKey('named_links', $fixture->storage->nodes->findById(self::page($fixture, 'traps'))?->getMetadata() ?? []);
+        $traps = $fixture->storage->nodes->findById(self::page($fixture, 'traps'));
+        self::assertNotNull($traps);
+        self::assertArrayNotHasKey('named_links', $traps->getMetadata(), 'a url() with a suffix is not a named link');
         self::assertSame(
             ['route:GET:/after-quote', 'route:GET:/after-twig', 'route:GET:/real'],
             self::targetsFrom($fixture, self::page($fixture, 'traps'), EdgeType::NavigatesTo),
