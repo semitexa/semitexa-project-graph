@@ -46,6 +46,8 @@ final class TemplateLinksTest extends TestCase
         <a {% if level > 1 %}class="deep"{% endif %} href="/after-twig">Deep</a>
         <a data-label="{{ "it's" }}" href="/after-quote">Quote</a>
         <a href="/users/{{ id }}">User</a>
+        <textarea name="snippet"><a href="/in-textarea">x</a></textarea>
+        <a href="{{ url('users') }}/edit">Edit</a>
         TWIG;
 
     private static function page(GraphFixture $fixture, string $name = 'page'): string
@@ -97,12 +99,13 @@ final class TemplateLinksTest extends TestCase
     {
         $fixture = self::graphOf(['Ui/traps.html.twig' => self::TRAPS]);
 
+        self::assertArrayNotHasKey('named_links', $fixture->storage->nodes->findById(self::page($fixture, 'traps'))?->getMetadata() ?? []);
         self::assertSame(
             ['route:GET:/after-quote', 'route:GET:/after-twig', 'route:GET:/real'],
             self::targetsFrom($fixture, self::page($fixture, 'traps'), EdgeType::NavigatesTo),
         );
         self::assertSame(
-            [['line' => 8, 'href' => '/users/{{ id }}', 'kind' => 'link']],
+            [['line' => 8, 'href' => '/users/{{ id }}', 'kind' => 'link'], ['line' => 10, 'href' => "{{ url('users') }}/edit", 'kind' => 'link']],
             $fixture->storage->nodes->findById(self::page($fixture, 'traps'))?->getMetadata()['unresolved_links'] ?? null,
         );
     }

@@ -42,9 +42,9 @@ final class TemplateLinkExtractor
         $result = new ExtractionResult();
         // What never renders as a link is blanked out line for line, so a
         // line number still points at the template as written: Twig and HTML
-        // comments, script and style bodies, {% verbatim %} blocks.
+        // comments, script, style and textarea bodies, {% verbatim %} blocks.
         $markup = (string) preg_replace_callback(
-            '/\{#.*?#\}|<!--.*?-->|<(script|style)\b.*?<\/\1\s*>|\{%-?\s*verbatim\s*-?%\}.*?\{%-?\s*endverbatim\s*-?%\}/is',
+            '/\{#.*?#\}|<!--.*?-->|<(script|style|textarea)\b.*?<\/\1\s*>|\{%-?\s*verbatim\s*-?%\}.*?\{%-?\s*endverbatim\s*-?%\}/is',
             static fn (array $m): string => str_repeat("\n", substr_count($m[0], "\n")),
             $contents,
         );
@@ -64,7 +64,9 @@ final class TemplateLinkExtractor
                 continue;
             }
             $line = substr_count($markup, "\n", 0, $tag[0][1]) + 1;
-            if (preg_match('/\A\{\{\s*url\(\s*([\'"])([A-Za-z0-9_.:-]+)\1\s*[,)]/', $target, $m) === 1) {
+            // Named only when url() is the whole target: {{ url('users') }}/edit
+            // renders somewhere else, and stays unresolved.
+            if (preg_match('/\A\{\{\s*url\(\s*([\'"])([A-Za-z0-9_.:-]+)\1\s*(?:,(?:[^{}]|\{[^{}]*\})*)?\)\s*\}\}\z/', $target, $m) === 1) {
                 $named[] = ['line' => $line, 'route' => $m[2], 'kind' => $isForm ? 'submit' : 'link'];
                 continue;
             }
