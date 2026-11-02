@@ -69,6 +69,12 @@ enum EdgeType: string
     case ReferencesADR      = 'references_adr';
     case Supersedes         = 'supersedes';
 
+    // The UI graph: how a user goes from one screen to another, and what a
+    // screen sends when they act.
+    case NavigatesTo        = 'navigates_to';
+    case SubmitsTo          = 'submits_to';
+    case ImplementedBy      = 'implemented_by';
+
     /**
      * Deliberately a match with no default arm: a new case that is not
      * classified here fails EdgeClassTest instead of silently falling into
@@ -84,7 +90,8 @@ enum EdgeType: string
             self::PipelinePhase, self::RendersSlot, self::ProvidesData,
             self::MapsToTable, self::HasRelation, self::ExposesApi, self::ScheduledAs, self::ExtendsModule,
             self::PublishesTo, self::ConsumesFrom, self::StreamsTo, self::HasSchema, self::IsAggregateOf,
-            self::ReplaysVia, self::RoutesCommandTo, self::DeadLettersTo, self::RetriesVia
+            self::ReplaysVia, self::RoutesCommandTo, self::DeadLettersTo, self::RetriesVia,
+            self::NavigatesTo, self::SubmitsTo, self::ImplementedBy
                 => EdgeClass::Wiring,
 
             self::Extends, self::Implements, self::Uses, self::ComposedOf, self::Imports,

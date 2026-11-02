@@ -136,6 +136,7 @@ final class ExtractorPipeline
     {
         return [
             new Attribute\PayloadExtractor(),
+            new Attribute\UiNavigationExtractor(),
             new Attribute\HandlerExtractor(),
             new Attribute\ServiceExtractor(),
             new Attribute\InjectionExtractor(),

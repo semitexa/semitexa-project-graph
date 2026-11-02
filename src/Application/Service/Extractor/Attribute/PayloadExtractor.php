@@ -37,6 +37,14 @@ final class PayloadExtractor implements ExtractorInterface
         AsProtectedPayload::class                   => 'protected',
         AsServicePayload::class                     => 'service',
         'Semitexa\Core\Attribute\AsPayload'         => 'protected',
+        // Routes declared by an AbstractPayloadRoute subclass of another
+        // package: a CRUD screen, a settings page, a collection feed. By name,
+        // so the graph does not require semitexa/crud; missing, they were not
+        // in the graph at all.
+        'Semitexa\Crud\Attribute\AsCrud'           => 'protected',
+        'Semitexa\Crud\Attribute\AsSettingsPage'   => 'protected',
+        // A feed is public (AsCollectionFeed::getAccessType()).
+        'Semitexa\Crud\Attribute\AsCollectionFeed' => 'public',
     ];
 
     public function supports(ParsedFile $file): bool

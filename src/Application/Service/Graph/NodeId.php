@@ -26,6 +26,24 @@ final class NodeId
         return 'route:' . $method . ':' . $path;
     }
 
+    /** A screen of the UI graph: a CRUD list ("admin.users"), or one of its dialogs ("admin.users?edit"). */
+    public static function forScreen(string $screen): string
+    {
+        return 'screen:' . $screen;
+    }
+
+    /** A named UI action: a form submit, a grid action, a tree action kind. */
+    public static function forUiAction(string $name): string
+    {
+        return 'uiaction:' . $name;
+    }
+
+    /** A group of the app's navigation menu. */
+    public static function forNavGroup(string $group): string
+    {
+        return 'nav:' . $group;
+    }
+
     public static function forModule(string $moduleName): string
     {
         return 'module:' . $moduleName;
