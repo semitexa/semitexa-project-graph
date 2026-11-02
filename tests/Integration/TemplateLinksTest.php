@@ -124,8 +124,12 @@ final class TemplateLinksTest extends TestCase
         $query = new \Semitexa\ProjectGraph\Application\Service\Query\GraphQueryService($fixture->storage);
         $before = $query->getRouteSummary();
         self::assertTrue($fixture->storage->nodes->findById('route:GET:/orders')?->getIsPlaceholder() ?? false);
-        $fixture->write('Ui/other.html.twig', '<a href="/somewhere-new">x</a>');
+        $fixture->write('Ui/other.html.twig', '<a href="/somewhere-new">x</a><a href="{{- url(\'shop.cart\') -}}">Cart</a>');
         $fixture->refresh();
+        // The refresh read the new template: its path is a placeholder route,
+        // and a whitespace-controlled url() is still a named link.
+        self::assertTrue($fixture->storage->nodes->findById('route:GET:/somewhere-new')?->getIsPlaceholder() ?? false);
+        self::assertSame([['line' => 1, 'route' => 'shop.cart', 'kind' => 'link']], $fixture->storage->nodes->findById(self::page($fixture, 'other'))?->getMetadata()['named_links'] ?? null);
         self::assertSame($before, (new \Semitexa\ProjectGraph\Application\Service\Query\GraphQueryService($fixture->storage))->getRouteSummary());
     }
 
