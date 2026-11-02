@@ -66,7 +66,7 @@ final class TemplateLinkExtractor
             $line = substr_count($markup, "\n", 0, $tag[0][1]) + 1;
             // Named only when url() is the whole target: {{ url('users') }}/edit
             // renders somewhere else, and stays unresolved.
-            if (preg_match('/\A\{\{\s*url\(\s*([\'"])([A-Za-z0-9_.:-]+)\1\s*(?:,(?:[^{}()]|(?<braces>\{(?:[^{}]|(?&braces))*\}))*)?\)\s*\}\}\z/', $target, $m) === 1) {
+            if (preg_match('/\A\{\{\s*url\(\s*([\'"])([A-Za-z0-9_.:-]+)\1\s*(?:,(?:[^{}()]|(?<nested>\{(?:[^{}()]|(?&nested))*\}|\((?:[^{}()]|(?&nested))*\)))*)?\)\s*\}\}\z/', $target, $m) === 1) {
                 $named[] = ['line' => $line, 'route' => $m[2], 'kind' => $isForm ? 'submit' : 'link'];
                 continue;
             }

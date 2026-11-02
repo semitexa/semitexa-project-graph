@@ -27,7 +27,7 @@ final class TemplateLinksTest extends TestCase
             <a href="/orders">Orders</a>
             <a class="x" href='/orders?status=open#top'>Open orders</a>
             <a href="{{ row.href }}">Row</a>
-            <a href="{{ url('admin.users', {id: 1, filter: {status: 'open'}}) }}">Users</a>
+            <a href="{{ url('admin.users', {id: 1, filter: {status: 'open'}, extra: params|default({})}) }}">Users</a>
             <a href="https://example.com/">Elsewhere</a>
             <a href="mailto:a@b.c">Mail</a>
             <a href="#section">Down</a>
