@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Service\Scanner;
 
 use Semitexa\ProjectGraph\Application\Service\Extractor\ConfigReferenceExtractor;
+use Semitexa\ProjectGraph\Application\Service\Extractor\TemplateLinkExtractor;
 
 final class FileScanner
 {
@@ -107,7 +108,7 @@ final class FileScanner
                                 ? fnmatch(ltrim($pattern, '/'), $relative, FNM_PATHNAME)
                                 : fnmatch($pattern, basename($path)));
                         if ($matches) {
-                            if ($file->getExtension() === 'php' || ConfigReferenceExtractor::handles($path)) {
+                            if ($file->getExtension() === 'php' || ConfigReferenceExtractor::handles($path) || TemplateLinkExtractor::handles($path)) {
                                 $this->exclude($pattern);
                             }
                             return false;
@@ -120,8 +121,9 @@ final class FileScanner
 
         $seen = [];
         foreach ($iterator as $file) {
-            // PHP, and the configuration files that name classes.
-            if ($file->getExtension() !== 'php' && !ConfigReferenceExtractor::handles($file->getPathname()) && !self::isPhpScript($file)) {
+            // PHP, the configuration files that name classes, and the
+            // templates that write out links.
+            if ($file->getExtension() !== 'php' && !ConfigReferenceExtractor::handles($file->getPathname()) && !TemplateLinkExtractor::handles($file->getPathname()) && !self::isPhpScript($file)) {
                 continue;
             }
 

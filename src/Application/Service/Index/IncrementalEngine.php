@@ -12,6 +12,7 @@ use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
 use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageGapKind;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ConfigReferenceExtractor;
+use Semitexa\ProjectGraph\Application\Service\Extractor\TemplateLinkExtractor;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractionResult;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractorPipeline;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphBuilder;
@@ -312,15 +313,17 @@ final class IncrementalEngine
      */
     private function extractFile(string $projectRoot, string $path, array &$errors): ExtractionResult
     {
-        if (ConfigReferenceExtractor::handles($path)) {
-            return (new ConfigReferenceExtractor())->extract(
-                $path,
-                (string) file_get_contents($path),
-                $this->resolveModule($projectRoot, $path),
-            );
-        }
-
         try {
+            // A template or a config file that cannot be read is a broken
+            // file like any other, not an empty one: read as '' it was
+            // indexed as having no ways and no references.
+            if (TemplateLinkExtractor::handles($path)) {
+                return (new TemplateLinkExtractor())->extract($path, self::read($path), $this->resolveModule($projectRoot, $path));
+            }
+            if (ConfigReferenceExtractor::handles($path)) {
+                return (new ConfigReferenceExtractor())->extract($path, self::read($path), $this->resolveModule($projectRoot, $path));
+            }
+
             $parsed = $this->parser->parse($path, $this->resolveModule($projectRoot, $path));
             $extracted = $this->extractors->process($parsed);
             if ($extracted->failures !== []) {
@@ -339,6 +342,13 @@ final class IncrementalEngine
 
             return $broken;
         }
+    }
+
+    private static function read(string $path): string
+    {
+        $contents = @file_get_contents($path);
+
+        return is_string($contents) ? $contents : throw new \RuntimeException('Cannot read ' . $path);
     }
 
     /** The line a parse error names ("... on line 3"); it was stored as 0. */

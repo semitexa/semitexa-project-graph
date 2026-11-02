@@ -13,6 +13,10 @@ final class IgnorePatternLoader
         '.git/',
         'tests/fixtures/',
         '*.generated.php',
+        // Published copies of templates (public/assets/ssr/tpl/x.<hash>.twig):
+        // every re-publish is a new name, and each would draw the source
+        // template's links again.
+        'public/assets/',
         // Documentation snippets (semitexa-demo's resources/examples): code in
         // a fictional App\ namespace that nothing autoloads, reusing class
         // names across examples. Scanned, they were 12 of the workspace's 13
