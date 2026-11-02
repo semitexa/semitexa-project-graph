@@ -12,6 +12,7 @@ use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
 use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageGapKind;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ConfigReferenceExtractor;
+use Semitexa\ProjectGraph\Application\Service\Extractor\TemplateLinkExtractor;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractionResult;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractorPipeline;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphBuilder;
@@ -312,6 +313,13 @@ final class IncrementalEngine
      */
     private function extractFile(string $projectRoot, string $path, array &$errors): ExtractionResult
     {
+        if (TemplateLinkExtractor::handles($path)) {
+            return (new TemplateLinkExtractor())->extract(
+                $path,
+                (string) file_get_contents($path),
+                $this->resolveModule($projectRoot, $path),
+            );
+        }
         if (ConfigReferenceExtractor::handles($path)) {
             return (new ConfigReferenceExtractor())->extract(
                 $path,

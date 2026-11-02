@@ -441,6 +441,12 @@ final class GraphQueryService implements QueryInterface
         $routes = $this->storage->nodes->findByType('route', $module);
         $summary = [];
         foreach ($routes as $route) {
+            // A route is what a payload declares. A placeholder is a path
+            // something links to (a template's href) that no payload serves:
+            // a dead link to report, not a route to count.
+            if ($route->getIsPlaceholder()) {
+                continue;
+            }
             $method = $route->getMetadata()['method'] ?? 'GET';
             $summary[$method] = ($summary[$method] ?? 0) + 1;
         }
