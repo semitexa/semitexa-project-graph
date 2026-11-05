@@ -17,8 +17,17 @@ final class GraphBuildMemory
     public static function ensure(): void
     {
         $current = (string) ini_get('memory_limit');
-        if ($current !== '-1' && ini_parse_quantity($current) < ini_parse_quantity(self::NEEDED)) {
-            ini_set('memory_limit', self::NEEDED);
+        $limit = self::limitFrom($current);
+        if ($limit !== $current) {
+            ini_set('memory_limit', $limit);
         }
+    }
+
+    /** The limit a build runs under, given the one it found. */
+    public static function limitFrom(string $current): string
+    {
+        return $current !== '-1' && ini_parse_quantity($current) < ini_parse_quantity(self::NEEDED)
+            ? self::NEEDED
+            : $current;
     }
 }
