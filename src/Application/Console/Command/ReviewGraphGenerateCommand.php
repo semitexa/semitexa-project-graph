@@ -16,6 +16,7 @@ use Semitexa\ProjectGraph\Application\Service\Scanner\FileScanner;
 use Semitexa\ProjectGraph\Application\Service\Scanner\IgnorePatternLoader;
 use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
+use Semitexa\ProjectGraph\Application\Service\Support\GraphBuildMemory;
 use Semitexa\ProjectGraph\Application\Service\Support\UsesProjectGraphConnection;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -47,6 +48,7 @@ final class ReviewGraphGenerateCommand extends BaseCommand
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        GraphBuildMemory::ensure();
         $io = new SymfonyStyle($input, $output);
         $full = $input->getOption('full');
 

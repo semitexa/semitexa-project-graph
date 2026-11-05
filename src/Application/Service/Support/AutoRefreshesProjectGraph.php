@@ -36,6 +36,7 @@ trait AutoRefreshesProjectGraph
             return;
         }
 
+        GraphBuildMemory::ensure();
         try {
             $engine = new IncrementalEngine(
                 new FileScanner(new IgnorePatternLoader()),
