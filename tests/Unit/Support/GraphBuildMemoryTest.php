@@ -9,20 +9,13 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\ProjectGraph\Application\Service\Support\GraphBuildMemory;
 
+/**
+ * The decision, not ini_set: PHP refuses to set a limit below what the process
+ * already uses, so a test that lowers the limit first depends on how much the
+ * suite has allocated before it. It passed alone and failed in a full run.
+ */
 final class GraphBuildMemoryTest extends TestCase
 {
-    private string $limit;
-
-    protected function setUp(): void
-    {
-        $this->limit = (string) ini_get('memory_limit');
-    }
-
-    protected function tearDown(): void
-    {
-        ini_set('memory_limit', $this->limit);
-    }
-
     /** @return iterable<string, array{string, string}> */
     public static function limits(): iterable
     {
@@ -35,10 +28,20 @@ final class GraphBuildMemoryTest extends TestCase
     #[DataProvider('limits')]
     public function the_limit_is_only_ever_raised(string $before, string $after): void
     {
-        ini_set('memory_limit', $before);
+        self::assertSame($after, GraphBuildMemory::limitFrom($before));
+    }
 
-        GraphBuildMemory::ensure();
+    #[Test]
+    public function a_build_under_a_low_limit_gets_what_it_needs(): void
+    {
+        // A process of its own: the suite's bootstrap raises the limit past what
+        // ensure() acts on, so run here it would change nothing and prove nothing.
+        $class = new \ReflectionClass(GraphBuildMemory::class);
+        $script = 'require ' . var_export((string) $class->getFileName(), true) . ';'
+            . '\\' . GraphBuildMemory::class . '::ensure(); echo ini_get("memory_limit");';
 
-        self::assertSame($after, ini_get('memory_limit'));
+        $limit = shell_exec(escapeshellarg(PHP_BINARY) . ' -d memory_limit=256M -r ' . escapeshellarg($script));
+
+        self::assertSame('512M', $limit);
     }
 }
