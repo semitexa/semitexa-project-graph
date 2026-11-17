@@ -113,6 +113,43 @@ final class PayloadHandlerWiringTest extends TestCase
         self::assertSame('public', $fixture->storage->nodes->findById('class:Campaign\\Feeds\\PricesFeed')?->getMetadata()['accessType']);
     }
 
+    /**
+     * Since crud#13 a feed says who may read it in its attribute's name, and gives its
+     * paging whole: `paging: new FeedPaging(...)`. The parser records that `new` and
+     * never runs it, so the attribute's constructor refused the record and the feed
+     * vanished from the graph; #[AsPublicFeed] was not read at all.
+     */
+    #[Test]
+    public function a_feed_named_protected_or_public_is_a_payload_with_that_access(): void
+    {
+        $fixture = self::graphOf(['Feeds/Named.php' => <<<'PHP'
+            <?php
+            namespace Campaign\Named;
+
+            use Semitexa\Crud\Attribute\AsProtectedFeed;
+            use Semitexa\Crud\Attribute\AsPublicFeed;
+            use Semitexa\Crud\Domain\Model\FeedPaging;
+
+            #[AsProtectedFeed(path: '/team/members', name: 'team.members', model: \stdClass::class, paging: new FeedPaging(defaultPerPage: 50))]
+            final class MembersFeed {}
+
+            #[AsPublicFeed(path: '/prices/all', name: 'prices.all', reason: 'the public price list', model: \stdClass::class)]
+            final class AllPricesFeed {}
+            PHP]);
+
+        $members = $fixture->storage->nodes->findById('class:Campaign\\Named\\MembersFeed');
+        $prices = $fixture->storage->nodes->findById('class:Campaign\\Named\\AllPricesFeed');
+        self::assertSame(
+            ['members' => ['protected', 'team.members'], 'prices' => ['public', 'prices.all']],
+            [
+                'members' => [$members?->getMetadata()['accessType'] ?? null, $members?->getMetadata()['name'] ?? null],
+                'prices' => [$prices?->getMetadata()['accessType'] ?? null, $prices?->getMetadata()['name'] ?? null],
+            ],
+        );
+        self::assertSame(['route:GET:/team/members'], self::targetsFrom($fixture, 'class:Campaign\\Named\\MembersFeed', EdgeType::ServesRoute));
+        self::assertSame(['route:GET:/prices/all'], self::targetsFrom($fixture, 'class:Campaign\\Named\\AllPricesFeed', EdgeType::ServesRoute));
+    }
+
     #[Test]
     public function a_payload_addressed_by_name_serves_no_route_and_keeps_its_name(): void
     {
