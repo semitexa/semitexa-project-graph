@@ -166,11 +166,13 @@ final class UiNavigationGraphTest extends TestCase
     }
 
     #[Test]
-    public function a_collection_feed_is_a_public_payload(): void
+    public function a_collection_feed_that_names_no_access_is_a_protected_payload(): void
     {
+        // A feed is Protected unless it says Public (tk-collection-feed-always-public);
+        // this read 'public' until tk-project-graph-shows-every-feed-as-public.
         $fixture = self::graphOf(['Ui/ProductsFeed.php' => self::FEED]);
 
-        self::assertSame('public', $fixture->storage->nodes->findById('class:Campaign\\Ui\\ProductsFeed')?->getMetadata()['accessType'] ?? null);
+        self::assertSame('protected', $fixture->storage->nodes->findById('class:Campaign\\Ui\\ProductsFeed')?->getMetadata()['accessType'] ?? null);
     }
 
     /**

@@ -87,6 +87,32 @@ final class PayloadHandlerWiringTest extends TestCase
      * A payload addressed by name over HUG has no path. It made route:GET:,
      * an empty route no request can match, and the payload looked routed.
      */
+    /**
+     * tk-project-graph-shows-every-feed-as-public: the graph mapped every
+     * #[AsCollectionFeed] to 'public', but a feed is Protected unless it says
+     * Public (tk-collection-feed-always-public). The attribute's own access wins.
+     */
+    #[Test]
+    public function a_collection_feed_has_the_access_its_attribute_says(): void
+    {
+        $fixture = self::graphOf(['Feeds/Feeds.php' => <<<'PHP'
+            <?php
+            namespace Campaign\Feeds;
+
+            use Semitexa\Core\Auth\PayloadAccessType;
+            use Semitexa\Crud\Attribute\AsCollectionFeed;
+
+            #[AsCollectionFeed(path: '/team/directory', name: 'team.directory', source: \stdClass::class)]
+            final class DirectoryFeed {}
+
+            #[AsCollectionFeed(path: '/prices', name: 'prices', source: \stdClass::class, access: PayloadAccessType::Public, reason: 'the public price list')]
+            final class PricesFeed {}
+            PHP]);
+
+        self::assertSame('protected', $fixture->storage->nodes->findById('class:Campaign\\Feeds\\DirectoryFeed')?->getMetadata()['accessType']);
+        self::assertSame('public', $fixture->storage->nodes->findById('class:Campaign\\Feeds\\PricesFeed')?->getMetadata()['accessType']);
+    }
+
     #[Test]
     public function a_payload_addressed_by_name_serves_no_route_and_keeps_its_name(): void
     {
