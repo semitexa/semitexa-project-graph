@@ -8,6 +8,7 @@ use Semitexa\Authorization\Attribute\AsProtectedPayload;
 use Semitexa\Authorization\Attribute\AsServicePayload;
 use Semitexa\Authorization\Attribute\RequiresCapability;
 use Semitexa\Authorization\Attribute\RequiresPermission;
+use Semitexa\Core\Attribute\AbstractPayloadRoute;
 use Semitexa\Core\Attribute\AsPublicPayload;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractionResult;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractorInterface;
@@ -43,9 +44,25 @@ final class PayloadExtractor implements ExtractorInterface
         // in the graph at all.
         'Semitexa\Crud\Attribute\AsCrud'           => 'protected',
         'Semitexa\Crud\Attribute\AsSettingsPage'   => 'protected',
-        // A feed is public (AsCollectionFeed::getAccessType()).
-        'Semitexa\Crud\Attribute\AsCollectionFeed' => 'public',
+        // A feed is Protected unless it says Public: its attribute's own access
+        // is read in extract(); this is only the fallback.
+        'Semitexa\Crud\Attribute\AsCollectionFeed' => 'protected',
     ];
+
+    /**
+     * The access the attribute says (a feed chooses Public or Protected), the
+     * class default only when it says none. An enum argument the parser cannot
+     * construct gives a stand-in, which still carries the `access` it was given.
+     */
+    private static function accessOf(object $instance, string $default): string
+    {
+        if ($instance instanceof AbstractPayloadRoute) {
+            return $instance->getAccessType()->value;
+        }
+        $access = EnumCaseReference::scalarOf($instance->access ?? null);
+
+        return is_string($access) && $access !== '' ? strtolower($access) : $default;
+    }
 
     public function supports(ParsedFile $file): bool
     {
@@ -86,7 +103,7 @@ final class PayloadExtractor implements ExtractorInterface
                         'methods'       => $instance->methods ?? ['GET'],
                         'responseClass' => $instance->responseWith ?? null,
                         'produces'      => $instance->produces ?? ['text/html'],
-                        'accessType'    => $accessType,
+                        'accessType'    => self::accessOf($instance, $accessType),
                     ],
                 );
                 $result->addNode($payloadNode);
