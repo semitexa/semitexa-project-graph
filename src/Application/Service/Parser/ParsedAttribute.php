@@ -79,7 +79,7 @@ final readonly class ParsedAttribute
         try {
             return new $class(...$arguments);
         } catch (\TypeError $e) {
-            if (!self::carriesEnumReference($arguments)) {
+            if (!self::carriesAstReading($arguments)) {
                 throw $e;
             }
 
@@ -87,11 +87,21 @@ final readonly class ParsedAttribute
         }
     }
 
-    /** @param array<int|string, mixed> $arguments */
-    private static function carriesEnumReference(array $arguments): bool
+    /**
+     * An argument read from the AST in place of a value the constructor types: an
+     * enum case, or an object a `new` built (`paging: new FeedPaging(...)`, recorded
+     * as a {@see ConstructedArgument}). Without the stand-in for the latter, every
+     * feed declaring its paging vanished from the graph (ep-feeds-declare-their-access).
+     *
+     * @param array<int|string, mixed> $arguments
+     */
+    private static function carriesAstReading(array $arguments): bool
     {
         foreach ($arguments as $argument) {
-            if ($argument instanceof EnumCaseReference || is_array($argument) && self::carriesEnumReference($argument)) {
+            if ($argument instanceof EnumCaseReference
+                || $argument instanceof ConstructedArgument
+                || is_array($argument) && self::carriesAstReading($argument)
+            ) {
                 return true;
             }
         }

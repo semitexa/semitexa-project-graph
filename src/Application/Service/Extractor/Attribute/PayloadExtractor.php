@@ -47,6 +47,9 @@ final class PayloadExtractor implements ExtractorInterface
         // A feed is Protected unless it says Public: its attribute's own access
         // is read in extract(); this is only the fallback.
         'Semitexa\Crud\Attribute\AsCollectionFeed' => 'protected',
+        // Since crud#13 a feed's attribute name says who may read it.
+        'Semitexa\Crud\Attribute\AsProtectedFeed'  => 'protected',
+        'Semitexa\Crud\Attribute\AsPublicFeed'     => 'public',
     ];
 
     /**
