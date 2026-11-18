@@ -243,4 +243,118 @@ final class UiFlowProjectionTest extends TestCase
         ksort($counts);
         self::assertSame(['exact' => 3, 'pattern' => 2, 'unresolved' => 5], $counts);
     }
+
+    /**
+     * project-graph#38 review: a name passed by name is still the name; a
+     * spelling Twig takes for the same file is the same file; and each line
+     * keeps the kind it was written with.
+     */
+    #[Test]
+    public function named_arguments_equivalent_spellings_and_kinds_per_line_are_read_as_twig_reads_them(): void
+    {
+        $review = <<<'TWIG'
+            {% include '@Shop/gone.html.twig' %}
+            {% include '@Shop/gone.html.twig' %}
+            {% embed '@Shop/gone.html.twig' %}{% endembed %}
+            {{ include(template = '@Shop/card.html.twig') }}
+            {{ include(with_context = false, template = '@Shop/partials/box.html.twig') }}
+            {{ block(template = '@Shop/partials/blocks.html.twig', name = 'title') }}
+            {% include '@Shop/./partials/../layout.html.twig' %}
+            {% include '@Shop/../../outside.html.twig' %}
+            TWIG;
+        $source = <<<'PHP'
+            <?php
+            namespace Campaign\Shop;
+
+            use Semitexa\Core\Attribute\AsPublicPayload;
+            use Semitexa\Core\Attribute\AsResource;
+
+            #[AsPublicPayload(path: '/review', methods: ['GET'], responseWith: ReviewResource::class)]
+            final class ReviewPayload {}
+
+            #[AsResource(template: '@Shop/review.html.twig')]
+            final class ReviewResource {}
+            PHP;
+        $fixture = self::graphOf(UiFlowProject::pages() + [
+            UiFlowProject::TEMPLATES . 'review.html.twig' => $review,
+            'src/modules/Shop/Application/Review.php' => $source,
+        ]);
+        $flow = new UiFlowProjection($fixture->storage);
+        $template = UiFlowProject::template($fixture, 'review.html.twig');
+
+        self::assertSame(
+            ['kinds' => ['include', 'include', 'embed'], 'lines' => [1, 2, 3]],
+            array_intersect_key(self::edgeBetween($fixture, EdgeType::RendersTemplate, $template, 'template:@Shop/gone.html.twig')?->getMetadata() ?? [], ['kinds' => 1, 'lines' => 1]),
+        );
+        $unresolved = array_values(array_filter($flow->unresolvedTemplates(), static fn (array $row): bool => $row['from'] === $template));
+        self::assertSame(
+            [
+                'review.html.twig:1 include @Shop/gone.html.twig',
+                'review.html.twig:2 include @Shop/gone.html.twig',
+                'review.html.twig:3 embed @Shop/gone.html.twig',
+                'review.html.twig:8 include @Shop/../../outside.html.twig',
+            ],
+            array_map(static fn (array $row): string => basename($row['at']) . ' ' . $row['kind'] . ' ' . $row['name'], $unresolved),
+        );
+
+        // The named template arguments are edges, and the dotted spelling is
+        // the layout's own file: its links are this page's.
+        $pages = array_column($flow->pages(), 'templates', 'id');
+        self::assertSame(
+            [
+                UiFlowProject::template($fixture, 'card.html.twig'),
+                UiFlowProject::template($fixture, 'layout.html.twig'),
+                UiFlowProject::template($fixture, 'partials/blocks.html.twig'),
+                UiFlowProject::template($fixture, 'partials/box.html.twig'),
+                $template,
+            ],
+            $pages[UiFlowProject::payload('ReviewPayload')] ?? null,
+        );
+        self::assertSame(UiFlowProject::payload('UserPayload'), self::way($flow->edgesOf(UiFlowProject::payload('ReviewPayload')), '/users/7')['to']);
+    }
+
+    /** A name answers for the methods its route takes, and a form is a POST only when it says so. */
+    #[Test]
+    public function a_named_way_resolves_only_to_a_route_of_its_own_method(): void
+    {
+        $named = <<<'TWIG'
+            <form method="post" action="{{ url('named.list') }}"><button>Post to a GET name</button></form>
+            <a href="{{ url('named.archive') }}">Link to a POST name</a>
+            <form action="{{ url('named.list') }}"><input name="q"></form>
+            <form method="post" action="{{ url('named.archive') }}"><button>Archive</button></form>
+            <form method="get" action="{{ search.action }}"><input name="q"></form>
+            TWIG;
+        $source = <<<'PHP'
+            <?php
+            namespace Campaign\Named;
+
+            use Semitexa\Core\Attribute\AsPublicPayload;
+
+            #[AsPublicPayload(path: '/named/list', methods: ['GET'], name: 'named.list')]
+            final class ListPayload {}
+
+            #[AsPublicPayload(path: '/named/archive', methods: ['POST'], name: 'named.archive')]
+            final class ArchivePayload {}
+            PHP;
+        $fixture = self::graphOf([
+            'src/modules/Named/Application/View/templates/named.html.twig' => $named,
+            'src/modules/Named/Application/Named.php' => $source,
+        ]);
+
+        $ways = array_map(
+            static fn (array $edge): array => [$edge['line'], $edge['kind'], $edge['method'], $edge['confidence'], $edge['route'], $edge['why']],
+            (new UiFlowProjection($fixture->storage))->templateEdges(),
+        );
+        self::assertSame(
+            [
+                [1, 'submit', 'POST', 'unresolved', null, 'the route of that name does not take POST'],
+                [2, 'link', 'GET', 'unresolved', null, 'the route of that name does not take GET'],
+                [3, 'link', 'GET', 'exact', 'GET /named/list', null],
+                [4, 'submit', 'POST', 'exact', 'POST /named/archive', null],
+                [5, 'link', 'GET', 'unresolved', null, 'computed'],
+            ],
+            $ways,
+        );
+        self::assertSame(['class:Campaign\\Named\\ArchivePayload'], array_keys((new UiFlowProjection($fixture->storage))->submitted()));
+    }
 }

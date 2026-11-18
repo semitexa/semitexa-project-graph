@@ -64,14 +64,19 @@ final class TemplateLinkExtractor
                 continue;
             }
             $line = substr_count($markup, "\n", 0, $tag[0][1]) + 1;
+            // A form's method beside a target that is not a literal path, when
+            // the markup states one (none is a GET): the reader must not take
+            // a GET form for a POST, nor resolve a POST to a GET-only route.
+            $formMethod = $isForm ? strtoupper(self::attribute($tag[2][0], 'method') ?? 'GET') : null;
+            $stated = in_array($formMethod, ['GET', 'POST'], true) ? ['method' => $formMethod] : [];
             // Named only when url() is the whole target: {{ url('users') }}/edit
             // renders somewhere else, and stays unresolved.
             if (preg_match('/\A\{\{-?\s*url\(\s*([\'"])([A-Za-z0-9_.:-]+)\1\s*(?:,(?:[^{}()]|(?<nested>\{(?:[^{}()]|(?&nested))*\}|\((?:[^{}()]|(?&nested))*\)))*)?\)\s*-?\}\}\z/', $target, $m) === 1) {
-                $named[] = ['line' => $line, 'route' => $m[2], 'kind' => $isForm ? 'submit' : 'link'];
+                $named[] = ['line' => $line, 'route' => $m[2], 'kind' => $isForm ? 'submit' : 'link'] + $stated;
                 continue;
             }
             if (str_contains($target, '{{') || str_contains($target, '{%')) {
-                $unresolved[] = ['line' => $line, 'href' => $target, 'kind' => $isForm ? 'submit' : 'link'];
+                $unresolved[] = ['line' => $line, 'href' => $target, 'kind' => $isForm ? 'submit' : 'link'] + $stated;
                 continue;
             }
             $routePath = self::applicationPath($target);

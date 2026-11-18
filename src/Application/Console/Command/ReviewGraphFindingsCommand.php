@@ -213,6 +213,9 @@ final class ReviewGraphFindingsCommand extends BaseCommand
             foreach ($accepted as $f) {
                 $lines[] = sprintf('- Accepted: `%s` %s (%s)', $f['at'], $f['subject'], $f['reason']);
             }
+            // As the other findings do: "No findings." over a graph with gaps is not a clean result.
+            $lines[] = '';
+            $lines[] = '> ' . CoverageReport::describe($coverage)[0];
             $output->writeln(implode("\n", $lines), OutputInterface::OUTPUT_RAW);
             return self::SUCCESS;
         }
@@ -238,6 +241,7 @@ final class ReviewGraphFindingsCommand extends BaseCommand
         if ($findings === []) {
             $io->text('No findings.');
         }
+        $io->text(CoverageReport::describe($coverage, $this->getProjectRoot()));
 
         return self::SUCCESS;
     }

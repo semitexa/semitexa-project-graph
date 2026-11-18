@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Service\UiFlow;
 
 use Semitexa\ProjectGraph\Application\Service\Extractor\TemplateNamespaces;
+use Semitexa\ProjectGraph\Application\Service\Findings\TestCode;
 use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
@@ -242,15 +243,20 @@ final class UiFlowProjection
                 if (!is_array($named) || !is_string($named['route'] ?? null)) {
                     continue;
                 }
-                $submit = ($named['kind'] ?? '') === 'submit';
-                $edges[] = $this->edge($template, $submit ? 'submit' : 'link', $submit ? 'POST' : 'GET', "url('" . $named['route'] . "')", is_int($named['line'] ?? null) ? $named['line'] : 0, $matcher->byName($named['route'], $submit ? null : 'GET') ?? $matcher->byName($named['route']), 'no route of that name');
+                [$kind, $method] = self::wayOf($named);
+                // The route of that name AND that method: a form posting to a
+                // name that only answers GET goes nowhere, and is not drawn
+                // as if it did.
+                $match = $matcher->byName($named['route'], $method);
+                $whyNot = $matcher->byName($named['route']) === null ? 'no route of that name' : 'the route of that name does not take ' . $method;
+                $edges[] = $this->edge($template, $kind, $method, "url('" . $named['route'] . "')", is_int($named['line'] ?? null) ? $named['line'] : 0, $match, $whyNot);
             }
             foreach (is_array($metadata['unresolved_links'] ?? null) ? $metadata['unresolved_links'] : [] as $computed) {
                 if (!is_array($computed) || !is_string($computed['href'] ?? null)) {
                     continue;
                 }
-                $submit = ($computed['kind'] ?? '') === 'submit';
-                $edges[] = $this->edge($template, $submit ? 'submit' : 'link', $submit ? 'POST' : 'GET', $computed['href'], is_int($computed['line'] ?? null) ? $computed['line'] : 0, null, 'computed');
+                [$kind, $method] = self::wayOf($computed);
+                $edges[] = $this->edge($template, $kind, $method, $computed['href'], is_int($computed['line'] ?? null) ? $computed['line'] : 0, null, 'computed');
             }
         }
         usort($edges, static fn (array $a, array $b): int => [$a['at'], $a['href']] <=> [$b['at'], $b['href']]);
@@ -263,9 +269,13 @@ final class UiFlowProjection
      * some template writes, or the class behind a named UI action (a form
      * submit, a grid or tree action) or the payload that class handles.
      *
+     * A form in a test template reaches nothing a visitor can: given what
+     * test code is, its forms are left out, as the report leaves out its
+     * links and its payloads.
+     *
      * @return array<string, true> payload id => true
      */
-    public function submitted(): array
+    public function submitted(?TestCode $tests = null): array
     {
         // Two payloads may declare one route (an override and what it
         // overrides): the form reaches the route, so both.
@@ -278,6 +288,9 @@ final class UiFlowProjection
         $reached = [];
         foreach ($this->templateEdges() as $edge) {
             if ($edge['kind'] !== 'submit' || $edge['to'] === null) {
+                continue;
+            }
+            if ($tests !== null && $tests->contains(substr($edge['template'], strlen('file:')))) {
                 continue;
             }
             $reached[$edge['to']] = true;
@@ -404,6 +417,24 @@ final class UiFlowProjection
         sort($found);
 
         return $found;
+    }
+
+    /**
+     * The kind and method of a named or computed way, as a literal one has
+     * them: a link is a GET; a form is what its method says, a GET form a
+     * navigation like any link, and a form whose method Twig computes is
+     * taken for the POST a form usually is.
+     *
+     * @param array<mixed> $entry
+     * @return array{string, string}
+     */
+    private static function wayOf(array $entry): array
+    {
+        if (($entry['kind'] ?? '') !== 'submit') {
+            return ['link', 'GET'];
+        }
+
+        return ($entry['method'] ?? null) === 'GET' ? ['link', 'GET'] : ['submit', 'POST'];
     }
 
     /** The file node a `template:<name>` stands for today, or null. */

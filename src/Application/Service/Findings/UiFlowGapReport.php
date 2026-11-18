@@ -62,7 +62,8 @@ final class UiFlowGapReport
             }
             $ways++;
             $byConfidence[$edge['confidence']]++;
-            if ($edge['why'] !== 'no route of that path' || self::isAsset($edge['href'])) {
+            // Only a link can be a file to download: nothing static answers a POST.
+            if ($edge['why'] !== 'no route of that path' || ($edge['kind'] === 'link' && self::isAsset($edge['href']))) {
                 continue;
             }
             $path = (string) preg_replace('/[?#].*\z/s', '', $edge['href']);
@@ -86,7 +87,7 @@ final class UiFlowGapReport
             ];
         }
 
-        $reached = $flow->submitted();
+        $reached = $flow->submitted($tests);
         $allowed = [];
         $posts = 0;
         $reachedCount = 0;

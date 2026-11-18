@@ -46,8 +46,12 @@ final class TemplateRenderExtractor implements ExtractorInterface
 
     private const TAGS = ['extends', 'include', 'embed', 'import', 'from', 'use'];
 
-    /** Functions whose n-th argument (from 0) names a template or a component. */
-    private const FUNCTIONS = ['include' => 0, 'component' => 0, 'block' => 1];
+    /**
+     * Functions whose argument names a template or a component: its position
+     * (from 0), and the name Twig knows it by when it is passed by name
+     * (`include(template = '@x')`, or `template: '@x'` since Twig 3.12).
+     */
+    private const FUNCTIONS = ['include' => [0, 'template'], 'component' => [0, null], 'block' => [1, 'template']];
 
     /** What may follow a literal name and leave it the whole name. */
     private const AFTER_NAME = ['with', 'ignore', 'only', 'as', 'import'];
@@ -114,7 +118,7 @@ final class TemplateRenderExtractor implements ExtractorInterface
                 sourceId: $fileNode->getId(),
                 targetId: $target,
                 type:     EdgeType::RendersTemplate,
-                metadata: ['source' => 'template', 'kinds' => array_values(array_unique($edge['kinds'])), 'lines' => $edge['lines'], 'names' => array_values(array_unique($edge['names']))],
+                metadata: ['source' => 'template', 'kinds' => $edge['kinds'], 'lines' => $edge['lines'], 'names' => array_values(array_unique($edge['names']))],
             ));
         }
 
@@ -222,7 +226,7 @@ final class TemplateRenderExtractor implements ExtractorInterface
                 || ($previous !== null && in_array(self::text($previous), ['.', '|'], true) && !$previous->test(Token::STRING_TYPE))) {
                 continue;
             }
-            $at = self::argument($tokens, $i + 2, self::FUNCTIONS[$value]);
+            $at = self::argument($tokens, $i + 2, self::FUNCTIONS[$value][0], self::FUNCTIONS[$value][1]);
             if ($at === null) {
                 // block('name') alone renders a block of this template.
                 continue;
@@ -272,34 +276,47 @@ final class TemplateRenderExtractor implements ExtractorInterface
     }
 
     /**
-     * Where the n-th argument of a call starts, the call's "(" already
-     * passed; null when the call has fewer arguments.
+     * Where the value of a call's argument starts, the call's "(" already
+     * passed: the one passed under $name, else the one at $position among
+     * those passed by position. Null when the call passes neither.
      *
      * @param list<Token> $tokens
      */
-    private static function argument(array $tokens, int $from, int $position): ?int
+    private static function argument(array $tokens, int $from, int $position, ?string $name): ?int
     {
         $depth = 0;
+        $index = 0;
+        $start = true;
+        $positional = null;
         for ($i = $from; isset($tokens[$i]); $i++) {
             $token = $tokens[$i];
             if ($token->test(Token::BLOCK_END_TYPE) || $token->test(Token::VAR_END_TYPE)) {
-                return null;
+                break;
             }
             $value = $token->test(Token::STRING_TYPE) ? '' : self::text($token);
             if ($depth === 0 && $value === ')') {
-                return null;
+                break;
             }
-            if ($depth === 0 && $position === 0) {
-                return $i;
+            if ($depth === 0 && $start) {
+                $start = false;
+                $next = $tokens[$i + 1] ?? null;
+                $named = $token->test(Token::NAME_TYPE) && $next !== null && !$next->test(Token::STRING_TYPE) && in_array(self::text($next), ['=', ':'], true);
+                if ($named && $name !== null && $value === $name) {
+                    return $i + 2;
+                }
+                if (!$named && $index === $position) {
+                    $positional = $i;
+                }
             }
             if ($depth === 0 && $value === ',') {
-                $position--;
+                $index++;
+                $start = true;
                 continue;
             }
             $depth += in_array($value, ['(', '[', '{'], true) ? 1 : (in_array($value, [')', ']', '}'], true) ? -1 : 0);
         }
 
-        return null;
+        return $positional;
     }
 
     private static function text(Token $token): string

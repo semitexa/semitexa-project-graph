@@ -78,7 +78,7 @@ final class PayloadExtractor implements ExtractorInterface
      *
      * @return array<string, mixed>
      */
-    private static function uiFlowFacts(ClassInfo $class, object $instance): array
+    private function uiFlowFacts(ClassInfo $class, object $instance): array
     {
         $strings = static fn (mixed $value): array => array_values(array_filter(
             array_map(static fn (mixed $item): mixed => EnumCaseReference::scalarOf($item), is_array($value) ? $value : [$value]),
@@ -93,12 +93,13 @@ final class PayloadExtractor implements ExtractorInterface
         ];
         $entry = $class->getAttribute(UiEntryPoint::class);
         if ($entry !== null) {
-            try {
-                $reason = $entry->getArguments()['reason'] ?? $entry->getArguments()[0] ?? '';
-            } catch (\Throwable) {
-                $reason = '';
+            // Accepted only with its reason: the attribute without one, with an
+            // empty or a computed one, says nothing, and the payload stays a finding.
+            $arguments = $this->getAttributeArguments($entry);
+            $reason = $arguments['reason'] ?? $arguments[0] ?? null;
+            if (is_string($reason) && trim($reason) !== '') {
+                $facts['uiEntryPoint'] = $reason;
             }
-            $facts['uiEntryPoint'] = is_string($reason) ? $reason : '';
         }
 
         return array_filter($facts, static fn (mixed $fact): bool => $fact !== null && $fact !== []);
@@ -144,7 +145,7 @@ final class PayloadExtractor implements ExtractorInterface
                         'responseClass' => $instance->responseWith ?? null,
                         'produces'      => $instance->produces ?? ['text/html'],
                         'accessType'    => self::accessOf($instance, $accessType),
-                    ] + self::uiFlowFacts($classInfo, $instance),
+                    ] + $this->uiFlowFacts($classInfo, $instance),
                 );
                 $result->addNode($payloadNode);
 

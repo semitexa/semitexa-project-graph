@@ -142,6 +142,65 @@ final class UiFlowGapReportTest extends TestCase
         self::assertSame(['api' => 2, 'json' => 1, 'service' => 1, 'signed-url' => 1], $report['summary']['allowed'], 'a path under /api/ is an API route');
     }
 
+    /** The attribute is an answer only with its reason: bare or empty, the payload is still a finding. */
+    #[Test]
+    public function a_ui_entry_point_without_a_reason_accepts_nothing(): void
+    {
+        $bare = <<<'PHP'
+            <?php
+            namespace Campaign\Shop;
+
+            use Semitexa\Core\Attribute\AsPublicPayload;
+            use Semitexa\ProjectGraph\Attribute\UiEntryPoint;
+
+            #[AsPublicPayload(path: '/orders/bare', methods: ['POST'])]
+            #[UiEntryPoint]
+            final class BareEntryPayload {}
+
+            #[AsPublicPayload(path: '/orders/blank', methods: ['POST'])]
+            #[UiEntryPoint(reason: '  ')]
+            final class BlankEntryPayload {}
+            PHP;
+        $fixture = self::graphOf(UiFlowProject::withPosts() + ['src/modules/Shop/Application/Bare.php' => $bare]);
+        $report = (new UiFlowGapReport())->collect($fixture->storage);
+
+        $orphans = array_column(self::ofRule($report['findings'], UiFlowGapReport::ORPHAN_POST), 'subject');
+        sort($orphans);
+        self::assertSame(['POST /orders/archive', 'POST /orders/bare', 'POST /orders/blank'], $orphans);
+        self::assertSame(['POST /orders/import'], array_column($report['accepted'], 'subject'));
+    }
+
+    /** A file extension makes a link a download; nothing static answers a POST. */
+    #[Test]
+    public function a_form_posting_to_a_path_that_looks_like_a_file_is_still_a_missing_route(): void
+    {
+        $export = '<form method="post" action="/exports/create.csv"><button>Export</button></form>' . "\n" . '<a href="/exports/last.csv">Last export</a>' . "\n";
+        $fixture = self::graphOf(UiFlowProject::withPosts() + [UiFlowProject::TEMPLATES . 'export.html.twig' => $export]);
+        $report = (new UiFlowGapReport())->collect($fixture->storage);
+
+        $missing = array_column(self::ofRule($report['findings'], UiFlowGapReport::FORM_TO_MISSING_ROUTE), 'at', 'subject');
+        self::assertSame(
+            ['POST /exports/create.csv' => UiFlowProject::TEMPLATES . 'export.html.twig:1', 'GET /nowhere' => UiFlowProject::TEMPLATES . 'layout.html.twig:5'],
+            $missing,
+        );
+    }
+
+    /** A form in a test template is no way a visitor has: it reaches nothing, as its links report nothing. */
+    #[Test]
+    public function a_form_in_a_test_template_does_not_make_a_payload_reached(): void
+    {
+        $form = '<form method="post" action="/orders/archive"><button>Archive</button></form>' . "\n";
+        $fixture = self::graphOf(UiFlowProject::withPosts() + ['tests/templates/archive.html.twig' => $form]);
+
+        $judged = (new UiFlowGapReport())->collect($fixture->storage, null, TestCode::of($fixture->storage));
+        self::assertSame(['POST /orders/archive'], array_column(self::ofRule($judged['findings'], UiFlowGapReport::ORPHAN_POST), 'subject'));
+        self::assertSame([2, 1], [$judged['summary']['reached'], $judged['summary']['test_code_skipped']]);
+
+        // Not told what test code is, the report takes the form for a real one.
+        $naive = (new UiFlowGapReport())->collect($fixture->storage);
+        self::assertSame([3, 0], [$naive['summary']['reached'], $naive['summary']['test_code_skipped']]);
+    }
+
     #[Test]
     public function a_finding_keeps_its_id_in_another_directory_and_a_module_filter_keeps_only_its_own(): void
     {

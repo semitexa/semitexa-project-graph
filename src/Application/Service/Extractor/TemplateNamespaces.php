@@ -75,6 +75,10 @@ final class TemplateNamespaces
                 }
             }
             // The catalog keeps one path per module: the last that exists.
+            // And one entry per module NAME, the last registered: a package
+            // named as a local module replaces it there (modulePaths[$name]
+            // is assigned, not ??=), so it does here. "First keeps it" is
+            // the rule between namespaces of differently named modules, below.
             foreach ($paths as $templates) {
                 if (is_dir($templates)) {
                     $modules[$name] = ['aliases' => $aliases, 'path' => rtrim($templates, '/')];
@@ -105,16 +109,30 @@ final class TemplateNamespaces
      */
     public function fileOf(string $name): ?string
     {
-        if (preg_match('#\A@([^/]+)/(.+)\z#s', $name, $m) !== 1 || str_contains($m[2], '..')) {
+        if (preg_match('#\A@([^/]+)/(.+)\z#s', $name, $m) !== 1) {
             return null;
         }
         $directory = $this->directories[$m[1]] ?? null;
         if ($directory === null) {
             return null;
         }
-        $file = $directory . '/' . ltrim($m[2], '/');
+        // The one spelling the index knows a file by: Twig takes
+        // `@Shop/./a//b/../layout.html.twig` for `@Shop/layout.html.twig`,
+        // and refuses a name that climbs out of its namespace.
+        $segments = [];
+        foreach (explode('/', str_replace('\\', '/', $m[2])) as $segment) {
+            if ($segment === '' || $segment === '.') {
+                continue;
+            }
+            if ($segment !== '..') {
+                $segments[] = $segment;
+            } elseif (array_pop($segments) === null) {
+                return null;
+            }
+        }
+        $file = $directory . '/' . implode('/', $segments);
 
-        return is_file($file) ? $file : null;
+        return $segments !== [] && is_file($file) ? $file : null;
     }
 
     /** @return array<string, string> */

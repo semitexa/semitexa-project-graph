@@ -66,7 +66,10 @@ final class UiFlowRefreshConvergenceTest extends TestCase
             static function (GraphFixture $f, UiFlowRead $before, UiFlowRead $after) use ($orders): void {
                 self::assertContains(UiFlowProject::template($f, 'partials/footer.html.twig'), $before->pages[$orders] ?? []);
                 // verify:accept-test-change an absence after an edit: the same case asserts a present entry, and the test then compares the whole refreshed read with a full build
-                self::assertNotContains(UiFlowProject::template($f, 'partials/footer.html.twig'), $after->pages[$orders] ?? []);
+                // The page itself survives, with its own template: only the partial is gone.
+                self::assertArrayHasKey($orders, $after->pages);
+                self::assertContains(UiFlowProject::template($f, 'pages/orders.html.twig'), $after->pages[$orders]);
+                self::assertNotContains(UiFlowProject::template($f, 'partials/footer.html.twig'), $after->pages[$orders]);
                 self::assertContains('@Shop/partials/footer.html.twig', $after->unresolved);
             },
         ];
