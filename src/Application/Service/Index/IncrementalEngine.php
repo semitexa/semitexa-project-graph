@@ -78,6 +78,37 @@ final class IncrementalEngine
         return $this->exclusively($projectRoot, fn (): UpdateResult => $this->storage->transaction(fn (): UpdateResult => $this->doUpdate($projectRoot, $keepEdgeLists)));
     }
 
+    /**
+     * The same refresh, for a caller that must not wait or do heavy work: an
+     * advisory check inside another command (ai:verify's UI flow warning).
+     * Null, and nothing touched, when another process is writing the graph
+     * (update() would wait for it, a full build for minutes) or when the
+     * graph was built by other extraction code (update() would rebuild it
+     * whole). The caller says which by asking {@see isCurrentBuild()} first.
+     */
+    public function updateUnlessBusy(string $projectRoot): ?UpdateResult
+    {
+        if (!$this->isCurrentBuild()) {
+            return null;
+        }
+        try {
+            return $this->exclusively($projectRoot, function () use ($projectRoot): UpdateResult {
+                $result = $this->storage->transaction(fn (): UpdateResult => $this->doUpdate($projectRoot, true));
+                \assert($result instanceof UpdateResult);
+
+                return $result;
+            }, wait: false);
+        } catch (GraphIsBeingWritten) {
+            return null;
+        }
+    }
+
+    /** Whether the stored graph was built by the extraction code now on disk: if not, the next refresh is a full build. */
+    public function isCurrentBuild(): bool
+    {
+        return $this->storage->getMeta('build_version') === self::buildVersion();
+    }
+
     private bool $locking = true;
 
     /** For a throwaway in-memory graph (the diff's two sides): nothing to serialise. */
@@ -107,7 +138,7 @@ final class IncrementalEngine
      * @param callable(): T $work
      * @return T
      */
-    private function exclusively(string $projectRoot, callable $work): mixed
+    private function exclusively(string $projectRoot, callable $work, bool $wait = true): mixed
     {
         if (!$this->locking) {
             return $work();
@@ -124,8 +155,11 @@ final class IncrementalEngine
             }
         }
         // No lock file possible (read-only tree): run unlocked, as before.
-        if ($handle !== null && !flock($handle, LOCK_EX)) {
+        if ($handle !== null && !flock($handle, $wait ? LOCK_EX : LOCK_EX | LOCK_NB)) {
             fclose($handle);
+            if (!$wait) {
+                throw new GraphIsBeingWritten('Another process is writing the project graph.');
+            }
             $handle = null;
         }
 

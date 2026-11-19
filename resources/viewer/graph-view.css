@@ -137,3 +137,57 @@
 .gv-flow-verdict.gv-flow-complete b{color:var(--gv-ok)}
 .gv-flow-list{padding:0 4px 6px}
 .gv-flow-name{font:600 13px/1.3 var(--gv-mono);color:var(--gv-text);margin:2px 4px 2px;overflow-wrap:anywhere}
+/* ---- UI flow: boxes of the page with an SVG of wires under them ---- */
+.gv .gv-ctl[hidden],.gv .gv-ui-stage[hidden]{display:none}
+.gv .gv-find.on{background:var(--gv-panel-2);border-color:var(--gv-line-2);box-shadow:inset 2px 0 var(--gv-accent)}
+.gv .gv-seg button:disabled{color:var(--gv-faint);cursor:default}
+/* Four tabs: each as wide as its label, so "Entry points" stays on one line. */
+.gv .gv-tabs button{flex:1 1 auto;white-space:nowrap}
+.gv-ui-totals{margin:8px 4px 0}
+/* Opaque, and the lanes the same colour: a wire behind a lane is hidden, with no seam. The scrollbar is always drawn. */
+.gv-ui-stage{flex:1;min-height:0;overflow:auto;position:relative;background:var(--gv-panel);scrollbar-width:thin;scrollbar-color:var(--gv-line-2) transparent}
+.gv-ui-more{position:absolute;right:1px;top:38px;bottom:12px;width:64px;display:flex;align-items:center;justify-content:flex-end;padding-right:9px;pointer-events:none;font:700 10.5px/1 var(--gv-mono);color:var(--gv-text);background:linear-gradient(to right,transparent,var(--gv-panel) 70%)}
+.gv-ui-more[hidden]{display:none}
+.gv-ui-legend{display:flex;flex-wrap:wrap;gap:4px 16px;padding:8px 16px 0;font:10.5px/1.4 var(--gv-mono);color:var(--gv-faint)}
+.gv-ui-key::before{content:"";display:inline-block;vertical-align:middle;margin-right:6px}
+.gv-ui-k-nav::before,.gv-ui-k-act::before,.gv-ui-k-pat::before{width:22px;border-top:1.6px solid var(--gv-dim)}
+.gv-ui-k-act::before{border-top-color:var(--gv-warn)}
+.gv-ui-k-pat::before{border-top-style:dashed}
+/* The bottom padding is the track the wires that go round the lanes run along. */
+.gv-ui-inner{position:relative;width:max-content;min-width:100%;padding:16px 70px 44px 16px}
+.gv-ui-wires{position:absolute;left:0;top:0;pointer-events:none;overflow:visible}
+.gv-ui-cols{position:relative;display:flex;align-items:flex-start;gap:76px}
+.gv-ui-col>h4{margin:0 0 9px;font:700 10px/1 var(--gv-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--gv-dim);display:flex;gap:8px;white-space:nowrap}
+.gv-ui-col>h4 span{color:var(--gv-faint);font-weight:500;letter-spacing:0}
+.gv-ui-lanes{display:flex;align-items:flex-start;gap:76px}
+.gv-ui-lane{display:flex;flex-direction:column;gap:8px;background:var(--gv-panel)}
+.gv .gv-ui-box{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:3px 7px;align-items:center;width:236px;text-align:left;padding:7px 9px;border-radius:8px;border:1px solid var(--gv-line-2);background:var(--gv-panel-2);color:var(--gv-text)}
+.gv .gv-ui-box:hover{border-color:var(--gv-accent)}
+.gv .gv-ui-box:focus-visible{outline:1px solid var(--gv-accent);outline-offset:1px}
+.gv-ui-path{font:600 12px/1.25 var(--gv-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.gv-ui-sub{grid-column:2/4;font:10.5px/1.2 var(--gv-mono);color:var(--gv-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gv-ui-chips{display:inline-flex;gap:4px}
+.gv-ui-chip{font:700 9.5px/1 var(--gv-mono);padding:3px 5px;border-radius:8px;border:1px solid var(--gv-line-2);color:var(--gv-dim);white-space:nowrap}
+/* The text keeps the text colour: amber on a white box does not read in light. */
+.gv-ui-chip.gv-warn{color:var(--gv-text);border-color:var(--gv-warn);background:color-mix(in srgb,var(--gv-warn) 22%,transparent)}
+.gv .gv-ui-box.gv-ui-ghost{border-style:dashed;background:transparent;color:var(--gv-dim)}
+.gv .gv-ui-box.gv-ui-endpoint{border-color:color-mix(in srgb,var(--gv-warn) 45%,var(--gv-line-2))}
+.gv .gv-ui-box.sel{border-color:var(--gv-accent);box-shadow:inset 3px 0 var(--gv-accent);background:color-mix(in srgb,var(--gv-accent) 14%,var(--gv-panel-2))}
+.gv .gv-ui-box.near{border-color:color-mix(in srgb,var(--gv-accent) 60%,var(--gv-line-2))}
+/* Dimmed by colour, not opacity: a see-through box would show the wires that pass behind it. */
+.gv-ui-has-focus .gv-ui-box:not(.sel):not(.near) .gv-ui-path{color:var(--gv-dim)}
+.gv .gv-ui-box[hidden],.gv-ui-col[hidden]{display:none}
+.gv .gv-ui-box:disabled{cursor:default}
+.gv .gv-ui-box:disabled:hover{border-color:var(--gv-line-2)}
+.gv-ui-wire{color:var(--gv-dim)}
+.gv-ui-wire path{fill:none;stroke:currentColor;stroke-width:1.2}
+.gv-ui-wire .gv-ui-head{fill:currentColor;stroke:none}
+.gv-ui-wire.gv-ui-action{color:var(--gv-warn)}
+.gv-ui-wire.gv-ui-pattern path:not(.gv-ui-head){stroke-dasharray:4 3}
+.gv-ui-wire.gv-ui-shared{display:none}
+.gv-ui-has-focus .gv-ui-wire{opacity:.3}
+.gv-ui-has-focus .gv-ui-wire.lit{display:inline;opacity:1;color:var(--gv-accent)}
+.gv-ui-has-focus .gv-ui-wire.lit path:not(.gv-ui-head){stroke-width:1.7}
+.gv .gv-ui-el{cursor:default}
+.gv button.gv-ui-el{cursor:pointer}
+.gv-ui-status{margin:8px 10px 0}

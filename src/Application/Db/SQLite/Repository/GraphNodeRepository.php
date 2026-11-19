@@ -155,7 +155,7 @@ final class GraphNodeRepository
      * @param list<string> $excludeTypes node types left out IN the query: filtering
      *        them after the LIMIT let fifty hidden nodes crowd every visible match out
      */
-    public function searchText(string $text, int $limit = 50, array $excludeTypes = [], ?string $module = null, ?string $type = null): array
+    public function searchText(string $text, int $limit = 50, array $excludeTypes = [], ?string $module = null, ?string $type = null, bool $templateNames = true): array
     {
         $like = '%' . strtr($text, ['\\' => '\\\\', '%' => '\\%', '_' => '\\_']) . '%';
         $prefix = substr($like, 1);
@@ -176,6 +176,8 @@ final class GraphNodeRepository
             . ($exclude === '' ? '' : ' AND type NOT IN (' . $exclude . ')')
             . ($module === null ? '' : ' AND module = :module')
             . ($type === null ? '' : ' AND type = :type')
+            // In the query, like the excluded types: a template name is no node to find.
+            . ($templateNames ? '' : " AND NOT (is_placeholder = 1 AND id LIKE 'template:%')")
             . " ORDER BY is_placeholder, CASE WHEN name LIKE :prefix ESCAPE '\\' THEN 0 ELSE 1 END, name LIMIT " . max(1, $limit),
             $params,
         )->fetchAll();
@@ -437,6 +439,18 @@ final class GraphNodeRepository
     {
         $result = $this->adapter->execute('SELECT COUNT(*) as cnt FROM graph_nodes');
         return (int) ($result->fetchOne()['cnt'] ?? 0);
+    }
+
+    /**
+     * How many `template:<name>` placeholders there are: the names templates
+     * are rendered by (`renders_template` points at one), which stand for a
+     * file found on the disk at read time and are no node of their own.
+     */
+    public function countTemplateNames(): int
+    {
+        $count = $this->adapter->execute("SELECT COUNT(*) as cnt FROM graph_nodes WHERE is_placeholder = 1 AND id LIKE 'template:%'")->fetchOne()['cnt'] ?? 0;
+
+        return is_numeric($count) ? (int) $count : 0;
     }
 
     /** @return array<string, int> type => count */

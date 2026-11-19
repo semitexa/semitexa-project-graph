@@ -42,6 +42,15 @@ final class UiFlowProjection
     public const LAYER_NAVIGATION = 'navigation';
     public const LAYER_ACTION = 'action';
 
+    public const ROOT_OK = 'ok';
+    /** The graph names a project root that is no directory on this machine. */
+    public const ROOT_MISSING = 'project-root-missing';
+    /** The graph names no project root at all. */
+    public const ROOT_UNKNOWN = 'project-root-unknown';
+
+    /** @var list<array{id: string, path: string, name: string, module: string, resource: string, via: string, templates: list<string>}>|null */
+    private ?array $pages = null;
+
     /** @var array<string, array{id: string, fqcn: string, file: string, line: int, module: string, path: string, methods: list<string>, name: string, metadata: array<string, mixed>}>|null */
     private ?array $payloads = null;
 
@@ -68,6 +77,27 @@ final class UiFlowProjection
     ) {
         $root = (string) $storage->getMeta('project_root');
         $this->root = $root !== '' ? rtrim($root, '/') . '/' : '';
+    }
+
+    /**
+     * Whether a template name can be placed on this machine. A graph built
+     * elsewhere (in a container, on another checkout) names a root that is
+     * not here: no template name then answers to a file, so there are no
+     * pages to show, and that is this state, not a project without pages.
+     */
+    public function rootStatus(): string
+    {
+        if ($this->root === '') {
+            return self::ROOT_UNKNOWN;
+        }
+
+        return is_dir($this->root) ? self::ROOT_OK : self::ROOT_MISSING;
+    }
+
+    /** The project root the graph was built from, as stored; '' when it names none. */
+    public function root(): string
+    {
+        return rtrim($this->root, '/');
     }
 
     /**
@@ -118,7 +148,7 @@ final class UiFlowProjection
         $routes = [];
         foreach ($this->payloads() as $payload) {
             foreach ($payload['methods'] as $method) {
-                $routes[] = ['method' => $method, 'path' => $payload['path'], 'name' => $payload['name'], 'payload' => $payload['id']];
+                $routes[] = ['method' => $method, 'path' => $payload['path'], 'name' => $payload['name'], 'payload' => $payload['id'], 'module' => $payload['module']];
             }
         }
 
@@ -129,10 +159,18 @@ final class UiFlowProjection
      * The pages: a GET payload, the resource it answers with, and every
      * template that resource renders, directly or through another.
      *
-     * @return list<array{id: string, path: string, name: string, module: string, resource: string, templates: list<string>}>
+     * A resource that declares no template is rendered by its handle: the
+     * layout renderer takes the first module file of that name
+     * ({@see TemplateNamespaces::layoutOf()}). `via` says which of the two
+     * gave the page its template: `template` or `handle`.
+     *
+     * @return list<array{id: string, path: string, name: string, module: string, resource: string, via: string, templates: list<string>}>
      */
     public function pages(): array
     {
+        if ($this->pages !== null) {
+            return $this->pages;
+        }
         $resources = [];
         foreach ($this->storage->edges->findByType(EdgeType::Handles) as $handles) {
             foreach ($this->storage->edges->findBySource($handles->getSourceId(), EdgeType::Produces) as $produces) {
@@ -148,7 +186,12 @@ final class UiFlowProjection
             $declared = $payload['metadata']['responseClass'] ?? null;
             $candidates = is_string($declared) && $declared !== '' ? ['class:' . ltrim($declared, '\\')] : [];
             foreach (array_unique([...$candidates, ...($resources[$payload['id']] ?? [])]) as $resource) {
+                $via = 'template';
                 $templates = $this->templatesUnder($resource);
+                if ($templates === [] && !isset($this->renders[$resource])) {
+                    $via = 'handle';
+                    $templates = $this->templatesByHandle($resource);
+                }
                 if ($templates === []) {
                     continue;
                 }
@@ -158,13 +201,14 @@ final class UiFlowProjection
                     'name' => $payload['name'],
                     'module' => $payload['module'],
                     'resource' => $resource,
+                    'via' => $via,
                     'templates' => $templates,
                 ];
                 break;
             }
         }
 
-        return $pages;
+        return $this->pages = $pages;
     }
 
     /**
@@ -222,7 +266,8 @@ final class UiFlowProjection
                 $metadata = $edge->getMetadata();
                 $hrefs = array_values(array_filter(is_array($metadata['hrefs'] ?? null) ? $metadata['hrefs'] : [], 'is_string'));
                 $lines = array_values(is_array($metadata['lines'] ?? null) ? $metadata['lines'] : []);
-                $match = $matcher->match($m[1], $m[2]);
+                // Two payloads may declare the path: the one in the template's own module is meant.
+                $match = $matcher->match($m[1], $m[2], $template->getModule());
                 foreach ($lines as $i => $line) {
                     $edges[] = $this->edge(
                         $template,
@@ -247,7 +292,7 @@ final class UiFlowProjection
                 // The route of that name AND that method: a form posting to a
                 // name that only answers GET goes nowhere, and is not drawn
                 // as if it did.
-                $match = $matcher->byName($named['route'], $method);
+                $match = $matcher->byName($named['route'], $method, $template->getModule());
                 $whyNot = $matcher->byName($named['route']) === null ? 'no route of that name' : 'the route of that name does not take ' . $method;
                 $edges[] = $this->edge($template, $kind, $method, "url('" . $named['route'] . "')", is_int($named['line'] ?? null) ? $named['line'] : 0, $match, $whyNot);
             }
@@ -329,7 +374,11 @@ final class UiFlowProjection
     public function unresolvedTemplates(): array
     {
         $unresolved = [];
-        foreach ($this->storage->edges->findByType(EdgeType::RendersTemplate) as $edge) {
+        // Without the project's files no name can be placed: every one of
+        // them would read "no such namespace or file", which is not what is
+        // wrong. rootStatus() says what is.
+        $placeable = $this->rootStatus() === self::ROOT_OK;
+        foreach ($placeable ? $this->storage->edges->findByType(EdgeType::RendersTemplate) : [] as $edge) {
             $target = $edge->getTargetId();
             if (!str_starts_with($target, 'template:') || $this->fileOf($target) !== null) {
                 continue;
@@ -428,6 +477,30 @@ final class UiFlowProjection
     }
 
     /**
+     * The template files of a resource that declares a handle and no
+     * template: the file the layout renderer finds by that handle today, and
+     * everything it renders.
+     *
+     * @return list<string> file node ids, sorted
+     */
+    private function templatesByHandle(string $resource): array
+    {
+        $handle = $this->storage->nodes->findById($resource)?->getMetadata()['layout_handle'] ?? null;
+        if (!is_string($handle) || $handle === '' || $this->rootStatus() !== self::ROOT_OK) {
+            return [];
+        }
+        $this->namespaces ??= TemplateNamespaces::ofProject($this->root);
+        $file = $this->namespaces->layoutOf($handle);
+        if ($file === null) {
+            return [];
+        }
+        $templates = array_values(array_unique(['file:' . $file, ...$this->templatesUnder('file:' . $file)]));
+        sort($templates);
+
+        return $templates;
+    }
+
+    /**
      * The kind and method of a named or computed way, as a literal one has
      * them: a link is a GET; a form is what its method says, a GET form a
      * navigation like any link, and a form whose method Twig computes is
@@ -450,7 +523,7 @@ final class UiFlowProjection
     {
         if (!array_key_exists($templateId, $this->files)) {
             // Without the root the graph was built from, no name can be placed.
-            $this->namespaces ??= $this->root !== '' ? TemplateNamespaces::ofProject($this->root) : null;
+            $this->namespaces ??= $this->rootStatus() === self::ROOT_OK ? TemplateNamespaces::ofProject($this->root) : null;
             $file = $this->namespaces?->fileOf(substr($templateId, strlen('template:')));
             $this->files[$templateId] = $file !== null ? 'file:' . $file : null;
         }
