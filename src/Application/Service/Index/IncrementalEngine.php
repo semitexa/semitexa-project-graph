@@ -92,7 +92,13 @@ final class IncrementalEngine
             return null;
         }
         try {
-            return $this->exclusively($projectRoot, function () use ($projectRoot): UpdateResult {
+            return $this->exclusively($projectRoot, function () use ($projectRoot): ?UpdateResult {
+                // Again, now that the lock is ours: a graph another process
+                // committed between the check above and here may be of
+                // another build, and doUpdate() would rebuild it whole.
+                if (!$this->isCurrentBuild()) {
+                    return null;
+                }
                 $result = $this->storage->transaction(fn (): UpdateResult => $this->doUpdate($projectRoot, true));
                 \assert($result instanceof UpdateResult);
 
@@ -148,11 +154,18 @@ final class IncrementalEngine
         $handle = null;
         // Only where the project already keeps var/tmp: creating it would drop
         // an untracked directory into a package repository the diff reads.
-        if (is_dir($dir) && is_writable($dir) || is_file($path)) {
+        if (is_dir($dir) && is_writable($dir) || is_file($path) || is_link($path)) {
             $handle = @fopen($path, 'c') ?: (@fopen($path, 'r') ?: null);
             if ($handle !== null && @fileowner($path) === getmyuid()) {
                 @chmod($path, 0666);
             }
+        }
+        // A lock that is there and cannot be opened may be held: a caller that
+        // does not wait cannot tell, so it does not write.
+        if ($handle === null && !$wait && (file_exists($path) || is_link($path))) {
+            // Not a busy graph but a lock file this process cannot open (owned
+            // by another user, a dead link): said with its path, every time.
+            throw new GraphLockUnusable('The project graph lock ' . $path . ' cannot be opened by this process; fix or remove it.');
         }
         // No lock file possible (read-only tree): run unlocked, as before.
         if ($handle !== null && !flock($handle, $wait ? LOCK_EX : LOCK_EX | LOCK_NB)) {

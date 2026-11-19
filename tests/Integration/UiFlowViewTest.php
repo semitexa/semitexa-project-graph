@@ -496,6 +496,38 @@ final class UiFlowViewTest extends TestCase
         self::assertSame(['/orders' => UiFlowProject::payload('OrdersPayload'), '/help/contact' => self::help('ContactPayload')], $ways);
     }
 
+    /** `format: ResponseFormat::Layout` is what an undeclared format becomes: the handle is still what finds the template. */
+    #[Test]
+    public function the_layout_format_said_out_loud_is_still_joined_by_its_handle(): void
+    {
+        $fixture = self::graphOf([
+            'src/modules/Docs/Application/Docs.php' => <<<'PHP'
+                <?php
+                namespace Campaign\Docs;
+
+                use Semitexa\Core\Attribute\AsPublicPayload;
+                use Semitexa\Core\Attribute\AsResource;
+                use Semitexa\Core\Http\Response\ResponseFormat;
+                use Semitexa\Ssr\Application\Service\Http\Response\HtmlResponse;
+
+                #[AsPublicPayload(path: '/docs', methods: ['GET'], responseWith: DocsResource::class)]
+                final class DocsPayload {}
+                #[AsResource(handle: 'docs-index', format: ResponseFormat::Layout)]
+                final class DocsResource extends HtmlResponse {}
+
+                #[AsPublicPayload(path: '/docs/raw', methods: ['GET'], responseWith: RawResource::class)]
+                final class RawPayload {}
+                #[AsResource(handle: 'docs-index', format: ResponseFormat::Text)]
+                final class RawResource {}
+                PHP,
+            'src/modules/Docs/Application/View/templates/docs-index.html.twig' => '<p>Docs</p>' . "\n",
+        ]);
+
+        $pages = array_column((new UiFlowProjection($fixture->storage))->pages(), 'via', 'id');
+
+        self::assertSame(['class:Campaign\\Docs\\DocsPayload' => 'handle'], $pages);
+    }
+
     #[Test]
     public function the_command_answers_the_overview_a_module_or_a_screen_and_refuses_what_is_not_there(): void
     {

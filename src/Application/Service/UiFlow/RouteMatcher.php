@@ -71,9 +71,10 @@ final class RouteMatcher
             if ($route['name'] !== '') {
                 $this->named[$route['name']][] = $route;
             }
+            // Every route, literal or with parameters: declaring() answers for both.
+            $this->declaring[$route['method']][$route['path']][] = $route;
             if (!str_contains($route['path'], '{')) {
                 $this->exact[$route['method']][$route['path']] ??= $route;
-                $this->declaring[$route['method']][$route['path']][] = $route;
                 continue;
             }
             $quoted = preg_replace('/\\\\\{[^}]+\\\\\}/', '[^/]+', preg_quote($route['path'], '#'));
@@ -148,23 +149,37 @@ final class RouteMatcher
     private function find(string $method, string $path, ?string $fromModule = null): ?array
     {
         if (isset($this->exact[$method][$path])) {
-            if ($fromModule !== null) {
-                foreach ($this->declaring[$method][$path] ?? [] as $route) {
-                    if ($this->moduleOf[$route['payload']] === $fromModule) {
-                        return ['confidence' => self::EXACT, 'route' => $route];
-                    }
-                }
-            }
-
-            return ['confidence' => self::EXACT, 'route' => $this->exact[$method][$path]];
+            return ['confidence' => self::EXACT, 'route' => $this->ofModule($this->exact[$method][$path], $fromModule)];
         }
         foreach ($this->patterns[$method] ?? [] as $pattern) {
             if (preg_match($pattern['regex'], $path) === 1) {
-                return ['confidence' => self::PATTERN, 'route' => $pattern['route']];
+                // Which pattern fits is decided by the order listed; between
+                // payloads declaring that same pattern, the linking module's own.
+                return ['confidence' => self::PATTERN, 'route' => $this->ofModule($pattern['route'], $fromModule)];
             }
         }
 
         return null;
+    }
+
+    /**
+     * The payload of $fromModule among those declaring this very route, or
+     * the route as given when that module declares none.
+     *
+     * @param array{method: string, path: string, name: string, payload: string} $route
+     * @return array{method: string, path: string, name: string, payload: string}
+     */
+    private function ofModule(array $route, ?string $fromModule): array
+    {
+        if ($fromModule !== null) {
+            foreach ($this->declaring[$route['method']][$route['path']] ?? [] as $declared) {
+                if ($this->moduleOf[$declared['payload']] === $fromModule) {
+                    return $declared;
+                }
+            }
+        }
+
+        return $route;
     }
 
     /** The path alone: no query, no fragment, no trailing slash but the root's. */

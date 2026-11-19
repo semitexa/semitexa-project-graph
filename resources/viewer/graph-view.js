@@ -1153,11 +1153,16 @@ const ext = api => {
     overview: null, loading: null, module: null, data: null, focus: null,
     on: {navigation: true, action: true}, boxes: new Map(), wires: [],
     svg: null, inner: null, title: null, moduleSeq: 0, detailSeq: 0,
+    // Whether the tab is the one shown. The main pane's title and the detail
+    // panel are shared with the other tabs: an answer that arrives after the
+    // tab was left is kept for the return, and writes to neither.
+    active: false,
   };
   const short = s => String(s).split('\\').pop();
   const count = (n, one, many) => n + ' ' + (n === 1 ? one : (many || one + 's'));
 
   api.loadUiFlow = () => {
+    U.active = true;
     if (U.title === null) U.title = parts.mainTitle.textContent;
     setTitle();
     if (U.loading) { requestAnimationFrame(wire); return U.loading; }
@@ -1176,9 +1181,14 @@ const ext = api => {
     return U.loading;
   };
   /** The main pane's title belongs to the DAG again once the tab is left. */
-  api.leaveUiFlow = () => { if (U.title !== null) { parts.mainTitle.textContent = U.title; U.title = null; } };
+  api.leaveUiFlow = () => {
+    U.active = false;
+    U.detailSeq++; // a screen still on its way describes nothing once the panel is another tab's
+    if (U.title !== null) { parts.mainTitle.textContent = U.title; U.title = null; }
+  };
 
   function setTitle() {
+    if (!U.active) return;
     const d = U.data;
     parts.mainTitle.textContent = d ? 'UI flow · ' + (d.module || 'no module') + ' · ' + count(d.screens.length, 'screen') + ' · ' + count(d.wires.length, 'wire') : 'UI flow';
   }
@@ -1233,7 +1243,7 @@ const ext = api => {
     const seq = ++U.moduleSeq;
     U.module = name; U.focus = null; U.data = null;
     // The screen described beside the picture belonged to the module just left.
-    U.detailSeq++; parts.detailBody.replaceChildren(el('div', 'gv-empty', 'Nothing selected.'));
+    U.detailSeq++; if (U.active) parts.detailBody.replaceChildren(el('div', 'gv-empty', 'Nothing selected.'));
     parts.uiScroll.querySelectorAll('.gv-find[data-module]').forEach(b => b.classList.toggle('on', b.dataset.module === name));
     parts.uiStage.replaceChildren(el('div', 'gv-empty', 'Reading ' + (name || 'the module') + '…'));
     return source.ui({module: name}).then(d => {
@@ -1459,6 +1469,9 @@ const ext = api => {
   }
 
   function renderNode(node) {
+    // An endpoint is described from what the picture already holds: a screen
+    // asked for a moment ago must not answer over it.
+    U.detailSeq++;
     const {h, acts} = head(node, 'endpoint', node.methods.join(' '));
     const graph = el('button', 'gv-btn', 'show in graph'); graph.type = 'button';
     graph.addEventListener('click', () => { api.showTab('tree'); api.reveal(node.id); });
