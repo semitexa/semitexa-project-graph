@@ -78,6 +78,7 @@ final class GraphExport
         foreach ($this->storage->nodes->all() as $node) {
             $type = $node->getType()->value;
             if (in_array($type, GraphBrowser::HIDDEN_NODES, true)
+                || GraphBrowser::isTemplateName($node)
                 || ($focusId !== null && !isset($keep[$node->getId()]))
                 || ($module !== null && $module !== '' && $node->getModule() !== $module)
                 || ($types !== null && $types !== [] && !in_array($type, $types, true))) {

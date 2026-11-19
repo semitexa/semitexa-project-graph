@@ -78,6 +78,47 @@ final class IncrementalEngine
         return $this->exclusively($projectRoot, fn (): UpdateResult => $this->storage->transaction(fn (): UpdateResult => $this->doUpdate($projectRoot, $keepEdgeLists)));
     }
 
+    /**
+     * The same refresh, for a caller that must not wait or do heavy work: an
+     * advisory check inside another command (ai:verify's UI flow warning).
+     * Null, and nothing touched, when another process is writing the graph
+     * (update() would wait for it, a full build for minutes) or when the
+     * graph was built by other extraction code (update() would rebuild it
+     * whole). The caller says which by asking {@see isCurrentBuild()} first.
+     *
+     * @throws GraphLockUnusable when the lock file is there and this process
+     *         cannot open it: not a busy graph, a setup to fix, so it is not
+     *         folded into null. An advisory caller turns it into its own skip.
+     */
+    public function updateUnlessBusy(string $projectRoot): ?UpdateResult
+    {
+        if (!$this->isCurrentBuild()) {
+            return null;
+        }
+        try {
+            return $this->exclusively($projectRoot, function () use ($projectRoot): ?UpdateResult {
+                // Again, now that the lock is ours: a graph another process
+                // committed between the check above and here may be of
+                // another build, and doUpdate() would rebuild it whole.
+                if (!$this->isCurrentBuild()) {
+                    return null;
+                }
+                $result = $this->storage->transaction(fn (): UpdateResult => $this->doUpdate($projectRoot, true));
+                \assert($result instanceof UpdateResult);
+
+                return $result;
+            }, wait: false);
+        } catch (GraphIsBeingWritten) {
+            return null;
+        }
+    }
+
+    /** Whether the stored graph was built by the extraction code now on disk: if not, the next refresh is a full build. */
+    public function isCurrentBuild(): bool
+    {
+        return $this->storage->getMeta('build_version') === self::buildVersion();
+    }
+
     private bool $locking = true;
 
     /** For a throwaway in-memory graph (the diff's two sides): nothing to serialise. */
@@ -107,7 +148,7 @@ final class IncrementalEngine
      * @param callable(): T $work
      * @return T
      */
-    private function exclusively(string $projectRoot, callable $work): mixed
+    private function exclusively(string $projectRoot, callable $work, bool $wait = true): mixed
     {
         if (!$this->locking) {
             return $work();
@@ -117,15 +158,25 @@ final class IncrementalEngine
         $handle = null;
         // Only where the project already keeps var/tmp: creating it would drop
         // an untracked directory into a package repository the diff reads.
-        if (is_dir($dir) && is_writable($dir) || is_file($path)) {
+        if (is_dir($dir) && is_writable($dir) || is_file($path) || is_link($path)) {
             $handle = @fopen($path, 'c') ?: (@fopen($path, 'r') ?: null);
             if ($handle !== null && @fileowner($path) === getmyuid()) {
                 @chmod($path, 0666);
             }
         }
+        // A lock that is there and cannot be opened may be held: a caller that
+        // does not wait cannot tell, so it does not write.
+        if ($handle === null && !$wait && (file_exists($path) || is_link($path))) {
+            // Not a busy graph but a lock file this process cannot open (owned
+            // by another user, a dead link): said with its path, every time.
+            throw new GraphLockUnusable('The project graph lock ' . $path . ' cannot be opened by this process; fix or remove it.');
+        }
         // No lock file possible (read-only tree): run unlocked, as before.
-        if ($handle !== null && !flock($handle, LOCK_EX)) {
+        if ($handle !== null && !flock($handle, $wait ? LOCK_EX : LOCK_EX | LOCK_NB)) {
             fclose($handle);
+            if (!$wait) {
+                throw new GraphIsBeingWritten('Another process is writing the project graph.');
+            }
             $handle = null;
         }
 

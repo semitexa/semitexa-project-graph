@@ -9,6 +9,7 @@ use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
 use Semitexa\ProjectGraph\Application\Service\Parser\ClassInfo;
+use Semitexa\ProjectGraph\Application\Service\Parser\EnumCaseReference;
 use Semitexa\ProjectGraph\Application\Service\Parser\ParsedFile;
 use Semitexa\ProjectGraph\Attribute\GraphIgnore;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
@@ -165,6 +166,16 @@ final class TemplateRenderExtractor implements ExtractorInterface
                     ));
                 } elseif ($template !== null) {
                     $metadata['unresolved_templates'] = [['line' => $class->startLine, 'kind' => $role, 'name' => '', 'reason' => 'computed']];
+                } elseif ($role === 'resource' && self::rendersLayout($arguments)) {
+                    // No template: the layout renderer looks one up by the
+                    // handle, declared or taken from the class name. Which
+                    // file that is, the disk says at read time (UiFlowProjection).
+                    $handle = $arguments['handle'] ?? $arguments[0] ?? null;
+                    if ($handle === null) {
+                        $metadata['layout_handle'] = self::defaultHandle($class->fqcn);
+                    } elseif (is_string($handle) && $handle !== '') {
+                        $metadata['layout_handle'] = $handle;
+                    }
                 }
                 if ($metadata !== []) {
                     // Merged into the class's own node: the lowest type there
@@ -175,6 +186,39 @@ final class TemplateRenderExtractor implements ExtractorInterface
         }
 
         return $result;
+    }
+
+    /**
+     * Whether the resource is rendered through the layout renderer: no format
+     * declared, or the layout format said out loud (`format:
+     * ResponseFormat::Layout` is what an undeclared one becomes, in
+     * ResponseRenderer). Json, Xml, Text and Raw never look a handle up, and
+     * a resource with a renderer of its own is not the layout renderer's.
+     *
+     * @param array<int|string, mixed> $arguments
+     */
+    private static function rendersLayout(array $arguments): bool
+    {
+        if (array_key_exists('renderer', $arguments) && $arguments['renderer'] !== null) {
+            return false;
+        }
+
+        return !array_key_exists('format', $arguments) || in_array(EnumCaseReference::scalarOf($arguments['format']), [null, 'layout'], true);
+    }
+
+    /**
+     * The handle a resource has when it declares none, as
+     * ResourceAttributeSchema gives it (semitexa/core): `AboutResponse` is
+     * `about`, `OrderListResponse` is `order-list`.
+     */
+    private static function defaultHandle(string $fqcn): string
+    {
+        $short = substr($fqcn, (int) strrpos('\\' . $fqcn, '\\'));
+        if (str_ends_with($short, 'Response')) {
+            $short = substr($short, 0, -8);
+        }
+
+        return strtolower(ltrim((string) preg_replace('/[A-Z]/', '-$0', $short), '-'));
     }
 
     /**

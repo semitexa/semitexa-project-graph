@@ -21,7 +21,10 @@
  *   - a detail panel with every edge, both directions;
  *   - FINDINGS, each focusing its node;
  *   - FLOWS (live only): every business flow, and the opened one traced
- *     step by step with the places the graph stops seeing it.
+ *     step by step with the places the graph stops seeing it;
+ *   - UI FLOW (live only): one module's screens in columns of navigation
+ *     depth, the links and forms between them, and the focused screen's
+ *     elements with one hop in and one hop out.
  */
 (() => {
 'use strict';
@@ -64,6 +67,8 @@ function fetchSource(endpoint) {
     traces: id => get({view: 'traces', id}).then(b => b.traces),
     flows: () => get({view: 'flows'}).then(b => b.flows),
     flow: id => get({view: 'flow', id}),
+    // {} the modules that have screens, {module} one of them, {id} one screen.
+    ui: params => get({view: 'ui', ...params}),
   };
 }
 
@@ -186,13 +191,15 @@ function mount(root, source, options = {}) {
   const tabFind = el('button', '', 'Findings'); tabFind.type = 'button';
   const findBadge = el('b'); findBadge.hidden = true; tabFind.append(findBadge);
   const tabFlow = el('button', '', 'Flows'); tabFlow.type = 'button'; tabFlow.hidden = !source.flows;
-  tabs.append(tabTree, tabFind, tabFlow);
+  const tabUi = el('button', '', 'UI flow'); tabUi.type = 'button'; tabUi.hidden = !source.ui;
+  tabs.append(tabTree, tabFind, tabFlow, tabUi);
   const treeScroll = el('div', 'gv-scroll');
   const tree = el('div', 'gv-tree'); tree.setAttribute('role', 'tree'); tree.tabIndex = 0;
   treeScroll.append(tree);
   const findScroll = el('div', 'gv-scroll'); findScroll.hidden = true;
   const flowScroll = el('div', 'gv-scroll'); flowScroll.hidden = true;
-  side.append(tabs, treeScroll, findScroll, flowScroll);
+  const uiScroll = el('div', 'gv-scroll'); uiScroll.hidden = true;
+  side.append(tabs, treeScroll, findScroll, flowScroll, uiScroll);
 
   const main = el('section', 'gv-pane gv-main');
   const mainHead = el('h2'); const mainTitle = el('span', '', 'Focus');
@@ -201,7 +208,11 @@ function mount(root, source, options = {}) {
   const wrap = el('div', 'gv-canvas-wrap');
   const mainEmpty = el('div', 'gv-empty', 'Pick a node in the tree or search for one — its neighbourhood is drawn here.');
   wrap.append(mainEmpty);
-  main.append(mainHead, wrap);
+  // The UI flow is drawn as boxes in the page, not on the canvas: it takes the canvas's place while its tab is open.
+  const uiStage = el('div', 'gv-ui-stage'); uiStage.hidden = true;
+  // Outside the scroller, so it stays at the pane's edge: says there is more of the picture to the right.
+  const uiMore = el('div', 'gv-ui-more', 'more →'); uiMore.hidden = true;
+  main.append(mainHead, wrap, uiStage, uiMore);
 
   const detail = el('section', 'gv-pane gv-detail');
   const detailBody = el('div', 'gv-scroll');
@@ -489,21 +500,25 @@ function mount(root, source, options = {}) {
 
   /* ---- tabs ---- */
   function showTab(which) {
-    tabTree.classList.toggle('on', which === 'tree'); tabFind.classList.toggle('on', which === 'find'); tabFlow.classList.toggle('on', which === 'flow');
-    treeScroll.hidden = which !== 'tree'; findScroll.hidden = which !== 'find'; flowScroll.hidden = which !== 'flow';
+    tabTree.classList.toggle('on', which === 'tree'); tabFind.classList.toggle('on', which === 'find'); tabFlow.classList.toggle('on', which === 'flow'); tabUi.classList.toggle('on', which === 'ui');
+    treeScroll.hidden = which !== 'tree'; findScroll.hidden = which !== 'find'; flowScroll.hidden = which !== 'flow'; uiScroll.hidden = which !== 'ui';
+    wrap.hidden = which === 'ui'; ctl.hidden = which === 'ui'; uiStage.hidden = which !== 'ui';
     if (which === 'find' && api.loadFindings) api.loadFindings();
     if (which === 'flow' && api.loadFlows) api.loadFlows();
+    if (which !== 'ui') uiMore.hidden = true;
+    if (which === 'ui' && api.loadUiFlow) api.loadUiFlow(); else if (which !== 'ui' && api.leaveUiFlow) api.leaveUiFlow();
   }
   tabTree.addEventListener('click', () => showTab('tree'));
   tabFind.addEventListener('click', () => showTab('find'));
   tabFlow.addEventListener('click', () => showTab('flow'));
+  tabUi.addEventListener('click', () => showTab('ui'));
 
   /* ---- focus graph (DAG), filled in by the DAG module below ---- */
   function focusGraph(id) { S.focus = id; if (api.drawFocus) api.drawFocus(id); }
 
   const api = {
     S, source, root, select, reveal, showTab,
-    parts: {bar, ctl, wrap, mainEmpty, mainTitle, findScroll, findBadge, flowScroll, detailBody},
+    parts: {bar, ctl, wrap, mainEmpty, mainTitle, findScroll, findBadge, flowScroll, uiScroll, uiStage, uiMore, detailBody},
     helpers: {el, dot, moduleClass, fail, kindRank, ENTRY_REVERSED},
     focusSearch: () => input.focus(),
   };
@@ -1081,6 +1096,442 @@ const ext = api => {
       box.append(s);
     }
   }
+};
+window.SemitexaGraphView = window.SemitexaGraphView || {};
+(window.SemitexaGraphView.extensions = window.SemitexaGraphView.extensions || []).push(ext);
+})();
+
+/* ======================================================================
+ * UI flow: which screens a module has and where a visitor can go or post
+ * from each (ep-ui-flow-graph), read from the model `ai:ask ui-flow` reads.
+ *
+ * One module at a time, picked from the list. Its screens stand in columns
+ * by how many links they are from the module's entry; the endpoints its
+ * forms post to stand beside them; every other module it touches is one
+ * dashed ghost box. A click on a screen focuses it: the detail panel lists
+ * its links and forms, where they lead and which screens lead to it, and its
+ * wires are lit.
+ *
+ * Boxes are elements of the page and wires an SVG laid under them, not the
+ * canvas of the DAG: a screen is a thing to click and to read, in both
+ * themes, with nothing to redraw when the theme changes. No inline style:
+ * positions go into SVG attributes.
+ *
+ * A column of boxes is a lane, and a lane is opaque: a wire that crosses one
+ * on its way runs behind it and shows only in the gutters between lanes,
+ * never as hatching in the gaps between rows. Every wire ends in an
+ * arrowhead, because half of what a module's screens write are links BACK to
+ * its entry, and a line without a direction reads as the opposite claim.
+ *
+ * Depth and the picture agree by one rule. A layout's links count for depth
+ * like any other link. Unfocused, a wire is drawn when it is a screen's own
+ * link, or when it is the link that first reaches a screen from the entry
+ * (`tree`), shared or not: so every screen in a depth column has the wire
+ * that put it there. The rest of a layout's links are drawn for the focused
+ * screen.
+ *
+ * Nothing is drawn that the graph does not know. A link whose target Twig
+ * computes, or that no route answers, has no wire: it is counted on its
+ * screen (the ?N chip) and listed with its reason when the screen is focused.
+ * ====================================================================== */
+(() => {
+'use strict';
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const LAYERS = [
+  ['navigation', 'navigation', 'links from one screen to another'],
+  ['action', 'actions', 'forms, and the endpoints they post to'],
+  ['data', 'data', ''],
+  ['access', 'access', ''],
+];
+/** Rows of the column that holds the screens no link reaches: it wraps instead of running off the page. */
+const FAR_ROWS = 12;
+const ext = api => {
+  const {source, parts, helpers} = api;
+  const {el, dot, fail} = helpers;
+  if (!source.ui) return;
+  const U = {
+    overview: null, loading: null, module: null, data: null, focus: null,
+    on: {navigation: true, action: true}, boxes: new Map(), wires: [],
+    svg: null, inner: null, title: null, moduleSeq: 0, detailSeq: 0,
+    // Whether the tab is the one shown. The main pane's title and the detail
+    // panel are shared with the other tabs: an answer that arrives after the
+    // tab was left is kept for the return, and writes to neither.
+    active: false,
+  };
+  const short = s => String(s).split('\\').pop();
+  const count = (n, one, many) => n + ' ' + (n === 1 ? one : (many || one + 's'));
+
+  api.loadUiFlow = () => {
+    U.active = true;
+    if (U.title === null) U.title = parts.mainTitle.textContent;
+    setTitle();
+    if (U.loading) { requestAnimationFrame(wire); return U.loading; }
+    parts.uiScroll.replaceChildren(el('div', 'gv-empty', 'Reading the UI flow…'));
+    U.loading = source.ui({}).then(o => {
+      U.overview = o;
+      renderSide();
+      // Open on the module with the most screens: the one there is most to see in.
+      const first = [...o.modules].sort((a, b) => b.screens - a.screens || a.module.localeCompare(b.module))[0];
+      if (first) return openModule(first.module);
+      parts.uiStage.replaceChildren(el('div', 'gv-empty', o.status === 'ok'
+        ? 'No screen in the graph. A screen is a GET route whose resource renders a template.'
+        : o.message));
+      return null;
+    }).catch(err => { U.loading = null; fail(parts.uiScroll, err); });
+    return U.loading;
+  };
+  /** The main pane's title belongs to the DAG again once the tab is left. */
+  api.leaveUiFlow = () => {
+    U.active = false;
+    U.detailSeq++; // a screen still on its way describes nothing once the panel is another tab's
+    if (U.title !== null) { parts.mainTitle.textContent = U.title; U.title = null; }
+  };
+
+  function setTitle() {
+    if (!U.active) return;
+    const d = U.data;
+    parts.mainTitle.textContent = d ? 'UI flow · ' + (d.module || 'no module') + ' · ' + count(d.screens.length, 'screen') + ' · ' + count(d.wires.length, 'wire') : 'UI flow';
+  }
+
+  /* ---- side: status, layers, modules ---- */
+  function renderSide() {
+    const o = U.overview, box = parts.uiScroll; box.replaceChildren();
+    if (o.status !== 'ok') {
+      const warn = el('div', 'gv-gap gv-ui-status');
+      warn.append(el('b', '', o.status === 'project-root-missing' ? 'Built on another machine' : 'Project unknown'), ' — ' + o.message);
+      box.append(warn);
+    }
+
+    const head = el('div', 'gv-sec');
+    const seg = el('div', 'gv-seg gv-ui-layers');
+    for (const [key, label, what] of LAYERS) {
+      const available = !!(o.layers[key] && o.layers[key].available);
+      const b = el('button', available && U.on[key] ? 'on' : '', label); b.type = 'button'; b.dataset.layer = key;
+      if (!available) {
+        b.disabled = true; b.title = label + ' is not drawn yet: it arrives with a later slice';
+      } else {
+        b.title = what; b.setAttribute('aria-pressed', String(U.on[key]));
+        b.addEventListener('click', () => {
+          U.on[key] = !U.on[key];
+          b.classList.toggle('on', U.on[key]); b.setAttribute('aria-pressed', String(U.on[key]));
+          applyLayers();
+        });
+      }
+      seg.append(b);
+    }
+    head.append(seg);
+    const t = o.totals;
+    head.append(el('div', 'gv-fe gv-ui-totals', count(t.screens, 'screen') + ' · ' + count(t.ways, 'link or form', 'links and forms') + ' · ' + t.unresolved + ' with a target the graph cannot name'));
+    box.append(head);
+
+    const list = el('div', 'gv-sec gv-ui-modules');
+    const h = el('h4', '', 'Modules'); h.append(el('span', '', String(o.modules.length))); list.append(h);
+    if (!o.modules.length) list.append(el('div', 'gv-empty', 'none with a screen'));
+    for (const m of o.modules) {
+      const b = el('button', 'gv-find' + (m.module === U.module ? ' on' : '')); b.type = 'button'; b.dataset.module = m.module;
+      const name = el('span', 'gv-ft'); name.append(dot({module: m.module}), ' ', m.module || 'no module');
+      b.append(el('span', 'gv-fc gv-low', String(m.screens)), name, el('span', 'gv-fe', count(m.ways, 'link or form', 'links and forms') + (m.unresolved ? ' · ' + m.unresolved + ' unresolved' : '')));
+      b.title = count(m.screens, 'screen') + ' in ' + (m.module || 'no module');
+      b.addEventListener('click', () => openModule(m.module));
+      list.append(b);
+    }
+    box.append(list);
+  }
+
+  /* ---- main: one module ---- */
+  function openModule(name, thenFocus) {
+    const seq = ++U.moduleSeq;
+    U.module = name; U.focus = null; U.data = null;
+    // The screen described beside the picture belonged to the module just left.
+    U.detailSeq++; if (U.active) parts.detailBody.replaceChildren(el('div', 'gv-empty', 'Nothing selected.'));
+    parts.uiScroll.querySelectorAll('.gv-find[data-module]').forEach(b => b.classList.toggle('on', b.dataset.module === name));
+    parts.uiStage.replaceChildren(el('div', 'gv-empty', 'Reading ' + (name || 'the module') + '…'));
+    return source.ui({module: name}).then(d => {
+      if (seq !== U.moduleSeq) return;
+      U.data = d;
+      renderStage();
+      if (thenFocus) focus(thenFocus);
+    }).catch(err => { if (seq === U.moduleSeq) fail(parts.uiStage, err); });
+  }
+
+  /** A titled column: its boxes in lanes of at most $rows, each lane opaque so wires pass behind it. */
+  function column(title, boxes, cls, rows) {
+    const col = el('div', 'gv-ui-col' + (cls ? ' ' + cls : ''));
+    const h = el('h4', '', title); h.append(el('span', '', String(boxes.length)));
+    const lanes = el('div', 'gv-ui-lanes');
+    for (let i = 0; i < boxes.length; i += rows) { const lane = el('div', 'gv-ui-lane'); lane.append(...boxes.slice(i, i + rows)); lanes.append(lane); }
+    col.append(h, lanes);
+    return col;
+  }
+
+  function box(node, cls, title, sub, chips) {
+    const b = el('button', 'gv-ui-box' + (cls ? ' ' + cls : '')); b.type = 'button'; b.dataset.id = node.id;
+    b.append(dot({module: node.module}), el('span', 'gv-ui-path', title));
+    const tags = el('span', 'gv-ui-chips'); tags.append(...(chips || [])); b.append(tags);
+    b.append(el('span', 'gv-ui-sub', sub));
+    U.boxes.set(node.id, b);
+    return b;
+  }
+
+  function chip(text, title, cls) { const c = el('span', 'gv-ui-chip' + (cls ? ' ' + cls : ''), text); c.title = title; return c; }
+
+  function screenBox(s) {
+    const chips = [];
+    if (s.unresolved > 0) chips.push(chip('?' + s.unresolved, count(s.unresolved, 'link or form', 'links or forms') + ' here whose target the graph cannot name: Twig computes it, or no route answers. Focus the screen to see each with its reason.', 'gv-warn'));
+    if (s.via === 'handle') chips.push(chip('handle', 'No template is declared: the layout renderer finds one by the resource\'s handle.'));
+    const b = box(s, '', s.path, short(s.fqcn), chips);
+    b.title = s.fqcn + ' · ' + s.at;
+    b.addEventListener('click', () => focus(s.id));
+    return b;
+  }
+
+  function endpointBox(n) {
+    const b = box(n, 'gv-ui-endpoint', n.path, short(n.fqcn), [chip(n.methods.join(' '), 'An endpoint: a route a form or a link reaches that renders no page of its own.')]);
+    b.title = n.fqcn + ' · ' + n.at;
+    b.addEventListener('click', () => { U.focus = n.id; paintFocus(); renderNode(n); });
+    return b;
+  }
+
+  function ghostBox(g) {
+    const b = box(g, 'gv-ui-ghost', g.module || 'no module', count(g.screens, 'screen') + ' · ' + g.ways_out + ' out · ' + g.ways_in + ' in', []);
+    b.title = 'Another module, collapsed: ' + count(g.ways_out, 'link or form', 'links or forms') + ' lead there from here, ' + g.ways_in + ' come from it.';
+    // A module with no screen of its own (only endpoints these links reach) has no picture to open.
+    if (g.screens > 0) { b.title += ' Click to open it.'; b.addEventListener('click', () => openModule(g.module)); }
+    else { b.disabled = true; b.title += ' It has no screen of its own, so there is nothing to open.'; }
+    return b;
+  }
+
+  function renderStage() {
+    const d = U.data, stage = parts.uiStage; stage.replaceChildren(); U.boxes.clear();
+    const legend = el('div', 'gv-ui-legend');
+    const key = (cls, text) => { const k = el('span', 'gv-ui-key ' + cls, text); legend.append(k); };
+    key('gv-ui-k-nav', 'link, to where the arrow points'); key('gv-ui-k-act', 'form'); key('gv-ui-k-pat', 'fits a route pattern');
+    legend.append(el('span', 'gv-ui-key', '?N: targets the graph cannot name'), el('span', 'gv-ui-key', 'the rest of a layout\'s links, shared by several screens, are drawn for the focused screen'));
+
+    const svg = document.createElementNS(SVG_NS, 'svg'); svg.setAttribute('class', 'gv-ui-wires'); svg.setAttribute('aria-hidden', 'true');
+    const cols = el('div', 'gv-ui-cols');
+    const depths = [...new Set(d.screens.filter(s => s.depth !== null).map(s => s.depth))].sort((a, b) => a - b);
+    for (const depth of depths) {
+      cols.append(column(depth === 0 ? 'entry' : count(depth, 'link') + ' in', d.screens.filter(s => s.depth === depth).map(screenBox), '', FAR_ROWS * 2));
+    }
+    if (d.endpoints.length) cols.append(column('endpoints', d.endpoints.map(endpointBox), 'gv-ui-col-act', FAR_ROWS * 2));
+    const far = d.screens.filter(s => s.depth === null);
+    if (far.length) {
+      const col = column('not reached from the entry', far.map(screenBox), 'gv-ui-col-far', FAR_ROWS);
+      col.title = 'No link the graph can read leads here from the entry: it may be computed (see the entry\'s ?N), written by a script, or not there. A wire from one of these to the entry is its link BACK, which reaches nothing.';
+      cols.append(col);
+    }
+    if (d.ghosts.length) cols.append(column('other modules', d.ghosts.map(ghostBox), 'gv-ui-col-ghost', FAR_ROWS * 2));
+
+    const inner = el('div', 'gv-ui-inner'); inner.append(svg, cols);
+    stage.append(legend, inner);
+    U.svg = svg; U.inner = inner;
+    setTitle();
+    applyLayers();
+  }
+
+  /** The cue at the pane's right edge, while some of the picture is still to the right. */
+  function more() {
+    const st = parts.uiStage;
+    parts.uiMore.hidden = st.hidden || st.scrollLeft + st.clientWidth >= st.scrollWidth - 4;
+  }
+  parts.uiStage.addEventListener('scroll', more, {passive: true});
+
+  /**
+   * A layer switched off takes its wires, and an endpoint goes with the last
+   * wire that reached it: one a link still leads to stays when the forms are
+   * switched off.
+   */
+  function applyLayers() {
+    if (!U.inner || !U.data) return;
+    const reached = new Set(U.data.wires.filter(w => U.on[w.layer]).map(w => w.to));
+    let shown = 0;
+    for (const n of U.data.endpoints) { const b = U.boxes.get(n.id); if (b) { b.hidden = !reached.has(n.id); shown += b.hidden ? 0 : 1; } }
+    const col = U.inner.querySelector('.gv-ui-col-act'); if (col) col.hidden = shown === 0;
+    wire();
+  }
+
+  /* ---- wires ---- */
+  /** A level arrowhead whose tip is at (x, y), pointing right when dir is 1. */
+  const arrow = (x, y, dir) => 'M' + x + ',' + y + ' L' + (x - dir * 7) + ',' + (y - 3.5) + ' L' + (x - dir * 7) + ',' + (y + 3.5) + ' Z';
+
+  /** A curve between neighbours: nothing stands between the two boxes. */
+  function curve(a, b) {
+    const ay = a.y + a.h / 2, by = b.y + b.h / 2;
+    let x1, x2, c;
+    if (b.x >= a.x + a.w) { x1 = a.x + a.w; x2 = b.x; c = (x1 + x2) / 2; }          // onward
+    else if (b.x + b.w <= a.x) { x1 = a.x; x2 = b.x + b.w; c = (x1 + x2) / 2; }     // back
+    else { x1 = a.x + a.w; x2 = b.x + b.w; c = Math.max(x1, x2) + 26; }             // same lane: round the side
+    const dir = c < x2 ? 1 : -1;
+    return {d: 'M' + x1 + ',' + ay + ' C' + c + ',' + ay + ' ' + c + ',' + by + ' ' + (x2 - dir * 7) + ',' + by, head: arrow(x2, by, dir)};
+  }
+
+  /**
+   * A wire with lanes between its ends goes round them: out into the gutter
+   * beside its box, down to a track under the picture, along it, and up the
+   * gutter beside its target. Straight through, it would run behind the
+   * lanes and show in each gutter as a stub leading nowhere. `slot` spreads
+   * the wires of different targets, so two tracks are not one line.
+   */
+  function detour(a, b, floor, slot) {
+    const ay = a.y + a.h / 2, by = b.y + b.h / 2, onward = b.x >= a.x + a.w;
+    const off = 16 + (slot % 5) * 6, r = 6;
+    const x1 = onward ? a.x + a.w : a.x, x2 = onward ? b.x : b.x + b.w;
+    const xs = onward ? x1 + off : x1 - off, xt = onward ? x2 - off : x2 + off;
+    const yb = floor + 8 + (slot % 4) * 5;
+    const sx = Math.sign(xt - xs) || 1, s1 = Math.sign(xs - x1), s2 = Math.sign(x2 - xt);
+    const d = 'M' + x1 + ',' + ay
+      + ' L' + (xs - s1 * r) + ',' + ay + ' Q' + xs + ',' + ay + ' ' + xs + ',' + (ay + r)
+      + ' L' + xs + ',' + (yb - r) + ' Q' + xs + ',' + yb + ' ' + (xs + sx * r) + ',' + yb
+      + ' L' + (xt - sx * r) + ',' + yb + ' Q' + xt + ',' + yb + ' ' + xt + ',' + (yb - r)
+      + ' L' + xt + ',' + (by + r) + ' Q' + xt + ',' + by + ' ' + (xt + s2 * r) + ',' + by
+      + ' L' + (x2 - s2 * 7) + ',' + by;
+    return {d, head: arrow(x2, by, s2)};
+  }
+
+  function wire() {
+    if (!U.data || !U.inner || parts.uiStage.hidden) return;
+    const svg = U.svg; svg.replaceChildren(); U.wires = [];
+    const base = U.inner.getBoundingClientRect();
+    svg.setAttribute('width', String(U.inner.offsetWidth)); svg.setAttribute('height', String(U.inner.offsetHeight));
+    const rect = id => {
+      const b = U.boxes.get(id); if (!b || b.offsetParent === null) return null;
+      const r = b.getBoundingClientRect();
+      return {x: Math.round(r.left - base.left), y: Math.round(r.top - base.top), w: Math.round(r.width), h: Math.round(r.height)};
+    };
+    // Where the lanes stand, and the floor under the lowest of them.
+    const lanes = [...U.inner.querySelectorAll('.gv-ui-lane')].filter(l => l.offsetParent !== null).map(l => { const r = l.getBoundingClientRect(); return {x: r.left - base.left, w: r.width, bottom: r.bottom - base.top}; });
+    const floor = Math.round(Math.max(0, ...lanes.map(l => l.bottom)));
+    const between = (a, b) => { const lo = Math.min(a.x + a.w, b.x + b.w), hi = Math.max(a.x, b.x); return lanes.some(l => l.x >= lo - 1 && l.x + l.w <= hi + 1); };
+    const slots = new Map();
+    for (const w of U.data.wires) {
+      if (!U.on[w.layer]) continue;
+      const a = rect(w.from), b = rect(w.to); if (!a || !b) continue;
+      if (!slots.has(w.to)) slots.set(w.to, slots.size);
+      const p = between(a, b) ? detour(a, b, floor, slots.get(w.to)) : curve(a, b);
+      const g = document.createElementNS(SVG_NS, 'g');
+      g.setAttribute('class', 'gv-ui-wire gv-ui-' + w.layer + (w.confidence === 'exact' ? '' : ' gv-ui-pattern') + (w.shared && !w.tree ? ' gv-ui-shared' : ''));
+      g.dataset.from = w.from; g.dataset.to = w.to; g.dataset.at = w.at;
+      const line = document.createElementNS(SVG_NS, 'path'); line.setAttribute('d', p.d);
+      // Its own shape, not an SVG marker: a marker takes the wire's colour only through an inline style.
+      const head = document.createElementNS(SVG_NS, 'path'); head.setAttribute('class', 'gv-ui-head'); head.setAttribute('d', p.head);
+      g.append(line, head); svg.append(g);
+      U.wires.push({w, g});
+    }
+    paintFocus();
+    more();
+  }
+  new ResizeObserver(() => wire()).observe(parts.uiStage);
+
+  function paintFocus() {
+    const near = new Set();
+    for (const {w, g} of U.wires) {
+      const lit = U.focus !== null && (w.from === U.focus || w.to === U.focus);
+      g.classList.toggle('lit', lit);
+      if (lit) { near.add(w.from); near.add(w.to); }
+    }
+    for (const [id, b] of U.boxes) { b.classList.toggle('sel', id === U.focus); b.classList.toggle('near', id !== U.focus && near.has(id)); }
+    if (U.inner) U.inner.classList.toggle('gv-ui-has-focus', U.focus !== null);
+  }
+
+  /* ---- focus: one screen in the detail panel ---- */
+  function focus(id) {
+    U.focus = id; paintFocus();
+    const b = U.boxes.get(id); if (b) b.scrollIntoView({block: 'nearest', inline: 'nearest'});
+    const seq = ++U.detailSeq;
+    parts.detailBody.replaceChildren(el('div', 'gv-empty', 'loading…'));
+    source.ui({id}).then(d => { if (seq === U.detailSeq) renderScreen(d); }).catch(err => { if (seq === U.detailSeq) fail(parts.detailBody, err); });
+  }
+
+  /** Go to a node named in a list: a screen is focused, in its own module's picture; an endpoint is described. */
+  function go(node) {
+    if (node.kind !== 'screen') { U.focus = node.id; paintFocus(); renderNode(node); return; }
+    if (node.module === U.module && U.boxes.has(node.id)) focus(node.id); else openModule(node.module, node.id);
+  }
+
+  function sourceLink(fqcn, label) {
+    const a = el('a', '', label); a.href = '/__trace/node?class=' + encodeURIComponent(fqcn); a.target = '_blank'; a.rel = 'noopener';
+    return a;
+  }
+
+  function head(node, type, meta) {
+    const h = el('div', 'gv-head');
+    const title = el('h3'); title.append(dot({module: node.module}), el('span', '', node.path), el('span', 'gv-type', type));
+    h.append(title, el('div', 'gv-fq', node.fqcn), el('div', 'gv-meta', (node.module || 'no module') + ' · ' + node.at + (meta ? ' · ' + meta : '')));
+    const acts = el('div', 'gv-acts'); acts.append(sourceLink(node.fqcn, 'source & wiring ↗'));
+    h.append(acts);
+    return {h, acts};
+  }
+
+  function section(title, n) {
+    const sec = el('div', 'gv-sec'); const h = el('h4', '', title); h.append(el('span', '', String(n))); sec.append(h);
+    return sec;
+  }
+
+  function renderNode(node) {
+    // An endpoint is described from what the picture already holds: a screen
+    // asked for a moment ago must not answer over it.
+    U.detailSeq++;
+    const {h, acts} = head(node, 'endpoint', node.methods.join(' '));
+    const graph = el('button', 'gv-btn', 'show in graph'); graph.type = 'button';
+    graph.addEventListener('click', () => { api.showTab('tree'); api.reveal(node.id); });
+    acts.append(graph);
+    parts.detailBody.replaceChildren(h, el('div', 'gv-empty', 'An endpoint renders no page of its own, so it has no links or forms to list. The screens that reach it are lit in the picture.'));
+  }
+
+  function renderScreen(d) {
+    const s = d.screen, body = parts.detailBody; body.replaceChildren();
+    const {h, acts} = head(s, 'screen', s.via === 'handle' ? 'template found by its handle' : null);
+    acts.append(sourceLink(s.resource.replace(/^class:/, ''), 'resource ↗'));
+    const graph = el('button', 'gv-btn', 'show in graph'); graph.type = 'button';
+    graph.addEventListener('click', () => { api.showTab('tree'); api.reveal(s.id); });
+    acts.append(graph);
+    body.append(h);
+    if (s.unresolved > 0) {
+      const gap = el('div', 'gv-gap');
+      gap.append(el('b', '', s.unresolved + ' unresolved'), ' — ' + (s.unresolved === 1 ? 'a link or form' : 'links or forms') + ' whose target the graph cannot name. Each is listed below with why; none is drawn as a wire.');
+      body.append(gap);
+    }
+
+    const targets = new Map(d.out.map(hop => [hop.node.id, hop.node]));
+    const elements = section('Links and forms', d.elements.length);
+    if (!d.elements.length) elements.append(el('div', 'gv-empty', 'none'));
+    for (const e of d.elements) {
+      const target = e.to === null ? null : targets.get(e.to) || (e.to === s.id ? s : null);
+      const row = el(target && target.id !== s.id ? 'button' : 'div', 'gv-find gv-ui-el'); if (row.tagName === 'BUTTON') row.type = 'button';
+      const lead = e.to === null ? 'unresolved: ' + e.why : '→ ' + e.route + (e.confidence === 'exact' ? '' : ' (' + e.confidence + ')') + (target && target.id === s.id ? ' · this screen' : '');
+      row.append(
+        el('span', 'gv-fc ' + (e.to === null ? 'gv-medium' : 'gv-low'), e.kind === 'submit' ? 'form' : 'link'),
+        el('span', 'gv-ft', (e.kind === 'submit' ? e.method + ' ' : '') + e.href),
+        el('span', 'gv-fe', lead + ' · ' + e.at + (e.shared ? ' · shared' : '')),
+      );
+      row.title = e.at + (e.shared ? ' · in a template several screens render' : '');
+      if (row.tagName === 'BUTTON') row.addEventListener('click', () => go(target));
+      elements.append(row);
+    }
+    body.append(elements);
+
+    for (const [title, hops, none] of [['Leads to', d.out, 'nowhere the graph can name'], ['Reached from', d.in, 'no screen the graph can read']]) {
+      const sec = section(title, hops.length);
+      if (!hops.length) sec.append(el('div', 'gv-empty', none));
+      for (const hop of hops) {
+        const n = hop.node;
+        const row = el('button', 'gv-find'); row.type = 'button';
+        const name = el('span', 'gv-ft'); name.append(dot({module: n.module}), ' ', n.path);
+        row.append(el('span', 'gv-fc gv-low', hop.count + '×'), name, el('span', 'gv-fe', (n.module || 'no module') + ' · ' + (n.kind === 'screen' ? 'screen' : n.methods.join(' ') + ' endpoint') + ' · ' + hop.layers.join(', ') + ' · ' + n.at));
+        row.title = n.fqcn;
+        row.addEventListener('click', () => go(n));
+        sec.append(row);
+      }
+      body.append(sec);
+    }
+
+    const templates = section('Templates it renders', d.templates.length);
+    for (const t of d.templates) templates.append(el('div', 'gv-fe gv-flow-list', t.at));
+    body.append(templates);
+  }
+
+  api.uiFlow = U; // inspectable from the console, like api.dag
 };
 window.SemitexaGraphView = window.SemitexaGraphView || {};
 (window.SemitexaGraphView.extensions = window.SemitexaGraphView.extensions || []).push(ext);

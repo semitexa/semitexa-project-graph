@@ -22,9 +22,13 @@ namespace Semitexa\ProjectGraph\Application\Service\Extractor;
  */
 final class TemplateNamespaces
 {
-    /** @param array<string, string> $directories namespace => directory, no trailing slash */
+    /**
+     * @param array<string, string> $directories namespace => directory, no trailing slash
+     * @param array<string, string> $modules module name => its template directory, in the order the modules register
+     */
     private function __construct(
         private readonly array $directories,
+        private readonly array $modules = [],
     ) {}
 
     public static function ofProject(string $projectRoot): self
@@ -100,7 +104,34 @@ final class TemplateNamespaces
             }
         }
 
-        return new self($directories);
+        return new self($directories, array_map(static fn (array $module): string => $module['path'], $modules));
+    }
+
+    /**
+     * The template a resource is rendered with when it declares a handle and
+     * no template: what ModuleTemplateCatalog::resolveLayout() answers at
+     * runtime (semitexa/ssr). The first module, in registration order, that
+     * holds `<handle>.html.twig`, `layouts/<handle>.html.twig` or
+     * `layouts/<dir>/<handle>.html.twig` gives the file; the handle names no
+     * module, so the module is whichever holds it.
+     */
+    public function layoutOf(string $handle): ?string
+    {
+        if ($handle === '' || str_contains($handle, '/') || str_contains($handle, '\\') || str_contains($handle, '..')) {
+            return null;
+        }
+        foreach ($this->modules as $directory) {
+            foreach ([$directory . '/' . $handle . '.html.twig', $directory . '/layouts/' . $handle . '.html.twig'] as $file) {
+                if (is_file($file)) {
+                    return $file;
+                }
+            }
+            foreach (glob($directory . '/layouts/*/' . $handle . '.html.twig') ?: [] as $file) {
+                return $file;
+            }
+        }
+
+        return null;
     }
 
     /**

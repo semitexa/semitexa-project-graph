@@ -66,6 +66,17 @@ final class GraphBrowser
     }
 
     /**
+     * A `template:<name>` placeholder: the name a template is rendered by,
+     * kept so `renders_template` has a target. Which file it is, the disk
+     * says at read time (UiFlowProjection); as a node it is a second, empty
+     * copy of that file, so the viewer neither lists nor counts it.
+     */
+    public static function isTemplateName(Node $node): bool
+    {
+        return $node->getIsPlaceholder() && str_starts_with($node->getId(), 'template:');
+    }
+
+    /**
      * What the view opens on: counts, modules and the entry points the tree is
      * rooted at.
      *
@@ -90,6 +101,10 @@ final class GraphBrowser
         foreach (self::HIDDEN_NODES as $hidden) {
             unset($byType[$hidden]);
         }
+        $templateNames = $this->storage->nodes->countTemplateNames();
+        if ($templateNames > 0 && isset($byType[NodeType::File->value])) {
+            $byType[NodeType::File->value] = max(0, $byType[NodeType::File->value] - $templateNames);
+        }
 
         $lastUpdate = $this->storage->getMeta('last_update');
         $exclusions = json_decode((string) ($this->storage->getMeta('coverage_exclusions') ?? ''), true);
@@ -97,7 +112,7 @@ final class GraphBrowser
         return [
             'builtAt' => $lastUpdate !== null && $lastUpdate !== '' ? (int) $lastUpdate : null,
             'counts' => [
-                'nodes' => $this->storage->nodes->countAll(),
+                'nodes' => max(0, $this->storage->nodes->countAll() - $templateNames),
                 'edges' => $this->storage->edges->countAll(),
                 'byType' => $byType,
             ],
@@ -118,7 +133,7 @@ final class GraphBrowser
     public function describe(string $id): ?array
     {
         $node = $this->storage->nodes->findById($id);
-        if ($node === null) {
+        if ($node === null || self::isTemplateName($node)) {
             return null;
         }
 
@@ -137,7 +152,7 @@ final class GraphBrowser
         foreach ($in as $edge) {
             $ids[] = $edge->getSourceId();
         }
-        $neighbours = $this->storage->nodes->findByIds($ids);
+        $neighbours = array_filter($this->storage->nodes->findByIds($ids), static fn (Node $other): bool => !self::isTemplateName($other));
 
         return [
             'node' => $this->node($node),
@@ -159,7 +174,7 @@ final class GraphBrowser
     public function subgraph(string $rootId, int $depth): ?array
     {
         $root = $this->storage->nodes->findById($rootId);
-        if ($root === null) {
+        if ($root === null || self::isTemplateName($root)) {
             return null;
         }
 
@@ -182,7 +197,7 @@ final class GraphBrowser
             }
 
             foreach ($this->storage->nodes->findByIds(array_keys($missing)) as $id => $node) {
-                if (in_array($node->getType()->value, self::HIDDEN_NODES, true)) {
+                if (in_array($node->getType()->value, self::HIDDEN_NODES, true) || self::isTemplateName($node)) {
                     continue;
                 }
                 if (count($nodes) >= self::MAX_NODES) {
@@ -318,7 +333,7 @@ final class GraphBrowser
         }
 
         $hits = [];
-        foreach ($this->storage->nodes->searchText($query, self::SEARCH_LIMIT + 1, self::HIDDEN_NODES) as $node) {
+        foreach ($this->storage->nodes->searchText($query, self::SEARCH_LIMIT + 1, self::HIDDEN_NODES, templateNames: false) as $node) {
             $hits[] = $this->node($node);
         }
         $truncated = count($hits) > self::SEARCH_LIMIT;
