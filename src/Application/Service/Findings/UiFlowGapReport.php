@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Service\Findings;
 
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
+use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
 use Semitexa\ProjectGraph\Application\Service\UiFlow\RouteMatcher;
 use Semitexa\ProjectGraph\Application\Service\UiFlow\UiFlowProjection;
 
@@ -88,6 +89,12 @@ final class UiFlowGapReport
         }
 
         $reached = $flow->submitted($tests);
+        // A UI action declared in test code is left out of the reach above: counted, like the test templates and payloads.
+        if ($tests !== null) {
+            foreach ($storage->nodes->findByType(NodeType::UiAction->value) as $action) {
+                $skipped += !$action->getIsPlaceholder() && $tests->contains($action->getFile()) && ($module === null || $action->getModule() === $module) ? 1 : 0;
+            }
+        }
         $allowed = [];
         $posts = 0;
         $reachedCount = 0;

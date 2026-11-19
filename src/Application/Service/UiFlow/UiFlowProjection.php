@@ -302,6 +302,14 @@ final class UiFlowProjection
             if (!str_starts_with($edge->getSourceId(), 'uiaction:')) {
                 continue;
             }
+            // A UI action declared in test code reaches nothing a visitor can
+            // use, as a form in a test template does not (review, project-graph#38).
+            if ($tests !== null) {
+                $action = $this->storage->nodes->findById($edge->getSourceId());
+                if ($action !== null && $action->getFile() !== '' && $tests->contains($action->getFile())) {
+                    continue;
+                }
+            }
             $reached[$edge->getTargetId()] = true;
             foreach ($this->storage->edges->findBySource($edge->getTargetId(), EdgeType::Handles) as $handles) {
                 $reached[$handles->getTargetId()] = true;

@@ -175,6 +175,41 @@ final class UiFlowGapReportTest extends TestCase
         self::assertSame([3, 0], [$naive['summary']['reached'], $naive['summary']['test_code_skipped']]);
     }
 
+    /**
+     * A UI action declared in test code is no button a visitor has: the
+     * payload its class handles is not reached by it (project-graph#38
+     * review). The attribute is read by name, so semitexa/platform-ui is
+     * not needed to declare it.
+     */
+    #[Test]
+    public function a_ui_action_in_test_code_does_not_make_a_payload_reached(): void
+    {
+        $action = <<<'PHP'
+            <?php
+            namespace Campaign\Shop\Tests;
+
+            use Campaign\Shop\ArchiveOrdersPayload;
+            use Campaign\Shop\OrdersResource;
+            use Semitexa\Core\Attribute\AsPayloadHandler;
+            use Semitexa\PlatformUi\Attribute\AsFormSubmitAction;
+
+            #[AsFormSubmitAction(name: 'archive')]
+            #[AsPayloadHandler(payload: ArchiveOrdersPayload::class, resource: OrdersResource::class)]
+            final class ArchiveAction {}
+            PHP;
+        $fixture = self::graphOf(UiFlowProject::withPosts() + ['tests/Support/ArchiveAction.php' => $action]);
+        self::assertTrue($fixture->hasEdge(\Semitexa\ProjectGraph\Application\Service\Graph\EdgeType::ImplementedBy, 'uiaction:form-submit:archive', 'class:Campaign\\Shop\\Tests\\ArchiveAction'), 'the action is in the graph');
+
+        $judged = (new UiFlowGapReport())->collect($fixture->storage, null, TestCode::of($fixture->storage));
+        self::assertSame(['POST /orders/archive'], array_column(self::ofRule($judged['findings'], UiFlowGapReport::ORPHAN_POST), 'subject'));
+        self::assertSame([2, 1], [$judged['summary']['reached'], $judged['summary']['test_code_skipped']]);
+
+        // Not told what test code is, the report takes the action for a real one.
+        $naive = (new UiFlowGapReport())->collect($fixture->storage);
+        self::assertSame([], self::ofRule($naive['findings'], UiFlowGapReport::ORPHAN_POST));
+        self::assertSame([3, 0], [$naive['summary']['reached'], $naive['summary']['test_code_skipped']]);
+    }
+
     #[Test]
     public function a_finding_keeps_its_id_in_another_directory_and_a_module_filter_keeps_only_its_own(): void
     {
