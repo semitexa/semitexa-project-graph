@@ -75,6 +75,36 @@ final class TemplateLinksTest extends TestCase
     }
 
     /**
+     * Review, project-graph#38: a form's method as a browser reads it. A
+     * `dialog` form sends no request and is no way at all; a missing, empty or
+     * invalid method is GET; a method Twig computes is not guessed.
+     */
+    #[Test]
+    public function a_form_method_is_read_as_a_browser_reads_it(): void
+    {
+        $markup = "<form method=\"dialog\" action=\"{{ url('archive') }}\"></form>\n"
+            . "<form method=\"\" action=\"{{ url('archive') }}\"></form>\n"
+            . "<form method=\"put\" action=\"{{ url('archive') }}\"></form>\n"
+            . "<form method=\"post\" action=\"{{ url('archive') }}\"></form>\n"
+            . "<form method=\"{{ m }}\" action=\"{{ url('archive') }}\"></form>\n"
+            . "<form method=\"dialog\" action=\"/orders\"></form>\n"
+            . "<form method=\"{{ m }}\" action=\"/orders\"></form>\n"
+            . "<form method=\"put\" action=\"/search\"></form>\n";
+        $fixture = self::graphOf(['Ui/page.html.twig' => $markup]);
+
+        self::assertSame([
+            ['line' => 2, 'route' => 'archive', 'kind' => 'submit', 'method' => 'GET'],
+            ['line' => 3, 'route' => 'archive', 'kind' => 'submit', 'method' => 'GET'],
+            ['line' => 4, 'route' => 'archive', 'kind' => 'submit', 'method' => 'POST'],
+            ['line' => 5, 'route' => 'archive', 'kind' => 'submit'],
+        ], $fixture->storage->nodes->findById(self::page($fixture))?->getMetadata()['named_links'] ?? null);
+        self::assertSame([], self::targetsFrom($fixture, self::page($fixture), EdgeType::SubmitsTo), 'a dialog form posts nothing');
+        // A computed method with a literal action draws nothing; "put" is
+        // invalid, so a browser sends GET to /search.
+        self::assertSame(['route:GET:/search'], self::targetsFrom($fixture, self::page($fixture), EdgeType::NavigatesTo));
+    }
+
+    /**
      * A computed target and a named route are listed with their line; a
      * stylesheet, a comment, another host, mailto: and a fragment are no way.
      */

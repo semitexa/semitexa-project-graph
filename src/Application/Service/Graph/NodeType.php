@@ -103,6 +103,9 @@ enum NodeType: string
             'screen'       => self::Screen,
             'uiaction'     => self::UiAction,
             'nav'          => self::NavGroup,
+            'component'    => self::Component,
+            // A template by the name it is rendered under: which file that is, is asked at read time.
+            'template'     => self::File,
             'example'      => self::UsageExample,
             'adr'          => self::ArchitecturalDecision,
             'module'       => self::Module,

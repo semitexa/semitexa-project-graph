@@ -12,6 +12,7 @@ use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageReport;
 use Semitexa\ProjectGraph\Application\Service\Findings\FindingsReport;
 use Semitexa\ProjectGraph\Application\Service\Findings\FlowGapReport;
 use Semitexa\ProjectGraph\Application\Service\Findings\TestCode;
+use Semitexa\ProjectGraph\Application\Service\Findings\UiFlowGapReport;
 use Semitexa\ProjectGraph\Application\Service\Findings\UnusedClassFinder;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
 use Semitexa\ProjectGraph\Application\Service\Query\GraphQueryService;
@@ -34,7 +35,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  */
 #[AsCommand(
     name: 'ai:review-graph:findings',
-    description: 'Unused classes graded by confidence, and class dependency loops',
+    description: 'Unused classes graded by confidence, and class dependency loops; --kind=flows and --kind=ui for where a flow stops',
 )]
 final class ReviewGraphFindingsCommand extends BaseCommand
 {
@@ -49,7 +50,7 @@ final class ReviewGraphFindingsCommand extends BaseCommand
 
     protected function configure(): void
     {
-        $this->addOption('kind', null, InputOption::VALUE_REQUIRED, 'unused, cycles, all, or flows (where the graph stops seeing a business flow; not part of all)', 'all');
+        $this->addOption('kind', null, InputOption::VALUE_REQUIRED, 'unused, cycles, all, flows (where the graph stops seeing a business flow) or ui (links and forms to no route, POST pages no form reaches); flows and ui are not part of all', 'all');
         $this->addOption('min-confidence', null, InputOption::VALUE_REQUIRED, 'Unused classes at or above: high, medium, low', UnusedClassFinder::MEDIUM);
         $this->addOption('module', 'm', InputOption::VALUE_REQUIRED, 'Only unused classes of this module, and loops that touch it');
         $this->addOption('format', null, InputOption::VALUE_REQUIRED, 'text, json, ndjson, markdown', 'text');
@@ -66,7 +67,7 @@ final class ReviewGraphFindingsCommand extends BaseCommand
 
         $machine = in_array($format, ['json', 'ndjson'], true);
         $error = match (true) {
-            !in_array($kind, ['unused', 'cycles', 'all', 'flows'], true) => '--kind must be unused, cycles, all or flows.',
+            !in_array($kind, ['unused', 'cycles', 'all', 'flows', 'ui'], true) => '--kind must be unused, cycles, all, flows or ui.',
             !isset(self::CONFIDENCE_RANK[$minConfidence])      => '--min-confidence must be high, medium or low.',
             !in_array($format, ['text', 'json', 'ndjson', 'markdown'], true) => '--format must be text, json, ndjson or markdown.',
             default => null,
@@ -95,6 +96,10 @@ final class ReviewGraphFindingsCommand extends BaseCommand
         $module = is_string($module) && $module !== '' ? $module : null;
         if ($kind === 'flows') {
             return $this->flows($output, $io, $format, (new FlowGapReport())->collect(new GraphQueryService($storage), $module, TestCode::of($storage)), (new CoverageReport($storage))->summary());
+        }
+
+        if ($kind === 'ui') {
+            return $this->uiFlow($output, $io, $format, (new UiFlowGapReport())->collect($storage, $module, TestCode::of($storage)), (new CoverageReport($storage))->summary());
         }
 
         $report = (new FindingsReport())->collect($storage, $kind, $minConfidence, $module);
@@ -155,6 +160,88 @@ final class ReviewGraphFindingsCommand extends BaseCommand
                 $output->writeln('      ' . $f['detail'], OutputInterface::OUTPUT_RAW);
             }
         }
+
+        return self::SUCCESS;
+    }
+
+    /**
+     * @param array{findings: list<array{id: string, kind: string, rule: string, at: string, module: string, detail: string, subject: string, lines?: list<int>}>, accepted: list<array{id: string, kind: string, rule: string, at: string, module: string, detail: string, subject: string, reason: string}>, summary: array{pages: int, ways: int, by_confidence: array<string, int>, post_payloads: int, reached: int, allowed: array<string, int>, by_rule: array<string, int>, test_code_skipped: int}} $report
+     * @param array<string, mixed> $coverage
+     */
+    private function uiFlow(OutputInterface $output, SymfonyStyle $io, string $format, array $report, array $coverage): int
+    {
+        $findings = $report['findings'];
+        $accepted = $report['accepted'];
+        $summary = $report['summary'];
+        if ($format === 'json') {
+            $output->writeln((string) json_encode(['ui_flow' => $findings, 'accepted' => $accepted, 'summary' => $summary, 'coverage' => $coverage], JSON_UNESCAPED_SLASHES), OutputInterface::OUTPUT_RAW);
+            return self::SUCCESS;
+        }
+        if ($format === 'ndjson') {
+            $output->writeln((string) json_encode(['kind' => 'summary', 'ui_flow' => count($findings), 'accepted' => count($accepted), 'summary' => $summary, 'coverage' => $coverage], JSON_UNESCAPED_SLASHES), OutputInterface::OUTPUT_RAW);
+            foreach ([...$findings, ...array_map(static fn (array $row): array => ['accepted' => true] + $row, $accepted)] as $finding) {
+                $output->writeln((string) json_encode($finding, JSON_UNESCAPED_SLASHES), OutputInterface::OUTPUT_RAW);
+            }
+            return self::SUCCESS;
+        }
+
+        $confidence = $summary['by_confidence'];
+        $headline = sprintf(
+            '%d pages; %d links and forms in templates: %d exact, %d by pattern, %d unresolved. %d POST routes: %d reached by a form or UI action, %d need none (%s), %d accepted.',
+            $summary['pages'],
+            $summary['ways'],
+            $confidence['exact'] ?? 0,
+            $confidence['pattern'] ?? 0,
+            $confidence['unresolved'] ?? 0,
+            $summary['post_payloads'],
+            $summary['reached'],
+            array_sum($summary['allowed']),
+            $summary['allowed'] === [] ? 'none' : implode(', ', array_map(static fn (string $why, int $count): string => $why . ' ' . $count, array_keys($summary['allowed']), $summary['allowed'])),
+            count($accepted),
+        );
+        if ($format === 'markdown') {
+            $lines = ['### UI flow findings', '', $headline, ''];
+            if ($findings !== []) {
+                $lines[] = '| Rule | At | Why |';
+                $lines[] = '|---|---|---|';
+                foreach ($findings as $f) {
+                    $lines[] = sprintf('| %s | `%s` | %s |', $f['rule'], $f['at'], str_replace('|', '\\|', $f['detail']));
+                }
+            } else {
+                $lines[] = 'No findings.';
+            }
+            foreach ($accepted as $f) {
+                $lines[] = sprintf('- Accepted: `%s` %s (%s)', $f['at'], $f['subject'], $f['reason']);
+            }
+            // As the other findings do: "No findings." over a graph with gaps is not a clean result.
+            $lines[] = '';
+            $lines[] = '> ' . CoverageReport::describe($coverage)[0];
+            $output->writeln(implode("\n", $lines), OutputInterface::OUTPUT_RAW);
+            return self::SUCCESS;
+        }
+
+        $io->text($headline);
+        foreach ($summary['by_rule'] as $rule => $count) {
+            $rows = array_values(array_filter($findings, static fn (array $f): bool => $f['rule'] === $rule));
+            if ($rows === []) {
+                continue;
+            }
+            $io->section(sprintf('%s (%d, warnings)', $rule, $count));
+            foreach ($rows as $f) {
+                $output->writeln(sprintf('%s  %s', $f['id'], $f['at']), OutputInterface::OUTPUT_RAW);
+                $output->writeln('      ' . $f['detail'], OutputInterface::OUTPUT_RAW);
+            }
+        }
+        if ($accepted !== []) {
+            $io->section(sprintf('Accepted by #[UiEntryPoint] (%d)', count($accepted)));
+            foreach ($accepted as $f) {
+                $output->writeln(sprintf('%s  %s  %s', $f['at'], $f['subject'], $f['reason']), OutputInterface::OUTPUT_RAW);
+            }
+        }
+        if ($findings === []) {
+            $io->text('No findings.');
+        }
+        $io->text(CoverageReport::describe($coverage, $this->getProjectRoot()));
 
         return self::SUCCESS;
     }

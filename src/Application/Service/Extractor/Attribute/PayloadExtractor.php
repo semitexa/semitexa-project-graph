@@ -10,14 +10,17 @@ use Semitexa\Authorization\Attribute\RequiresCapability;
 use Semitexa\Authorization\Attribute\RequiresPermission;
 use Semitexa\Core\Attribute\AbstractPayloadRoute;
 use Semitexa\Core\Attribute\AsPublicPayload;
+use Semitexa\Core\Attribute\RequiresSignedUrl;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractionResult;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractorInterface;
 use Semitexa\ProjectGraph\Application\Service\Extractor\SafeAttributeResolver;
 use Semitexa\ProjectGraph\Application\Service\Graph\EdgeType;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeId;
 use Semitexa\ProjectGraph\Application\Service\Graph\NodeType;
+use Semitexa\ProjectGraph\Application\Service\Parser\ClassInfo;
 use Semitexa\ProjectGraph\Application\Service\Parser\EnumCaseReference;
 use Semitexa\ProjectGraph\Application\Service\Parser\ParsedFile;
+use Semitexa\ProjectGraph\Attribute\UiEntryPoint;
 use Semitexa\ProjectGraph\Domain\Model\Edge;
 use Semitexa\ProjectGraph\Domain\Model\Node;
 
@@ -67,6 +70,41 @@ final class PayloadExtractor implements ExtractorInterface
         return is_string($access) && $access !== '' ? strtolower($access) : $default;
     }
 
+    /**
+     * What the UI flow reads to tell a page from an API and a form's target
+     * from a machine's (UiFlowGapReport): only what the attribute states, each
+     * key left out when it states nothing. `produces` above falls back to
+     * text/html, so what was declared is kept apart.
+     *
+     * @return array<string, mixed>
+     */
+    private function uiFlowFacts(ClassInfo $class, object $instance): array
+    {
+        $strings = static fn (mixed $value): array => array_values(array_filter(
+            array_map(static fn (mixed $item): mixed => EnumCaseReference::scalarOf($item), is_array($value) ? $value : [$value]),
+            static fn (mixed $item): bool => is_string($item) && $item !== '',
+        ));
+        $facts = [
+            'consumes'         => $strings($instance->consumes ?? null),
+            'producesDeclared' => $strings($instance->produces ?? null),
+            'renderProfile'    => $strings($instance->renderProfile ?? null),
+            'transport'        => $strings($instance->transport ?? null)[0] ?? null,
+            'signedUrl'        => $class->hasAttribute(RequiresSignedUrl::class) ?: null,
+        ];
+        $entry = $class->getAttribute(UiEntryPoint::class);
+        if ($entry !== null) {
+            // Accepted only with its reason: the attribute without one, with an
+            // empty or a computed one, says nothing, and the payload stays a finding.
+            $arguments = $this->getAttributeArguments($entry);
+            $reason = $arguments['reason'] ?? $arguments[0] ?? null;
+            if (is_string($reason) && trim($reason) !== '') {
+                $facts['uiEntryPoint'] = $reason;
+            }
+        }
+
+        return array_filter($facts, static fn (mixed $fact): bool => $fact !== null && $fact !== []);
+    }
+
     public function supports(ParsedFile $file): bool
     {
         foreach (array_keys(self::ACCESS_ATTRIBUTES) as $attributeClass) {
@@ -107,7 +145,7 @@ final class PayloadExtractor implements ExtractorInterface
                         'responseClass' => $instance->responseWith ?? null,
                         'produces'      => $instance->produces ?? ['text/html'],
                         'accessType'    => self::accessOf($instance, $accessType),
-                    ],
+                    ] + $this->uiFlowFacts($classInfo, $instance),
                 );
                 $result->addNode($payloadNode);
 

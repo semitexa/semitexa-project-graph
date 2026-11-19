@@ -14,9 +14,11 @@
         "semitexa/core": "*",
         "semitexa/orm": "*",
         "semitexa/prompt": "*",
-        "nikic/php-parser": "^5.0"
+        "nikic/php-parser": "^5.0",
+        "twig/twig": "^3.10"
     },
     "require-dev": {
+        "semitexa/authorization": "*",
         "swoole/ide-helper": "^5.1"
     },
     "autoload": {

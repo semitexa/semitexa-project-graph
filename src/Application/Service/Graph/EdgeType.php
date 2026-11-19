@@ -74,6 +74,13 @@ enum EdgeType: string
     case NavigatesTo        = 'navigates_to';
     case SubmitsTo          = 'submits_to';
     case ImplementedBy      = 'implemented_by';
+    /**
+     * A resource or component class renders its template; a template renders
+     * the ones it extends, includes or embeds, and the components it calls
+     * (target `component:<name>`). The 61st case: InboundIndex packs the
+     * type into 6 bits, so 3 more fit.
+     */
+    case RendersTemplate    = 'renders_template';
 
     /**
      * Deliberately a match with no default arm: a new case that is not
@@ -91,7 +98,7 @@ enum EdgeType: string
             self::MapsToTable, self::HasRelation, self::ExposesApi, self::ScheduledAs, self::ExtendsModule,
             self::PublishesTo, self::ConsumesFrom, self::StreamsTo, self::HasSchema, self::IsAggregateOf,
             self::ReplaysVia, self::RoutesCommandTo, self::DeadLettersTo, self::RetriesVia,
-            self::NavigatesTo, self::SubmitsTo, self::ImplementedBy
+            self::NavigatesTo, self::SubmitsTo, self::ImplementedBy, self::RendersTemplate
                 => EdgeClass::Wiring,
 
             self::Extends, self::Implements, self::Uses, self::ComposedOf, self::Imports,

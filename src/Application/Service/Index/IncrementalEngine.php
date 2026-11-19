@@ -13,6 +13,7 @@ use Semitexa\ProjectGraph\Application\Service\Graph\GraphStorage;
 use Semitexa\ProjectGraph\Application\Service\Coverage\CoverageGapKind;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ConfigReferenceExtractor;
 use Semitexa\ProjectGraph\Application\Service\Extractor\TemplateLinkExtractor;
+use Semitexa\ProjectGraph\Application\Service\Extractor\TemplateRenderExtractor;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractionResult;
 use Semitexa\ProjectGraph\Application\Service\Extractor\ExtractorPipeline;
 use Semitexa\ProjectGraph\Application\Service\Graph\GraphBuilder;
@@ -318,7 +319,11 @@ final class IncrementalEngine
             // file like any other, not an empty one: read as '' it was
             // indexed as having no ways and no references.
             if (TemplateLinkExtractor::handles($path)) {
-                return (new TemplateLinkExtractor())->extract($path, self::read($path), $this->resolveModule($projectRoot, $path));
+                $contents = self::read($path);
+                $module = $this->resolveModule($projectRoot, $path);
+
+                return (new TemplateLinkExtractor())->extract($path, $contents, $module)
+                    ->merge((new TemplateRenderExtractor())->extractTemplate($path, $contents, $module));
             }
             if (ConfigReferenceExtractor::handles($path)) {
                 return (new ConfigReferenceExtractor())->extract($path, self::read($path), $this->resolveModule($projectRoot, $path));

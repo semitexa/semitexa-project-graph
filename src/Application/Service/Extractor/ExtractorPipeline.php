@@ -144,6 +144,7 @@ final class ExtractorPipeline
             new Attribute\OrmExtractor(),
             new Attribute\AuthExtractor(),
             new Attribute\SsrExtractor(),
+            new TemplateRenderExtractor(),
             new Attribute\SchedulerExtractor(),
             new Attribute\TenancyExtractor(),
             new Attribute\PipelineExtractor(),
