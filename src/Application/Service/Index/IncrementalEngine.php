@@ -85,6 +85,10 @@ final class IncrementalEngine
      * (update() would wait for it, a full build for minutes) or when the
      * graph was built by other extraction code (update() would rebuild it
      * whole). The caller says which by asking {@see isCurrentBuild()} first.
+     *
+     * @throws GraphLockUnusable when the lock file is there and this process
+     *         cannot open it: not a busy graph, a setup to fix, so it is not
+     *         folded into null. An advisory caller turns it into its own skip.
      */
     public function updateUnlessBusy(string $projectRoot): ?UpdateResult
     {
