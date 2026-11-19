@@ -19,6 +19,8 @@ final class UiFlowGapReportTest extends TestCase
 {
     use ExtractorCampaign;
 
+    // verify:accept-test-change a_ui_entry_point_without_a_reason_accepts_nothing moved, unchanged, to InvalidUiEntryPointTest: a negative fixture lives in an Invalid* file, so the reference never shows it as the example (docs#166)
+
     /**
      * @template T of array<string, mixed>
      * @param list<T> $findings
@@ -140,34 +142,6 @@ final class UiFlowGapReportTest extends TestCase
         sort($orphans);
         self::assertSame(['POST /orders/archive', 'POST /orders/subscribe', 'POST /orders/upload'], $orphans);
         self::assertSame(['api' => 2, 'json' => 1, 'service' => 1, 'signed-url' => 1], $report['summary']['allowed'], 'a path under /api/ is an API route');
-    }
-
-    /** The attribute is an answer only with its reason: bare or empty, the payload is still a finding. */
-    #[Test]
-    public function a_ui_entry_point_without_a_reason_accepts_nothing(): void
-    {
-        $bare = <<<'PHP'
-            <?php
-            namespace Campaign\Shop;
-
-            use Semitexa\Core\Attribute\AsPublicPayload;
-            use Semitexa\ProjectGraph\Attribute\UiEntryPoint;
-
-            #[AsPublicPayload(path: '/orders/bare', methods: ['POST'])]
-            #[UiEntryPoint]
-            final class BareEntryPayload {}
-
-            #[AsPublicPayload(path: '/orders/blank', methods: ['POST'])]
-            #[UiEntryPoint(reason: '  ')]
-            final class BlankEntryPayload {}
-            PHP;
-        $fixture = self::graphOf(UiFlowProject::withPosts() + ['src/modules/Shop/Application/Bare.php' => $bare]);
-        $report = (new UiFlowGapReport())->collect($fixture->storage);
-
-        $orphans = array_column(self::ofRule($report['findings'], UiFlowGapReport::ORPHAN_POST), 'subject');
-        sort($orphans);
-        self::assertSame(['POST /orders/archive', 'POST /orders/bare', 'POST /orders/blank'], $orphans);
-        self::assertSame(['POST /orders/import'], array_column($report['accepted'], 'subject'));
     }
 
     /** A file extension makes a link a download; nothing static answers a POST. */

@@ -64,10 +64,14 @@ final class TemplateLinkExtractor
                 continue;
             }
             $line = substr_count($markup, "\n", 0, $tag[0][1]) + 1;
-            // A form's method beside a target that is not a literal path, when
-            // the markup states one (none is a GET): the reader must not take
-            // a GET form for a POST, nor resolve a POST to a GET-only route.
-            $formMethod = $isForm ? strtoupper(self::attribute($tag[2][0], 'method') ?? 'GET') : null;
+            // A form's method as a browser reads it: a missing, empty or invalid
+            // one is GET, `dialog` sends no request at all, and one Twig computes
+            // is unknown (review, project-graph#38). The reader must not take a
+            // GET form for a POST, nor resolve a POST to a GET-only route.
+            $formMethod = $isForm ? self::formMethod(self::attribute($tag[2][0], 'method')) : null;
+            if ($formMethod === 'DIALOG') {
+                continue;
+            }
             $stated = in_array($formMethod, ['GET', 'POST'], true) ? ['method' => $formMethod] : [];
             // Named only when url() is the whole target: {{ url('users') }}/edit
             // renders somewhere else, and stays unresolved.
@@ -83,8 +87,9 @@ final class TemplateLinkExtractor
             if ($routePath === null) {
                 continue;
             }
-            $method = $isForm ? strtoupper(self::attribute($tag[2][0], 'method') ?? 'GET') : 'GET';
-            if (!in_array($method, ['GET', 'POST'], true)) {
+            // A form whose method Twig computes is not guessed: no way is drawn.
+            $method = $isForm ? $formMethod : 'GET';
+            if ($method === null || !in_array($method, ['GET', 'POST'], true)) {
                 continue;
             }
             $type = $isForm && $method === 'POST' ? EdgeType::SubmitsTo : EdgeType::NavigatesTo;
@@ -148,5 +153,22 @@ final class TemplateLinkExtractor
         $path = (string) preg_replace('/[?#].*\z/s', '', $target);
 
         return $path === '' ? '/' : $path;
+    }
+
+    /**
+     * GET or POST as the HTML spec reads the attribute, DIALOG for a form that
+     * sends nothing, null when Twig computes it.
+     */
+    private static function formMethod(?string $raw): ?string
+    {
+        if ($raw !== null && (str_contains($raw, '{{') || str_contains($raw, '{%'))) {
+            return null;
+        }
+
+        return match (strtolower(trim((string) $raw))) {
+            'post' => 'POST',
+            'dialog' => 'DIALOG',
+            default => 'GET',
+        };
     }
 }
