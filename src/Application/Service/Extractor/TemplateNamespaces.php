@@ -19,6 +19,11 @@ namespace Semitexa\ProjectGraph\Application\Service\Extractor;
  * module's template (`src/theme/<theme>/<alias>/templates`). The edge points
  * at the module's own file, which is the one rendered when no theme says
  * otherwise.
+ *
+ * No extractor calls this: the graph stores a template name as written, and
+ * UiFlowProjection resolves it here each time the graph is read.
+ *
+ * verify:accept-cross-file-read UiFlowRefreshConvergenceTest::a_refresh_after_the_edit_leaves_what_a_full_build_would read when the graph is read, never at extract time, so a refresh sees the disk as it is
  */
 final class TemplateNamespaces
 {
