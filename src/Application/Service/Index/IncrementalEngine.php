@@ -134,7 +134,12 @@ final class IncrementalEngine
         $root = $projectRoot ?? (string) $this->storage->getMeta('project_root');
 
         return ($projectRoot === null && !is_dir($root))
-            || (string) $this->storage->getMeta(InstalledPackages::META) === InstalledPackages::fingerprint($root);
+            || $this->builtForPackages(InstalledPackages::fingerprint($root));
+    }
+
+    private function builtForPackages(string $installed): bool
+    {
+        return (string) $this->storage->getMeta(InstalledPackages::META) === $installed;
     }
 
     private bool $locking = true;
@@ -212,6 +217,11 @@ final class IncrementalEngine
     {
         $timer = microtime(true);
 
+        // Read once, before the scan, and stored as read: packages that change
+        // while the scan runs then no longer match it, and the next refresh
+        // rebuilds instead of keeping facts from the old set (review,
+        // project-graph#40).
+        $installed = InstalledPackages::fingerprint($projectRoot);
         $indexedFiles = $this->storage->fileIndex->getAll();
         // A graph the current extractors did not build is re-derived whole: a
         // refresh re-reads only changed files, so a fix to an extractor (or a
@@ -219,7 +229,7 @@ final class IncrementalEngine
         // not change. Measured 2026-10-02: a graph without the gaps table
         // stayed "no gaps" through every refresh; a full build found 368.
         // The same for other installed packages: attribute classes are theirs.
-        if ($indexedFiles !== [] && !$this->isCurrentBuild($projectRoot)) {
+        if ($indexedFiles !== [] && ($this->storage->getMeta('build_version') !== self::buildVersion() || !$this->builtForPackages($installed))) {
             return $this->rebuild($projectRoot);
         }
         // Findings judge "is this test code" relative to it (see TestCode).
@@ -295,7 +305,7 @@ final class IncrementalEngine
 
         $this->storage->setMeta('last_update', (string)time());
         $this->storage->setMeta('build_version', self::buildVersion());
-        $this->storage->setMeta(InstalledPackages::META, InstalledPackages::fingerprint($projectRoot));
+        $this->storage->setMeta(InstalledPackages::META, $installed);
         $this->storage->setMeta('total_nodes', (string)$this->storage->nodes->countAll());
         $this->storage->setMeta('total_edges', (string)$this->storage->edges->countAll());
         // The module map findings and coverage read; stored now, while writing.

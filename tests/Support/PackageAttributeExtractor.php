@@ -18,6 +18,9 @@ use Semitexa\ProjectGraph\Domain\Model\Edge;
  */
 final class PackageAttributeExtractor implements ExtractorInterface
 {
+    /** Run while a file is read: a test changes the installed packages in the middle of a refresh with it. */
+    public static ?\Closure $whileExtracting = null;
+
     public function supports(ParsedFile $file): bool
     {
         return $file->hasAttribute(PackageAttribute::class);
@@ -25,6 +28,9 @@ final class PackageAttributeExtractor implements ExtractorInterface
 
     public function extract(ParsedFile $file): ExtractionResult
     {
+        if (self::$whileExtracting !== null) {
+            (self::$whileExtracting)();
+        }
         $result = new ExtractionResult();
         foreach ($file->getClassesWithAttribute(PackageAttribute::class) as $class) {
             $instance = $class->getAttribute(PackageAttribute::class)?->newInstance();

@@ -13,6 +13,7 @@ use Semitexa\ProjectGraph\Application\Service\Index\IncrementalEngine;
 use Semitexa\ProjectGraph\Application\Service\Parser\PhpParserAdapter;
 use Semitexa\ProjectGraph\Application\Service\Scanner\FileScanner;
 use Semitexa\ProjectGraph\Application\Service\Scanner\IgnorePatternLoader;
+use Semitexa\ProjectGraph\Application\Service\Index\InstalledPackages;
 use Semitexa\ProjectGraph\Tests\Support\GraphFixture;
 use Semitexa\ProjectGraph\Tests\Support\PackageAttribute;
 use Semitexa\ProjectGraph\Tests\Support\PackageAttributeExtractor;
@@ -31,9 +32,66 @@ final class InstalledPackagesRefreshTest extends TestCase
     private const SCREEN = 'class:Campaign\\Shop\\ProductsScreen';
     private const INSTALLED = 'vendor/composer/installed.json';
 
+    /** The release before this test, put back as it was (review, project-graph#40). */
+    private int $release = 1;
+
+    protected function setUp(): void
+    {
+        $this->release = PackageAttribute::$release;
+    }
+
     protected function tearDown(): void
     {
-        PackageAttribute::$release = 1;
+        PackageAttribute::$release = $this->release;
+        PackageAttributeExtractor::$whileExtracting = null;
+    }
+
+    /**
+     * Review on project-graph#40: the fingerprint was read when it was stored,
+     * after the scan. Packages that changed during the scan were then stored
+     * as the ones it used, and the graph read as current with the old facts.
+     */
+    #[Test]
+    public function packages_that_change_during_a_refresh_leave_it_not_current(): void
+    {
+        $fixture = self::project();
+        $engine = self::engine($fixture);
+        $engine->fullBuild($fixture->root);
+        $fixture->write('Shop/ProductsScreen.php', $fixture->read('Shop/ProductsScreen.php') . "// touched\n");
+        PackageAttributeExtractor::$whileExtracting = static function () use ($fixture): void {
+            PackageAttributeExtractor::$whileExtracting = null;
+            self::install($fixture, 2);
+        };
+
+        $engine->update($fixture->root);
+
+        self::assertNull(PackageAttributeExtractor::$whileExtracting, 'the refresh read the touched file');
+        self::assertFalse($engine->isCurrentBuild($fixture->root), 'built while the packages changed: the next refresh must rebuild');
+    }
+
+    /** Review on project-graph#40: an installed.json that is there and unreadable is no reason to read composer.lock instead. */
+    #[Test]
+    public function an_installed_json_that_cannot_be_read_is_a_failure_not_the_lock_file(): void
+    {
+        if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+            // verify:accept-test-change root reads a file whatever its mode, so there is nothing to provoke; the suite runs as uid 1000 in the workspace and the release clone
+            self::markTestSkipped('root reads a file whatever its mode');
+        }
+        $fixture = self::project();
+        $fixture->write('composer.lock', '{"packages": []}');
+        chmod($fixture->path(self::INSTALLED), 0000);
+        // Not try/fail/catch: PHPUnit's own failure is a RuntimeException too,
+        // and the catch would take it for the gate's.
+        $thrown = null;
+        try {
+            InstalledPackages::fingerprint($fixture->root);
+        } catch (\RuntimeException $e) {
+            $thrown = $e;
+        } finally {
+            chmod($fixture->path(self::INSTALLED), 0644);
+        }
+        self::assertInstanceOf(\RuntimeException::class, $thrown, 'an unreadable installed.json gave a fingerprint (composer.lock\'s)');
+        self::assertStringStartsWith('Cannot read ' . $fixture->path(self::INSTALLED), $thrown->getMessage());
     }
 
     #[Test]

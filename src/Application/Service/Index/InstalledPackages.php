@@ -25,14 +25,27 @@ final class InstalledPackages
     /** installed.json is what is on disk; composer.lock stands in before an install. Empty when the project has neither. */
     private const SOURCES = ['/vendor/composer/installed.json', '/composer.lock'];
 
+    /**
+     * The next source stands in only for one that is absent. One that is there
+     * and cannot be read is a failure: two installs with the same lock file
+     * would get the same fingerprint, and a graph built for the other one
+     * would read as current (review, project-graph#40).
+     *
+     * @throws \RuntimeException when a source that exists cannot be read
+     */
     public static function fingerprint(string $projectRoot): string
     {
         foreach (self::SOURCES as $source) {
             $path = rtrim($projectRoot, '/') . $source;
-            $hash = is_file($path) ? @hash_file('xxh3', $path) : false;
-            if (is_string($hash)) {
-                return $hash;
+            if (!is_file($path)) {
+                continue;
             }
+            $hash = @hash_file('xxh3', $path);
+            if (!is_string($hash)) {
+                throw new \RuntimeException("Cannot read {$path}, so the installed packages cannot be told apart; the graph would be taken for current.");
+            }
+
+            return $hash;
         }
 
         return '';
