@@ -1,0 +1,16 @@
+{
+    "_": "This package's share of the Semitexa quality ledger: lower is better. Written only by `bin/semitexa ai:quality`; do not edit by hand.",
+    "metrics": {
+        "tests.skip-calls": {
+            "count": 1,
+            "accepted": [
+                {
+                    "at": "2026-11-20",
+                    "from": 0,
+                    "to": 1,
+                    "reason": "InstalledPackagesRefreshTest (semitexa-project-graph): the unreadable-installed.json test skips as root, which reads a file whatever its mode; the suite runs as uid 1000 in the workspace and the release clone, where it runs (review, project-graph#40)"
+                }
+            ]
+        }
+    }
+}

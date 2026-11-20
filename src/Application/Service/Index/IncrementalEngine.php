@@ -75,7 +75,12 @@ final class IncrementalEngine
         // reader saw states that were neither the old graph nor the new one,
         // and a process killed between them left a route stale for good —
         // its holder was already indexed (round 2 fuzzing, 2026-10-02).
-        return $this->exclusively($projectRoot, fn (): UpdateResult => $this->storage->transaction(fn (): UpdateResult => $this->doUpdate($projectRoot, $keepEdgeLists)));
+        return $this->exclusively($projectRoot, function () use ($projectRoot, $keepEdgeLists): UpdateResult {
+            $result = $this->storage->transaction(fn (): UpdateResult => $this->doUpdate($projectRoot, $keepEdgeLists));
+            \assert($result instanceof UpdateResult);
+
+            return $result;
+        });
     }
 
     /**
@@ -83,8 +88,9 @@ final class IncrementalEngine
      * advisory check inside another command (ai:verify's UI flow warning).
      * Null, and nothing touched, when another process is writing the graph
      * (update() would wait for it, a full build for minutes) or when the
-     * graph was built by other extraction code (update() would rebuild it
-     * whole). The caller says which by asking {@see isCurrentBuild()} first.
+     * graph was built by other extraction code or for other installed
+     * packages (update() would rebuild it whole). The caller says which by
+     * asking {@see isCurrentBuild()} first.
      *
      * @throws GraphLockUnusable when the lock file is there and this process
      *         cannot open it: not a busy graph, a setup to fix, so it is not
@@ -92,7 +98,7 @@ final class IncrementalEngine
      */
     public function updateUnlessBusy(string $projectRoot): ?UpdateResult
     {
-        if (!$this->isCurrentBuild()) {
+        if (!$this->isCurrentBuild($projectRoot)) {
             return null;
         }
         try {
@@ -100,7 +106,7 @@ final class IncrementalEngine
                 // Again, now that the lock is ours: a graph another process
                 // committed between the check above and here may be of
                 // another build, and doUpdate() would rebuild it whole.
-                if (!$this->isCurrentBuild()) {
+                if (!$this->isCurrentBuild($projectRoot)) {
                     return null;
                 }
                 $result = $this->storage->transaction(fn (): UpdateResult => $this->doUpdate($projectRoot, true));
@@ -113,10 +119,27 @@ final class IncrementalEngine
         }
     }
 
-    /** Whether the stored graph was built by the extraction code now on disk: if not, the next refresh is a full build. */
-    public function isCurrentBuild(): bool
+    /**
+     * Whether the stored graph was built by the extraction code now on disk
+     * and for the packages now installed ({@see InstalledPackages}): if not,
+     * the next refresh is a full build. Without a root the packages are those
+     * of the root it was built for, and not asked about when that path is not
+     * on this machine (a graph built in the container, read from the host).
+     */
+    public function isCurrentBuild(?string $projectRoot = null): bool
     {
-        return $this->storage->getMeta('build_version') === self::buildVersion();
+        if ($this->storage->getMeta('build_version') !== self::buildVersion()) {
+            return false;
+        }
+        $root = $projectRoot ?? (string) $this->storage->getMeta('project_root');
+
+        return ($projectRoot === null && !is_dir($root))
+            || $this->builtForPackages(InstalledPackages::fingerprint($root));
+    }
+
+    private function builtForPackages(string $installed): bool
+    {
+        return (string) $this->storage->getMeta(InstalledPackages::META) === $installed;
     }
 
     private bool $locking = true;
@@ -194,13 +217,19 @@ final class IncrementalEngine
     {
         $timer = microtime(true);
 
+        // Read once, before the scan, and stored as read: packages that change
+        // while the scan runs then no longer match it, and the next refresh
+        // rebuilds instead of keeping facts from the old set (review,
+        // project-graph#40).
+        $installed = InstalledPackages::fingerprint($projectRoot);
         $indexedFiles = $this->storage->fileIndex->getAll();
         // A graph the current extractors did not build is re-derived whole: a
         // refresh re-reads only changed files, so a fix to an extractor (or a
         // graph built before a table existed) never reached the files that did
         // not change. Measured 2026-10-02: a graph without the gaps table
         // stayed "no gaps" through every refresh; a full build found 368.
-        if ($indexedFiles !== [] && $this->storage->getMeta('build_version') !== self::buildVersion()) {
+        // The same for other installed packages: attribute classes are theirs.
+        if ($indexedFiles !== [] && ($this->storage->getMeta('build_version') !== self::buildVersion() || !$this->builtForPackages($installed))) {
             return $this->rebuild($projectRoot);
         }
         // Findings judge "is this test code" relative to it (see TestCode).
@@ -276,6 +305,7 @@ final class IncrementalEngine
 
         $this->storage->setMeta('last_update', (string)time());
         $this->storage->setMeta('build_version', self::buildVersion());
+        $this->storage->setMeta(InstalledPackages::META, $installed);
         $this->storage->setMeta('total_nodes', (string)$this->storage->nodes->countAll());
         $this->storage->setMeta('total_edges', (string)$this->storage->edges->countAll());
         // The module map findings and coverage read; stored now, while writing.
@@ -313,6 +343,7 @@ final class IncrementalEngine
                 continue;
             }
             foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS)) as $file) {
+                /** @var \SplFileInfo $file */
                 if ($file->getExtension() === 'php') {
                     $files[] = $file->getPathname();
                 }
@@ -574,6 +605,7 @@ final class IncrementalEngine
 
             return $diff;
         });
+        \assert($diff instanceof GraphDiff);
 
         // Netted across every batch and pass: a file move reported +1/-1 node
         // when nothing changed, a split +1/+1/-1/-1 (round 2). What one pass
@@ -629,6 +661,7 @@ final readonly class UpdateResult
         return new self(0, 0, 0, 0, 0, 0, 0, []);
     }
 
+    /** @return array<string, mixed> */
     public function toArray(): array
     {
         return [
