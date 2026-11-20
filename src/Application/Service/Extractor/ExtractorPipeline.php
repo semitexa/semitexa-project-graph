@@ -99,7 +99,7 @@ final class ExtractorPipeline
             }
             $ignored[NodeId::forClass($class->fqcn)] = true;
             $given = $attribute->unreadableReason() === null ? ($attribute->getArguments()['reason'] ?? $attribute->getArguments()[0] ?? '') : '';
-            $reason = is_scalar($given) ? (string) $given : '';
+            $reason = is_string($given) ? $given : '';
             $result->gaps[] = new CoverageGap(
                 CoverageGapKind::Ignored,
                 $file->path,
