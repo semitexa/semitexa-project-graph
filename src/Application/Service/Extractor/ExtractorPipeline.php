@@ -31,7 +31,8 @@ final class ExtractorPipeline
                     $merged = $merged->merge($extractor->extract($file));
                 }
             } catch (\Throwable $e) {
-                $name = (new \ReflectionClass($extractor))->getShortName();
+                // The short class name, from the name itself: reflection would be a read beyond this file (lint:graph-extractors).
+                $name = substr((string) strrchr('\\' . $extractor::class, '\\'), 1);
                 $merged->failures[] = $name . ': ' . $e->getMessage();
                 $merged->gaps[] = new CoverageGap(CoverageGapKind::ExtractionFailed, $file->path, $e->getMessage(), $name);
             }
@@ -97,7 +98,8 @@ final class ExtractorPipeline
                 continue;
             }
             $ignored[NodeId::forClass($class->fqcn)] = true;
-            $reason = $attribute->unreadableReason() === null ? (string) ($attribute->getArguments()['reason'] ?? $attribute->getArguments()[0] ?? '') : '';
+            $given = $attribute->unreadableReason() === null ? ($attribute->getArguments()['reason'] ?? $attribute->getArguments()[0] ?? '') : '';
+            $reason = is_string($given) ? $given : '';
             $result->gaps[] = new CoverageGap(
                 CoverageGapKind::Ignored,
                 $file->path,
