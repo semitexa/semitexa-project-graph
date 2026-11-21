@@ -39,14 +39,17 @@ final class EveryClassIsWhereTheAutoloaderLooksTest extends TestCase
             $files++;
             $relative = substr($path, strlen($src) + 1, -4);
             $expected = self::PREFIX . str_replace('/', '\\', $relative);
-            $declared = self::declaredIn((string) file_get_contents($path));
-            if ($declared !== [] && $declared !== [$expected]) {
+            $php = file_get_contents($path);
+            self::assertIsString($php, 'unreadable: ' . $relative . '.php');
+            // Exactly one: a file declaring nothing is a class PSR-4 promises and does not find.
+            $declared = self::declaredIn($php);
+            if ($declared !== [$expected]) {
                 $wrong[$relative . '.php'] = $declared;
             }
         }
 
         self::assertGreaterThan(100, $files, 'the scan read the package\'s src');
-        self::assertSame([], $wrong, 'a file declares a class PSR-4 does not look for there');
+        self::assertSame([], $wrong, 'a file declares no class, or one PSR-4 does not look for there');
     }
 
     /** Each class that shared a file is found by the autoloader alone, in a process that loaded nothing else. */
