@@ -1,0 +1,18 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Semitexa\ProjectGraph\Application\Service\Query;
+
+use Semitexa\ProjectGraph\Domain\Model\Edge;
+use Semitexa\ProjectGraph\Domain\Model\Node;
+
+final readonly class ImpactedNode
+{
+    public function __construct(
+        public Node   $node,
+        public int    $distance,
+        /** @var list<list<Edge>> paths from changed node to this node */
+        public array  $paths,
+    ) {}
+}
