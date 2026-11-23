@@ -29,15 +29,22 @@ final class InstalledPackages
      * The next source stands in only for one that is absent. One that is there
      * and cannot be read is a failure: two installs with the same lock file
      * would get the same fingerprint, and a graph built for the other one
-     * would read as current (review, project-graph#40).
+     * would read as current (review, project-graph#40). So is one in a
+     * directory that cannot be searched (a root-owned vendor/composer at
+     * 0700): nothing says it is absent.
      *
-     * @throws \RuntimeException when a source that exists cannot be read
+     * @throws \RuntimeException when a source that exists, or may, cannot be read
      */
     public static function fingerprint(string $projectRoot): string
     {
+        $root = rtrim($projectRoot, '/');
         foreach (self::SOURCES as $source) {
-            $path = rtrim($projectRoot, '/') . $source;
+            $path = $root . $source;
             if (!is_file($path)) {
+                $hiding = self::unsearchableDirectoryOf($root, $path);
+                if ($hiding !== null) {
+                    throw new \RuntimeException("Cannot search {$hiding} for {$path}, so the installed packages cannot be told apart; the graph would be taken for current.");
+                }
                 continue;
             }
             $hash = @hash_file('xxh3', $path);
@@ -49,5 +56,21 @@ final class InstalledPackages
         }
 
         return '';
+    }
+
+    /**
+     * The deepest directory on the way from $root to $path that exists, when
+     * it cannot be searched: $path may be in it. Null when that directory can
+     * be searched, so $path is absent.
+     */
+    private static function unsearchableDirectoryOf(string $root, string $path): ?string
+    {
+        $dir = dirname($path);
+        while (!is_dir($dir) && $dir !== $root && $dir !== dirname($dir)) {
+            $dir = dirname($dir);
+        }
+
+        // stat() of "<dir>/." looks a name up in <dir>, which takes search permission on it.
+        return is_dir($dir) && @stat($dir . '/.') === false ? $dir : null;
     }
 }

@@ -69,7 +69,12 @@ final class InstalledPackagesRefreshTest extends TestCase
         self::assertFalse($engine->isCurrentBuild($fixture->root), 'built while the packages changed: the next refresh must rebuild');
     }
 
-    /** Review on project-graph#40: an installed.json that is there and unreadable is no reason to read composer.lock instead. */
+    /**
+     * Review on project-graph#40: an installed.json that is there and unreadable
+     * is no reason to read composer.lock instead. Nor is one that a vendor/composer,
+     * or a vendor, that cannot be searched hides from is_file()
+     * (tk-graph-fingerprint-untraversable-vendor).
+     */
     #[Test]
     public function an_installed_json_that_cannot_be_read_is_a_failure_not_the_lock_file(): void
     {
@@ -92,6 +97,22 @@ final class InstalledPackagesRefreshTest extends TestCase
         }
         self::assertInstanceOf(\RuntimeException::class, $thrown, 'an unreadable installed.json gave a fingerprint (composer.lock\'s)');
         self::assertStringStartsWith('Cannot read ' . $fixture->path(self::INSTALLED), $thrown->getMessage());
+
+        $installed = $fixture->path(self::INSTALLED);
+        foreach ([dirname($installed), dirname($installed, 2)] as $closed) {
+            chmod($closed, 0000);
+            $thrown = null;
+            try {
+                InstalledPackages::fingerprint($fixture->root);
+            } catch (\RuntimeException $e) {
+                $thrown = $e;
+            } finally {
+                chmod($closed, 0755);
+            }
+            self::assertInstanceOf(\RuntimeException::class, $thrown, "{$closed} at 0000 gave a fingerprint (composer.lock's)");
+            self::assertStringStartsWith("Cannot search {$closed} for {$installed}, ", $thrown->getMessage());
+        }
+        self::assertSame(hash_file('xxh3', $installed), InstalledPackages::fingerprint($fixture->root), 'searchable and readable again: installed.json');
     }
 
     #[Test]
