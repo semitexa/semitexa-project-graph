@@ -113,6 +113,42 @@ final class InstalledPackagesRefreshTest extends TestCase
             self::assertStringStartsWith("Cannot search {$closed} for {$installed}, ", $thrown->getMessage());
         }
         self::assertSame(hash_file('xxh3', $installed), InstalledPackages::fingerprint($fixture->root), 'searchable and readable again: installed.json');
+
+        // A vendor linked into a directory that cannot be searched (review, project-graph#43):
+        // is_dir() is false for vendor and vendor/composer alike.
+        $outside = sys_get_temp_dir() . '/semitexa-graph-outside-' . bin2hex(random_bytes(4));
+        $vendor = $fixture->path('vendor');
+        mkdir($outside . '/private/install', 0o755, true);
+        rename($vendor, $outside . '/private/install/vendor');
+        symlink($outside . '/private/install/vendor', $vendor);
+        $thrown = null;
+        try {
+            chmod($outside . '/private', 0000);
+            InstalledPackages::fingerprint($fixture->root);
+        } catch (\RuntimeException $e) {
+            $thrown = $e;
+        } finally {
+            chmod($outside . '/private', 0o755);
+            unlink($vendor);
+            rename($outside . '/private/install/vendor', $vendor);
+            exec('rm -rf ' . escapeshellarg($outside));
+        }
+        self::assertInstanceOf(\RuntimeException::class, $thrown, 'a vendor linked out of reach gave a fingerprint (composer.lock\'s)');
+        self::assertStringStartsWith("Cannot search {$outside}/private for {$installed}, ", $thrown->getMessage());
+    }
+
+    /** A vendor that is a dangling link is no install, as no vendor is: the lock file stands in (review, project-graph#43). */
+    #[Test]
+    public function a_dangling_vendor_link_leaves_the_lock_file_to_stand_in(): void
+    {
+        $fixture = self::project();
+        $fixture->write('composer.lock', '{"packages": []}');
+        $vendor = $fixture->path('vendor');
+        exec('rm -rf ' . escapeshellarg($vendor));
+        symlink($fixture->root . '/gone/vendor', $vendor);
+        clearstatcache();
+
+        self::assertSame(hash_file('xxh3', $fixture->path('composer.lock')), InstalledPackages::fingerprint($fixture->root));
     }
 
     #[Test]

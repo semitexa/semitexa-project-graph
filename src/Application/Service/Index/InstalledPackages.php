@@ -41,7 +41,7 @@ final class InstalledPackages
         foreach (self::SOURCES as $source) {
             $path = $root . $source;
             if (!is_file($path)) {
-                $hiding = self::unsearchableDirectoryOf($root, $path);
+                $hiding = self::hidingDirectory($path);
                 if ($hiding !== null) {
                     throw new \RuntimeException("Cannot search {$hiding} for {$path}, so the installed packages cannot be told apart; the graph would be taken for current.");
                 }
@@ -59,18 +59,30 @@ final class InstalledPackages
     }
 
     /**
-     * The deepest directory on the way from $root to $path that exists, when
-     * it cannot be searched: $path may be in it. Null when that directory can
-     * be searched, so $path is absent.
+     * The directory that hides $path: the deepest one on its way that exists,
+     * when it cannot be searched. Null when that one can be searched, so $path
+     * is absent. A symbolic link on the way that leads to no directory is
+     * followed (review, project-graph#43): a vendor linked into a directory
+     * that cannot be searched hides the file; a dangling link leaves it absent,
+     * as no vendor does. A link loop, or links more than 40 deep (the kernel's
+     * limit), cannot be followed, and the link hides $path.
      */
-    private static function unsearchableDirectoryOf(string $root, string $path): ?string
+    private static function hidingDirectory(string $path, int $links = 0): ?string
     {
         $dir = dirname($path);
-        while (!is_dir($dir) && $dir !== $root && $dir !== dirname($dir)) {
+        while (!is_dir($dir) && !is_link($dir) && $dir !== dirname($dir)) {
             $dir = dirname($dir);
         }
+        if (is_dir($dir)) {
+            // stat() of "<dir>/." looks a name up in <dir>, which takes search permission on it.
+            return @stat($dir . '/.') === false ? $dir : null;
+        }
+        $target = $links < 40 && is_link($dir) ? @readlink($dir) : false;
+        if ($target === false) {
+            return $dir;
+        }
+        $followed = (str_starts_with($target, '/') ? $target : dirname($dir) . '/' . $target) . substr($path, strlen($dir));
 
-        // stat() of "<dir>/." looks a name up in <dir>, which takes search permission on it.
-        return is_dir($dir) && @stat($dir . '/.') === false ? $dir : null;
+        return self::hidingDirectory($followed, $links + 1);
     }
 }
