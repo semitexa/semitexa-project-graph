@@ -465,12 +465,18 @@ final class IncrementalEngine
      * so the attribute class is part of what its user means. Edit AsCrud in a
      * path repository under the project root, or an attribute class of the
      * project's own, and every screen kept the old permission slug until a full
-     * build (tk-graph-refresh-misses-loaded-class-changes). Only for the files
-     * that changed on disk: a file re-read here runs the same attribute classes
-     * as before.
+     * build (tk-graph-refresh-misses-loaded-class-changes). In every round,
+     * not only for the files that changed on disk: an attribute class whose
+     * constructor default is a constant of another class
+     * (AsCrud's paginationMode = CollectionPaginationPolicy::MODE_PAGE) is
+     * re-read as a reader of that constant, and what it gives its users has
+     * changed with it.
      *
-     * Not reached: what an attribute class calls in another file that it does
-     * not inherit from, and a process that loaded the class before the edit
+     * Not reached: what an attribute class calls in another file that it
+     * neither inherits from nor reads a constant of; the class of an object an
+     * argument constructs (`#[Feed(paging: new FeedPaging())]`: the user has
+     * no annotated_with edge to FeedPaging, and its defaults are not read);
+     * and a process that loaded the class before the edit
      * (ai:review-graph:watch) — PHP cannot load it again, so a full build there
      * reads the old class as well.
      *
@@ -481,17 +487,20 @@ final class IncrementalEngine
      */
     private function reextractDependents(string $projectRoot, array $changedClassIds, array $processed, array &$totals, array &$errors, bool $keepEdgeLists): void
     {
-        $annotated = $changedClassIds === [] ? [] : $this->storage->edges->sourceFilesAnnotatedWith($changedClassIds);
         // To a fixed point: Holder::K = Routes::ORDERS is two hops, and the
-        // payload reading Holder::K changes when Routes does (round 2).
+        // payload reading Holder::K changes when Routes does (round 2). So is an
+        // attribute class that reads Routes::ORDERS, and then its users.
         for ($round = 0; $round < 10 && $changedClassIds !== []; $round++) {
             $files = [];
-            foreach ([...$this->storage->edges->sourceFilesReadingConstantsOf($changedClassIds), ...$annotated] as $file) {
+            $dependents = [
+                ...$this->storage->edges->sourceFilesReadingConstantsOf($changedClassIds),
+                ...$this->storage->edges->sourceFilesAnnotatedWith($changedClassIds),
+            ];
+            foreach ($dependents as $file) {
                 if (!isset($processed[$file]) && is_file($file)) {
                     $files[$file] = true;
                 }
             }
-            $annotated = [];
             if ($files === []) {
                 return;
             }

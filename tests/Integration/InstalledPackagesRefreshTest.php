@@ -135,6 +135,36 @@ final class InstalledPackagesRefreshTest extends TestCase
         }
         self::assertInstanceOf(\RuntimeException::class, $thrown, 'a vendor linked out of reach gave a fingerprint (composer.lock\'s)');
         self::assertStringStartsWith("Cannot search {$outside}/private for {$installed}, ", $thrown->getMessage());
+
+        // A path repository the scan does not read is in the fingerprint by
+        // content (tk-graph-refresh-misses-loaded-class-changes): a file or a
+        // directory of it that cannot be read may hold anything.
+        $package = $fixture->path('vendor/acme/screens');
+        mkdir($package . '/src', 0o755, true);
+        file_put_contents($package . '/src/Screen.php', "<?php\n");
+        $fixture->write(self::INSTALLED, (string) json_encode(['packages' => [[
+            'name' => 'acme/screens',
+            'dist' => ['type' => 'path', 'url' => $package, 'reference' => str_repeat('a', 40)],
+            'install-path' => '../acme/screens',
+        ]]]));
+        self::assertNotSame(hash_file('xxh3', $installed), InstalledPackages::fingerprint($fixture->root));
+        foreach ([
+            $package . '/src/Screen.php' => "Cannot read {$package}/src/Screen.php, ",
+            $package . '/src' => "Cannot read the path repository {$package} (",
+        ] as $closed => $message) {
+            $mode = fileperms($closed) & 0o777;
+            chmod($closed, 0000);
+            $thrown = null;
+            try {
+                InstalledPackages::fingerprint($fixture->root);
+            } catch (\RuntimeException $e) {
+                $thrown = $e;
+            } finally {
+                chmod($closed, $mode);
+            }
+            self::assertInstanceOf(\RuntimeException::class, $thrown, "{$closed} at 0000 gave a fingerprint");
+            self::assertStringStartsWith($message, $thrown->getMessage());
+        }
     }
 
     /** A vendor that is a dangling link is no install, as no vendor is: the lock file stands in (review, project-graph#43). */

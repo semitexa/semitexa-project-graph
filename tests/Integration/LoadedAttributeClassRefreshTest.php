@@ -101,6 +101,63 @@ final class LoadedAttributeClassRefreshTest extends TestCase
         self::assertSame(0, $engine->update($fixture->root)->filesScanned, 'and it is current again');
     }
 
+    /**
+     * Review of 326d1c4: the users of an attribute class were looked up once,
+     * for the files changed on disk. A class whose constructor default is a
+     * constant of another class (AsCrud's paginationMode) was re-read when the
+     * constant changed, as its reader, and its users were not.
+     */
+    #[Test]
+    public function a_refresh_after_a_constant_an_attribute_class_reads_changes_leaves_what_a_full_build_would(): void
+    {
+        $fixture = self::project();
+        $fixture->write('src/Attribute/Slugs.php', "<?php\nnamespace Semitexa\\ProjectGraph\\Tests\\Support;\n\nfinal class Slugs\n{\n    public const READ = 'read';\n}\n");
+        $fixture->write('src/Attribute/PackageAttribute.php', "<?php\nnamespace Semitexa\\ProjectGraph\\Tests\\Support;\n\n#[\\Attribute(\\Attribute::TARGET_CLASS)]\nfinal class PackageAttribute\n{\n"
+            . "    public function __construct(public readonly string \$permission, public readonly string \$read = Slugs::READ)\n    {\n    }\n}\n");
+        $engine = self::engine($fixture);
+        $engine->fullBuild($fixture->root);
+        self::assertSame(['permission:catalog.read'], self::needs($fixture));
+
+        // The constant is edited; the attribute class and the screen are not.
+        $fixture->write('src/Attribute/Slugs.php', str_replace("'read'", "'view'", $fixture->read('src/Attribute/Slugs.php')));
+        PackageAttribute::$release = 2;
+        clearstatcache();
+        $result = $engine->update($fixture->root);
+
+        self::assertSame(1, $result->filesScanned, 'one file changed on disk: a refresh, not a full build');
+        self::assertSame(['permission:catalog.view'], self::needs($fixture), 'the unchanged screen is read with what the attribute class gives now');
+        $refreshed = [$fixture->nodeLines(), $fixture->edgeLines()];
+
+        $engine->fullBuild($fixture->root);
+        self::assertSame([$fixture->nodeLines(), $fixture->edgeLines()], $refreshed, 'the refreshed graph is the full build');
+        self::assertSame(0, $engine->update($fixture->root)->filesScanned, 'and it is current again');
+    }
+
+    /**
+     * A link to a file that is not there hides nothing and is hashed by where
+     * it points. (A file that is there and cannot be read is a failure:
+     * InstalledPackagesRefreshTest, beside the unreadable installed.json.)
+     */
+    #[Test]
+    public function a_dangling_link_in_a_path_repository_is_hashed_by_where_it_points(): void
+    {
+        $fixture = self::project();
+        $package = $fixture->path('vendor/acme/screens');
+        mkdir($package, 0o755, true);
+        file_put_contents($package . '/PackageAttribute.php', self::attributeSource('read'));
+        self::installFromPath($fixture, $package);
+        $plain = InstalledPackages::fingerprint($fixture->root);
+
+        symlink($package . '/gone/One.php', $package . '/Linked.php');
+        $one = InstalledPackages::fingerprint($fixture->root);
+        self::assertNotSame($plain, $one, 'the link is part of the package');
+        unlink($package . '/Linked.php');
+        symlink($package . '/gone/Two.php', $package . '/Linked.php');
+        self::assertNotSame($one, InstalledPackages::fingerprint($fixture->root), 'and so is where it points');
+        unlink($package . '/Linked.php');
+        self::assertSame($plain, InstalledPackages::fingerprint($fixture->root));
+    }
+
     /** @return iterable<string, array{bool}> whether the package directory is outside the project root */
     public static function unscannedInstalls(): iterable
     {

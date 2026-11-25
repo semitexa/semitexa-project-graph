@@ -22,7 +22,8 @@ use Semitexa\ProjectGraph\Application\Service\Scanner\FileScanner;
  * an attribute class when its file changes
  * ({@see IncrementalEngine}, LoadedAttributeClassRefreshTest). One the scan
  * does not enter (outside the root, or copied into vendor) is part of the
- * fingerprint by the content of its PHP files.
+ * fingerprint by the content of its PHP files: an edit of any of them, a test
+ * of the package included, makes the next refresh a full build.
  *
  * Known limits: a path repository under the root that .graphignore keeps out
  * of the scan; a constant another file sets with define(), read in an
@@ -123,6 +124,12 @@ final class InstalledPackages
      * One hash for the PHP files of a package directory, by path and content,
      * leaving out what a scan leaves out (its own vendor, var, .git).
      *
+     * A file or a directory that is there and cannot be read is a failure, as
+     * an unreadable installed.json is: what it holds may have changed, and the
+     * graph would be taken for current. A link to a file that is not there
+     * hides nothing, PHP can load no class from it, and it is hashed by where
+     * it points: one dangling link must not stop every graph command.
+     *
      * @throws \RuntimeException when a file or a directory of it cannot be read
      */
     private static function contentOf(string $dir): string
@@ -148,7 +155,7 @@ final class InstalledPackages
         sort($files);
         $context = hash_init('xxh3');
         foreach ($files as $file) {
-            $hash = @hash_file('xxh3', $file);
+            $hash = is_link($file) && !file_exists($file) ? 'link:' . (string) @readlink($file) : @hash_file('xxh3', $file);
             if (!is_string($hash)) {
                 throw new \RuntimeException("Cannot read {$file}, so the installed packages cannot be told apart; the graph would be taken for current.");
             }
