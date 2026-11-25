@@ -34,8 +34,14 @@ final class IgnorePatternLoader
 
         $ignoreFile = $projectRoot . '/.graphignore';
         if (is_file($ignoreFile)) {
-            $lines = file($ignoreFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-            foreach ($lines === false ? [] : $lines as $line) {
+            $lines = @file($ignoreFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            // A .graphignore that is there and cannot be read fails the scan:
+            // without its patterns the graph would take in what the project
+            // told it to leave out, and say nothing (review, project-graph#47).
+            if ($lines === false) {
+                throw new \RuntimeException("Cannot read {$ignoreFile}: the graph would be built without the project's ignore patterns.");
+            }
+            foreach ($lines as $line) {
                 $line = trim($line);
                 if ($line !== '' && !str_starts_with($line, '#')) {
                     $this->patterns[] = $line;

@@ -50,7 +50,7 @@ use Semitexa\ProjectGraph\Application\Service\Scanner\IgnorePatternLoader;
  * its edit, which reads the loaded one whatever is refreshed. Each needs a
  * full build in a new process.
  *
- * @phpstan-type LinkWalk array{root: string, left: int, truncated: bool, unreadable: array<string, true>}
+ * @phpstan-type LinkWalk array{root: string, patterns: list<string>, left: int, truncated: bool, unreadable: array<string, true>}
  */
 final class InstalledPackages
 {
@@ -119,7 +119,9 @@ final class InstalledPackages
             if (!is_string($hash)) {
                 throw new \RuntimeException("Cannot read {$path}, so the installed packages cannot be told apart; the graph would be taken for current.");
             }
-            [$unscanned, $linked] = $source === self::SOURCES[0] ? self::unscannedPathPackages($root, $path) : [[], []];
+            // The scan's own ignore patterns: what they prune, the scan does not read.
+            $patterns = (new IgnorePatternLoader())->load($root);
+            [$unscanned, $linked] = $source === self::SOURCES[0] ? self::unscannedPathPackages($root, $path, $patterns) : [[], []];
             if ($unscanned === [] && $linked === []) {
                 return [$hash, []];
             }
@@ -139,7 +141,7 @@ final class InstalledPackages
                 if ($real !== false && !isset($targets[$real])) {
                     $targets[$real] = true;
                     $visited = [$real => true];
-                    $walk = ['root' => $realRoot, 'left' => self::LINKED_ENTRIES, 'truncated' => false, 'unreadable' => []];
+                    $walk = ['root' => $realRoot, 'patterns' => $patterns, 'left' => self::LINKED_ENTRIES, 'truncated' => false, 'unreadable' => []];
                     $content = self::contentOf($link, $visited, $walk);
                     $shown = str_replace("\0", '', $label);
                     ksort($walk['unreadable']);
@@ -169,17 +171,17 @@ final class InstalledPackages
      * a file of theirs does. And, for the ones the scan does read, the
      * directory links in them that lead out of what it reads.
      *
+     * @param list<string> $patterns the scan's ignore patterns
      * @return array{array<string, string>, array<string, string>} package name => its directory ('' when it is not there), by name;
      *                                                             then "name\0path in the package" => the directory link, by that key
      */
-    private static function unscannedPathPackages(string $root, string $installedJson): array
+    private static function unscannedPathPackages(string $root, string $installedJson, array $patterns): array
     {
         $installed = json_decode((string) @file_get_contents($installedJson), true);
         $packages = is_array($installed) ? ($installed['packages'] ?? $installed) : [];
         $realRoot = realpath($root);
         $found = [];
         $linked = [];
-        $patterns = null;
         foreach (is_array($packages) ? $packages : [] as $package) {
             if (!is_array($package) || !is_array($package['dist'] ?? null) || ($package['dist']['type'] ?? null) !== 'path') {
                 continue;
@@ -203,16 +205,15 @@ final class InstalledPackages
                 $found[$name] = '';
                 continue;
             }
-            if ($realRoot === false || !self::scanReads($dir, $realRoot)) {
+            if ($realRoot === false || !self::scanReads($dir, $realRoot, $patterns)) {
                 $found[$name] = $dir;
                 continue;
             }
             $links = [];
-            $patterns ??= (new IgnorePatternLoader())->load($root);
             self::directoryLinksIn($dir, strlen($realRoot) + 1, $patterns, $links);
             foreach ($links as $link) {
                 $real = realpath($link);
-                if ($real !== false && self::isOutOfScan($real, $realRoot)) {
+                if ($real !== false && self::isOutOfScan($real, $realRoot, $patterns)) {
                     $linked[$name . "\0" . substr($link, strlen($dir))] = $link;
                 }
             }
@@ -223,11 +224,24 @@ final class InstalledPackages
         return [$found, $linked];
     }
 
-    /** Whether a scan of $realRoot reads the files of the directory $real: under the root, and under no directory a scan skips. */
-    private static function scanReads(string $real, string $realRoot): bool
+    /**
+     * Whether a scan of $realRoot reads the files of the directory $real:
+     * under the root, under no directory a scan skips, and under none an
+     * ignore pattern prunes (a link from a scanned package into
+     * tests/fixtures/ leads to files the scan never reads; review,
+     * project-graph#47).
+     *
+     * @param list<string> $patterns the scan's ignore patterns
+     */
+    private static function scanReads(string $real, string $realRoot, array $patterns): bool
     {
-        return str_starts_with($real . '/', $realRoot . '/')
-            && array_intersect(explode('/', substr($real, strlen($realRoot))), FileScanner::EXCLUDED_DIRS) === [];
+        if (!str_starts_with($real . '/', $realRoot . '/')
+            || array_intersect(explode('/', substr($real, strlen($realRoot))), FileScanner::EXCLUDED_DIRS) !== []) {
+            return false;
+        }
+        $relative = ltrim(substr($real, strlen($realRoot)), '/');
+
+        return $relative === '' || FileScanner::prunedBy($patterns, $relative . '/') === null;
     }
 
     /**
@@ -236,9 +250,10 @@ final class InstalledPackages
      * real path. Not one to a directory the root is under either (a link to
      * /): it leads to the whole project again, and to everything beside it.
      */
-    private static function isOutOfScan(string $real, string $realRoot): bool
+    /** @param list<string> $patterns the scan's ignore patterns */
+    private static function isOutOfScan(string $real, string $realRoot, array $patterns): bool
     {
-        return !self::scanReads($real, $realRoot) && !str_starts_with($realRoot . '/', rtrim($real, '/') . '/');
+        return !self::scanReads($real, $realRoot, $patterns) && !str_starts_with($realRoot . '/', rtrim($real, '/') . '/');
     }
 
     /**
@@ -363,7 +378,7 @@ final class InstalledPackages
             $path = $dir . '/' . $entry;
             if (is_dir($path)) {
                 $real = in_array($entry, FileScanner::EXCLUDED_DIRS, true) ? false : realpath($path);
-                if ($real !== false && !isset($visited[$real]) && ($walk === null || self::isOutOfScan($real, $walk['root']))) {
+                if ($real !== false && !isset($visited[$real]) && ($walk === null || self::isOutOfScan($real, $walk['root'], $walk['patterns']))) {
                     $visited[$real] = true;
                     self::phpFilesIn($package, $path, $visited, $files, $walk);
                 }

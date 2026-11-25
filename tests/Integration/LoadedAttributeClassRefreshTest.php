@@ -475,6 +475,30 @@ final class LoadedAttributeClassRefreshTest extends TestCase
         self::assertNotSame($plain, $linked, 'the same directory through a link the scan is not told to ignore');
     }
 
+    /**
+     * CodeRabbit on project-graph#47: a link from a scanned package to a
+     * directory inside the root that an ignore pattern prunes was taken for
+     * scanned, so neither the scan nor the fingerprint read its files.
+     */
+    #[Test]
+    public function a_link_into_an_ignored_directory_of_the_root_is_read(): void
+    {
+        $fixture = self::project();
+        $fixture->write('tests/fixtures/shared/One.php', "<?php\n");
+        $fixture->write('packages/acme-screens/Plain.php', "<?php\n");
+        self::installFromPath($fixture, $fixture->path('packages/acme-screens'));
+        $plain = hash_file('xxh3', $fixture->path(self::INSTALLED));
+        symlink($fixture->path('tests/fixtures/shared'), $fixture->path('packages/acme-screens/src'));
+
+        $first = InstalledPackages::fingerprint($fixture->root);
+        self::assertNotSame('', $first);
+        self::assertNotSame($plain, $first, 'the ignored target is read through the link');
+
+        $fixture->write('tests/fixtures/shared/One.php', "<?php\n// edited\n");
+        clearstatcache();
+        self::assertNotSame($first, InstalledPackages::fingerprint($fixture->root), 'an edit there is seen');
+    }
+
     private static function project(): GraphFixture
     {
         $fixture = GraphFixture::create();

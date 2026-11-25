@@ -114,6 +114,23 @@ final class InstalledPackagesRefreshTest extends TestCase
         }
         self::assertSame(hash_file('xxh3', $installed), InstalledPackages::fingerprint($fixture->root), 'searchable and readable again: installed.json');
 
+        // An unreadable .graphignore was read as an empty one, and the graph
+        // took in what the project told it to leave out (CodeRabbit on
+        // project-graph#47).
+        $fixture->write('.graphignore', "Generated/\n");
+        chmod($fixture->path('.graphignore'), 0000);
+        $thrown = null;
+        try {
+            InstalledPackages::fingerprint($fixture->root);
+        } catch (\RuntimeException $e) {
+            $thrown = $e;
+        } finally {
+            chmod($fixture->path('.graphignore'), 0644);
+        }
+        self::assertInstanceOf(\RuntimeException::class, $thrown, 'an unreadable .graphignore gave a fingerprint');
+        self::assertStringStartsWith('Cannot read ' . $fixture->path('.graphignore'), $thrown->getMessage());
+        unlink($fixture->path('.graphignore'));
+
         // A vendor linked into a directory that cannot be searched (review, project-graph#43):
         // is_dir() is false for vendor and vendor/composer alike.
         $outside = sys_get_temp_dir() . '/semitexa-graph-outside-' . bin2hex(random_bytes(4));
