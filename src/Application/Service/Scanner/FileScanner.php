@@ -85,12 +85,10 @@ final class FileScanner
                         }
                         // A directory pattern prunes the whole directory rather
                         // than being checked against every file inside it.
-                        $relative = substr($file->getPathname(), strlen($root)) . '/';
-                        foreach ($ignorePatterns as $pattern) {
-                            if (str_ends_with($pattern, '/') && self::matchesDirectory($pattern, $relative)) {
-                                $this->exclude($pattern);
-                                return false;
-                            }
+                        $pruning = self::prunedBy($ignorePatterns, substr($file->getPathname(), strlen($root)) . '/');
+                        if ($pruning !== null) {
+                            $this->exclude($pruning);
+                            return false;
                         }
                         return true;
                     }
@@ -165,6 +163,26 @@ final class FileScanner
         usort($results, static fn (FileScanResult $a, FileScanResult $b): int => strcmp($a->path, $b->path));
 
         return $results;
+    }
+
+    /**
+     * The directory pattern that keeps a directory out of the scan, null when
+     * none does. Whoever follows what the scan does not (the directory links
+     * {@see \Semitexa\ProjectGraph\Application\Service\Index\InstalledPackages}
+     * reads) asks the same question.
+     *
+     * @param list<string> $patterns as {@see IgnorePatternLoader::load()} gives them
+     * @param string $relative the directory from the project root, with a trailing slash
+     */
+    public static function prunedBy(array $patterns, string $relative): ?string
+    {
+        foreach ($patterns as $pattern) {
+            if (str_ends_with($pattern, '/') && self::matchesDirectory($pattern, $relative)) {
+                return $pattern;
+            }
+        }
+
+        return null;
     }
 
     private function exclude(string $rule): void

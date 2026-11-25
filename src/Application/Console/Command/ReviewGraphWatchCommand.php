@@ -77,6 +77,9 @@ final class ReviewGraphWatchCommand extends BaseCommand
         while ($running) {
             $signals && pcntl_signal_dispatch();
             try {
+                // PHP keeps a resolved path for 120 s: a link given another
+                // target would be read as the old one for that long.
+                clearstatcache(true);
                 $result = $engine->update($this->getProjectRoot());
                 if (!$result->isNoChanges()) {
                     $io->text('[' . date('H:i:s') . '] Updated: ' . $result->filesScanned . ' files, +' . $result->nodesAdded . '/-' . $result->nodesRemoved . ' nodes');
