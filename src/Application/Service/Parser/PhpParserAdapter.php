@@ -20,6 +20,7 @@ final class PhpParserAdapter
 
     public function parse(string $filePath, string $module = ''): ParsedFile
     {
+        // verify:accept-cross-file-read filesystem IncrementalRefreshIntegrityTest::a_refresh_after_touching_every_file_one_by_one_equals_a_full_build the file read is the one being extracted: the engine re-reads it whenever its hash changes
         $code = file_get_contents($filePath);
         $ast  = $this->parser->parse($code) ?? [];
 

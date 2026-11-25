@@ -130,6 +130,7 @@ final class AttributeArgumentEvaluator
             // and constant() on a name without "::" never autoload a class.
             $name = $expr->name->toString();
             if (defined($name)) {
+                // verify:accept-cross-file-read class-probe IncrementalRefreshIntegrityTest::a_refresh_after_touching_every_file_one_by_one_equals_a_full_build a global constant by its plain name, which never autoloads; PHP defines nearly all of them. Not covered: one the project sets with define() in another file (tk-graph-refresh-misses-loaded-class-changes)
                 return constant($name);
             }
         }
@@ -152,6 +153,7 @@ final class AttributeArgumentEvaluator
         }
 
         if (self::isLoadedInternal($class)) {
+            // verify:accept-cross-file-read class-probe IncrementalRefreshIntegrityTest::a_refresh_after_touching_every_file_one_by_one_equals_a_full_build reached only for a class PHP itself declares (isLoadedInternal): its constants live in no file of the project or a package
             return constant($class . '::' . $constant);
         }
 
@@ -184,10 +186,12 @@ final class AttributeArgumentEvaluator
     /** An internal class (\Attribute, \ReflectionMethod) already present: reading its constant runs no project code. */
     private static function isLoadedInternal(string $class): bool
     {
+        // verify:accept-cross-file-read class-probe IncrementalRefreshIntegrityTest::a_refresh_after_touching_every_file_one_by_one_equals_a_full_build asks without autoloading, and the answer is used only for a class PHP itself declares: no file is read
         if (!class_exists($class, false) && !interface_exists($class, false) && !enum_exists($class, false)) {
             return false;
         }
 
+        // verify:accept-cross-file-read reflection IncrementalRefreshIntegrityTest::a_refresh_after_touching_every_file_one_by_one_equals_a_full_build asks only whether PHP itself declares the class, which no file of the project or a package can change
         return (new \ReflectionClass($class))->isInternal();
     }
 

@@ -24,6 +24,7 @@ final class AttributeStandIn
     public static function of(string $attributeClass, array $arguments): self
     {
         $standIn = new self();
+        // verify:accept-cross-file-read reflection InstalledPackagesRefreshTest::a_refresh_after_the_installed_packages_change_leaves_what_a_full_build_would reads the constructor of the attribute class: one of an installed package changes with installed.json, which makes the next refresh a full build. Not covered: an attribute class in a path repository or in the project (tk-graph-refresh-misses-loaded-class-changes)
         $reflection = new \ReflectionClass($attributeClass);
         $parameters = $reflection->getConstructor()?->getParameters() ?? [];
 
@@ -39,6 +40,7 @@ final class AttributeStandIn
         }
         foreach ($reflection->getProperties(\ReflectionProperty::IS_PUBLIC) as $property) {
             $name = $property->getName();
+            // verify:accept-cross-file-read class-probe IncrementalRefreshIntegrityTest::a_refresh_after_touching_every_file_one_by_one_equals_a_full_build asks the stand-in object built above which names it carries already: no class is looked up and no file read
             if (!property_exists($standIn, $name) && !$property->isStatic() && $property->hasDefaultValue()) {
                 $standIn->{$name} = $property->getDefaultValue();
             }
