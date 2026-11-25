@@ -219,7 +219,8 @@ final class GraphFixture
         );
         foreach ($items as $item) {
             /** @var \SplFileInfo $item */
-            $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());
+            // A link to a directory is a link: rmdir() refuses it, and what it points at is not the fixture's.
+            $item->isDir() && !$item->isLink() ? rmdir($item->getPathname()) : unlink($item->getPathname());
         }
         rmdir($dir);
     }

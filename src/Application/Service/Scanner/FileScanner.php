@@ -9,7 +9,8 @@ use Semitexa\ProjectGraph\Application\Service\Extractor\TemplateLinkExtractor;
 
 final class FileScanner
 {
-    private const EXCLUDED_DIRS = ['vendor', 'node_modules', '.git', 'var'];
+    /** Directories no scan enters, at any depth. */
+    public const EXCLUDED_DIRS = ['vendor', 'node_modules', '.git', 'var'];
 
     /** @var \Closure(string): (string|false) */
     private readonly \Closure $hasher;

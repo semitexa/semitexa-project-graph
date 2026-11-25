@@ -24,7 +24,7 @@ final class AttributeStandIn
     public static function of(string $attributeClass, array $arguments): self
     {
         $standIn = new self();
-        // verify:accept-cross-file-read reflection InstalledPackagesRefreshTest::a_refresh_after_the_installed_packages_change_leaves_what_a_full_build_would reads the constructor of the attribute class: one of an installed package changes with installed.json, which makes the next refresh a full build. Not covered: an attribute class in a path repository or in the project (tk-graph-refresh-misses-loaded-class-changes)
+        // verify:accept-cross-file-read reflection LoadedAttributeClassRefreshTest::a_refresh_after_an_attribute_class_changes_leaves_what_a_full_build_would reads the constructor of the attribute class: when the file declaring it, or a class it inherits from, changes, the engine reads the files annotated with it again; a class of an installed package changes with installed.json, and a path repository the scan skips is in the fingerprint by content (InstalledPackages)
         $reflection = new \ReflectionClass($attributeClass);
         $parameters = $reflection->getConstructor()?->getParameters() ?? [];
 

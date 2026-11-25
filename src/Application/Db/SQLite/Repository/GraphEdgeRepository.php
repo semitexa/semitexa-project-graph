@@ -459,6 +459,57 @@ final class GraphEdgeRepository
     }
 
     /**
+     * Files whose declared nodes carry an attribute of one of these classes, or
+     * of a class that inherits from one (extends, implements, a trait it uses):
+     * AsCrud's permissionFor() lives in AsCrud, its path in AbstractPayloadRoute.
+     * The attribute class runs when its user is extracted, so its user is read
+     * again when the file that declares it changes.
+     *
+     * @param list<string> $classIds
+     * @return list<string>
+     */
+    public function sourceFilesAnnotatedWith(array $classIds): array
+    {
+        $known = array_fill_keys($classIds, true);
+        $frontier = array_keys($known);
+        // Each round is one level of inheritance; a class is asked about once.
+        while ($frontier !== []) {
+            $next = [];
+            foreach (array_chunk($frontier, 500) as $chunk) {
+                [$in, $params] = self::named('t', $chunk);
+                $rows = $this->adapter->execute(
+                    "SELECT DISTINCT source_id FROM graph_edges WHERE type IN ('extends', 'implements', 'uses') AND target_id IN (" . $in . ')',
+                    $params,
+                )->fetchAll();
+                foreach ($rows as $row) {
+                    $id = self::text($row['source_id'] ?? null);
+                    if ($id !== '' && !isset($known[$id])) {
+                        $known[$id] = true;
+                        $next[] = $id;
+                    }
+                }
+            }
+            $frontier = $next;
+        }
+
+        $files = [];
+        foreach (array_chunk(array_keys($known), 500) as $chunk) {
+            [$in, $params] = self::named('t', $chunk);
+            $rows = $this->adapter->execute(
+                'SELECT DISTINCT n.file AS file FROM graph_edges e JOIN graph_nodes n ON n.id = e.source_id'
+                . " WHERE e.type = 'annotated_with' AND e.target_id IN (" . $in . ") AND n.file != '' AND n.is_placeholder = 0",
+                $params,
+            )->fetchAll();
+            foreach ($rows as $row) {
+                $files[self::text($row['file'] ?? null)] = true;
+            }
+        }
+        unset($files['']);
+
+        return array_keys($files);
+    }
+
+    /**
      * Files of declared nodes with an edge into $nodeId, first few by path.
      *
      * @return list<string>

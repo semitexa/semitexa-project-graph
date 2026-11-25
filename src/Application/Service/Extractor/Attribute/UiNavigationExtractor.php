@@ -132,7 +132,7 @@ final class UiNavigationExtractor implements ExtractorInterface
         $id = $crud->id;
         $label = is_string($crud->label ?? null) ? $crud->label : $id;
         $permission = static function (string $operation) use ($crud): ?string {
-            // verify:accept-cross-file-read class-probe InstalledPackagesRefreshTest::a_refresh_after_the_installed_packages_change_leaves_what_a_full_build_would $crud is an AsCrud object already built; its class changes with the installed packages, and a changed installed.json makes the next refresh a full build. Not covered: the class edited in a path repository (tk-graph-refresh-misses-loaded-class-changes)
+            // verify:accept-cross-file-read class-probe LoadedAttributeClassRefreshTest::a_refresh_after_an_attribute_class_changes_leaves_what_a_full_build_would $crud is an AsCrud object already built: when the file declaring it, or a class it inherits from, changes, the engine reads the files annotated with it again; a class of an installed package changes with installed.json, and a path repository the scan skips is in the fingerprint by content (InstalledPackages)
             $slug = method_exists($crud, 'permissionFor') ? $crud->permissionFor($operation) : null;
 
             return is_string($slug) ? $slug : null;
