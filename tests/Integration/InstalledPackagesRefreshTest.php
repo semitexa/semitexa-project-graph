@@ -155,7 +155,9 @@ final class InstalledPackagesRefreshTest extends TestCase
         mkdir($outside . '/private', 0o755, true);
         file_put_contents($outside . '/private/Hidden.php', "<?php\n");
         symlink($outside . '/private/Hidden.php', $package . '/src/Linked.php');
-        self::assertNotSame($readable, InstalledPackages::fingerprint($fixture->root), 'a link to a file that can be read is the file');
+        $linked = InstalledPackages::fingerprint($fixture->root);
+        self::assertNotSame('', $linked);
+        self::assertNotSame($readable, $linked, 'a link to a file that can be read is the file');
         foreach ([
             $package . '/src/Screen.php' => "Cannot read {$package}/src/Screen.php, ",
             $package . '/src' => "Cannot read the path repository {$package} (",

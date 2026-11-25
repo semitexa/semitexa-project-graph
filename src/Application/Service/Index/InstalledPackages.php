@@ -26,7 +26,10 @@ use Semitexa\ProjectGraph\Application\Service\Scanner\FileScanner;
  * of the package included, makes the next refresh a full build.
  *
  * Known limits: a path repository under the root that .graphignore keeps out
- * of the scan; a constant another file sets with define(), read in an
+ * of the scan; a directory link inside a path repository under the root that
+ * points out of the scan (src -> /shared/src), whose files neither the scan nor
+ * this fingerprint reads (review, project-graph#45, tk-graph-refresh-misses-edits-behind-a-linked-dir);
+ * a constant another file sets with define(), read in an
  * attribute argument (none of the workspace's 18006 attributes reads one,
  * measured 2026-11-25); and a process that loaded an attribute class before
  * its edit, which reads the loaded one whatever is refreshed. Each needs a
