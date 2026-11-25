@@ -22,8 +22,6 @@ namespace Semitexa\ProjectGraph\Application\Service\Extractor;
  *
  * No extractor calls this: the graph stores a template name as written, and
  * UiFlowProjection resolves it here each time the graph is read.
- *
- * verify:accept-cross-file-read UiFlowRefreshConvergenceTest::a_refresh_after_the_edit_leaves_what_a_full_build_would read when the graph is read, never at extract time, so a refresh sees the disk as it is
  */
 final class TemplateNamespaces
 {
@@ -45,6 +43,7 @@ final class TemplateNamespaces
         foreach (self::directories($root . '/src/modules') as $dir) {
             $name = basename($dir);
             foreach (['/Application/View/templates', '/Layout'] as $templates) {
+                // verify:accept-cross-file-read filesystem UiFlowRefreshConvergenceTest::a_refresh_after_the_edit_leaves_what_a_full_build_would read when the graph is read, never at extract time, so a refresh sees the disk as it is
                 if (is_dir($dir . $templates)) {
                     $modules[$name] = ['aliases' => [$name], 'path' => $dir . $templates];
                     break;
@@ -59,6 +58,7 @@ final class TemplateNamespaces
                 continue;
             }
             // A package linked into vendor/ is the package, not a second module.
+            // verify:accept-cross-file-read filesystem UiFlowRefreshConvergenceTest::a_refresh_after_the_edit_leaves_what_a_full_build_would read when the graph is read, never at extract time, so a refresh sees the disk as it is
             $real = realpath($path) ?: $path;
             if (isset($seen[$real])) {
                 continue;
@@ -77,6 +77,7 @@ final class TemplateNamespaces
                 $aliases[] = $extra['template_alias'];
             }
 
+            // verify:accept-cross-file-read filesystem UiFlowRefreshConvergenceTest::a_refresh_after_the_edit_leaves_what_a_full_build_would read when the graph is read, never at extract time, so a refresh sees the disk as it is
             $paths = [is_dir($path . '/src/Application/View/templates') ? $path . '/src/Application/View/templates' : $path . '/Application/View/templates'];
             foreach (is_array($extra['template_paths'] ?? null) ? $extra['template_paths'] : [] as $relative) {
                 if (is_string($relative) && $relative !== '') {
@@ -89,6 +90,7 @@ final class TemplateNamespaces
             // is assigned, not ??=), so it does here. "First keeps it" is
             // the rule between namespaces of differently named modules, below.
             foreach ($paths as $templates) {
+                // verify:accept-cross-file-read filesystem UiFlowRefreshConvergenceTest::a_refresh_after_the_edit_leaves_what_a_full_build_would read when the graph is read, never at extract time, so a refresh sees the disk as it is
                 if (is_dir($templates)) {
                     $modules[$name] = ['aliases' => $aliases, 'path' => rtrim($templates, '/')];
                 }
@@ -127,10 +129,12 @@ final class TemplateNamespaces
         }
         foreach ($this->modules as $directory) {
             foreach ([$directory . '/' . $handle . '.html.twig', $directory . '/layouts/' . $handle . '.html.twig'] as $file) {
+                // verify:accept-cross-file-read filesystem UiFlowRefreshConvergenceTest::a_refresh_after_the_edit_leaves_what_a_full_build_would read when the graph is read, never at extract time, so a refresh sees the disk as it is
                 if (is_file($file)) {
                     return $file;
                 }
             }
+            // verify:accept-cross-file-read filesystem UiFlowRefreshConvergenceTest::a_refresh_after_the_edit_leaves_what_a_full_build_would read when the graph is read, never at extract time, so a refresh sees the disk as it is
             foreach (glob($directory . '/layouts/*/' . $handle . '.html.twig') ?: [] as $file) {
                 return $file;
             }
@@ -168,6 +172,7 @@ final class TemplateNamespaces
         }
         $file = $directory . '/' . implode('/', $segments);
 
+        // verify:accept-cross-file-read filesystem UiFlowRefreshConvergenceTest::a_refresh_after_the_edit_leaves_what_a_full_build_would read when the graph is read, never at extract time, so a refresh sees the disk as it is
         return $segments !== [] && is_file($file) ? $file : null;
     }
 
@@ -191,6 +196,7 @@ final class TemplateNamespaces
         }
         foreach ([$root . '/packages', $root . '/vendor'] as $base) {
             foreach (self::directories($base) as $dir) {
+                // verify:accept-cross-file-read filesystem UiFlowRefreshConvergenceTest::a_refresh_after_the_edit_leaves_what_a_full_build_would read when the graph is read, never at extract time, so a refresh sees the disk as it is
                 if (is_file($dir . '/composer.json')) {
                     $found[] = [$dir, basename($dir), false];
                     continue;
@@ -207,6 +213,7 @@ final class TemplateNamespaces
     /** @return list<string> */
     private static function directories(string $in): array
     {
+        // verify:accept-cross-file-read filesystem UiFlowRefreshConvergenceTest::a_refresh_after_the_edit_leaves_what_a_full_build_would read when the graph is read, never at extract time, so a refresh sees the disk as it is
         return is_dir($in) ? (glob($in . '/*', GLOB_ONLYDIR) ?: []) : [];
     }
 
@@ -214,9 +221,11 @@ final class TemplateNamespaces
     private static function composer(string $path): array
     {
         $file = $path . '/composer.json';
+        // verify:accept-cross-file-read filesystem UiFlowRefreshConvergenceTest::a_refresh_after_the_edit_leaves_what_a_full_build_would read when the graph is read, never at extract time, so a refresh sees the disk as it is
         if (!is_file($file)) {
             return [];
         }
+        // verify:accept-cross-file-read filesystem UiFlowRefreshConvergenceTest::a_refresh_after_the_edit_leaves_what_a_full_build_would read when the graph is read, never at extract time, so a refresh sees the disk as it is
         $json = json_decode((string) @file_get_contents($file), true);
 
         return is_array($json) ? $json : [];

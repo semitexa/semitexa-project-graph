@@ -112,7 +112,9 @@ final class ClassDeclarationReader
         // (AuthDemo's RuntimeCapability) are declared by ClassDiscovery without
         // a Composer mapping — 4 #[RequiresCapability] arguments were
         // unreadable without this.
+        // verify:accept-cross-file-read class-probe EngineRound2ConvergenceTest::a_refresh_converges_to_a_full_build asks without autoloading whether the holder is declared already; which file declares it is read below, and tracked there
         if (class_exists($fqcn, false) || interface_exists($fqcn, false) || enum_exists($fqcn, false) || trait_exists($fqcn, false)) {
+            // verify:accept-cross-file-read reflection EngineRound2ConvergenceTest::a_refresh_converges_to_a_full_build the holder of a constant an attribute reads: the engine re-reads every file that reads a constant of a class declared in a changed file
             $file = (new \ReflectionClass($fqcn))->getFileName();
             $file = is_string($file) ? $this->inCopy($file, $copy) : null;
             if ($file !== null) {
@@ -151,6 +153,7 @@ final class ClassDeclarationReader
             $file = $copy[0] . substr($file, strlen($copy[1]));
         }
 
+        // verify:accept-cross-file-read filesystem EngineRound2ConvergenceTest::a_refresh_converges_to_a_full_build the holder of a constant an attribute reads: the engine re-reads every file that reads a constant of a class declared in a changed file
         return is_file($file) ? $file : null;
     }
 
@@ -279,6 +282,7 @@ final class ClassDeclarationReader
     /** @return array<string, ClassLike> lower-cased FQCN => declaration */
     private function classesIn(string $file): array
     {
+        // verify:accept-cross-file-read filesystem EngineRound2ConvergenceTest::a_refresh_converges_to_a_full_build the holder of a constant an attribute reads: the engine re-reads every file that reads a constant of a class declared in a changed file
         $code = @file_get_contents($file);
         if ($code === false) {
             return [];
