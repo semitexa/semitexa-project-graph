@@ -147,13 +147,17 @@ final class LoadedAttributeClassRefreshTest extends TestCase
         file_put_contents($package . '/PackageAttribute.php', self::attributeSource('read'));
         self::installFromPath($fixture, $package);
         $plain = InstalledPackages::fingerprint($fixture->root);
+        self::assertNotSame('', $plain);
 
         symlink($package . '/gone/One.php', $package . '/Linked.php');
         $one = InstalledPackages::fingerprint($fixture->root);
+        self::assertNotSame('', $one);
         self::assertNotSame($plain, $one, 'the link is part of the package');
         unlink($package . '/Linked.php');
         symlink($package . '/gone/Two.php', $package . '/Linked.php');
-        self::assertNotSame($one, InstalledPackages::fingerprint($fixture->root), 'and so is where it points');
+        $two = InstalledPackages::fingerprint($fixture->root);
+        self::assertNotSame('', $two);
+        self::assertNotSame($one, $two, 'and so is where it points');
         unlink($package . '/Linked.php');
         self::assertSame($plain, InstalledPackages::fingerprint($fixture->root));
     }
@@ -220,12 +224,48 @@ final class LoadedAttributeClassRefreshTest extends TestCase
         file_put_contents($package . '/PackageAttribute.php', self::attributeSource('read'));
         self::installFromPath($fixture, $package);
         $there = InstalledPackages::fingerprint($fixture->root);
+        self::assertNotSame('', $there);
         self::assertNotSame(hash_file('xxh3', $fixture->path(self::INSTALLED)), $there, 'the content of a path package the scan skips is in the fingerprint');
 
         exec('rm -rf ' . escapeshellarg($package));
         clearstatcache();
+        $gone = InstalledPackages::fingerprint($fixture->root);
+        self::assertNotSame('', $gone, 'installed.json is still there: not the fingerprint of a project with no manifest');
+        self::assertNotSame($there, $gone);
 
-        self::assertNotSame($there, InstalledPackages::fingerprint($fixture->root));
+        // Installed as a link to a directory that is gone: the same state, and no failure either.
+        symlink($fixture->root . '/gone/acme-screens', $package);
+        clearstatcache();
+        self::assertSame($gone, InstalledPackages::fingerprint($fixture->root));
+    }
+
+    /**
+     * Review on project-graph#45: a package whose src is a link to another
+     * directory was hashed without it, so an attribute class there changed
+     * with the same fingerprint. A link back to a parent must not hang.
+     */
+    #[Test]
+    public function a_directory_link_inside_a_path_repository_is_followed_once(): void
+    {
+        $fixture = self::project();
+        $package = $fixture->path('vendor/acme/screens');
+        $shared = sys_get_temp_dir() . '/semitexa-graph-shared-src-' . bin2hex(random_bytes(4));
+        $this->outside[] = $shared;
+        mkdir($package, 0o755, true);
+        mkdir($shared . '/Attribute', 0o755, true);
+        file_put_contents($shared . '/Attribute/PackageAttribute.php', self::attributeSource('read'));
+        symlink($shared, $package . '/src');
+        symlink($package, $shared . '/Attribute/back');
+        self::installFromPath($fixture, $package);
+        $read = InstalledPackages::fingerprint($fixture->root);
+        self::assertNotSame('', $read);
+
+        file_put_contents($shared . '/Attribute/PackageAttribute.php', self::attributeSource('view'));
+        clearstatcache();
+        $view = InstalledPackages::fingerprint($fixture->root);
+
+        self::assertNotSame('', $view);
+        self::assertNotSame($read, $view, 'the class behind the linked src is part of the package');
     }
 
     private static function project(): GraphFixture

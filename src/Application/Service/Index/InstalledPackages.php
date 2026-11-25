@@ -104,9 +104,17 @@ final class InstalledPackages
             if (!is_string($name) || !is_string($installPath)) {
                 continue;
             }
-            $dir = realpath(str_starts_with($installPath, '/') ? $installPath : dirname($installedJson) . '/' . $installPath);
+            $named = str_starts_with($installPath, '/') ? $installPath : dirname($installedJson) . '/' . $installPath;
+            $dir = realpath($named);
             // is_dir() too: PHP's realpath cache answers for a directory removed a moment ago.
             if ($dir === false || !is_dir($dir)) {
+                // realpath() fails as well for a package behind a directory that
+                // cannot be searched: that one is there, and what it holds may
+                // have changed (review, project-graph#45).
+                $hiding = self::hidingDirectory($named . '/.');
+                if ($hiding !== null) {
+                    throw new \RuntimeException("Cannot search {$hiding} for the path repository {$named} ({$name}), so the installed packages cannot be told apart; the graph would be taken for current.");
+                }
                 $found[$name] = '';
                 continue;
             }
@@ -138,24 +146,12 @@ final class InstalledPackages
             return '';
         }
         $files = [];
-        try {
-            $iterator = new \RecursiveIteratorIterator(new \RecursiveCallbackFilterIterator(
-                new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
-                static fn (\SplFileInfo $file): bool => !$file->isDir() || !in_array($file->getBasename(), FileScanner::EXCLUDED_DIRS, true),
-            ));
-            foreach ($iterator as $file) {
-                /** @var \SplFileInfo $file */
-                if ($file->getExtension() === 'php') {
-                    $files[] = $file->getPathname();
-                }
-            }
-        } catch (\UnexpectedValueException $e) {
-            throw new \RuntimeException("Cannot read the path repository {$dir} ({$e->getMessage()}), so the installed packages cannot be told apart; the graph would be taken for current.", 0, $e);
-        }
-        sort($files);
+        $visited = [$dir => true];
+        self::phpFilesIn($dir, $dir, $visited, $files);
+        ksort($files);
         $context = hash_init('xxh3');
-        foreach ($files as $file) {
-            $hash = is_link($file) && !file_exists($file) ? 'link:' . (string) @readlink($file) : @hash_file('xxh3', $file);
+        foreach ($files as $file => $dangling) {
+            $hash = $dangling ? 'link:' . (string) @readlink($file) : @hash_file('xxh3', $file);
             if (!is_string($hash)) {
                 throw new \RuntimeException("Cannot read {$file}, so the installed packages cannot be told apart; the graph would be taken for current.");
             }
@@ -163,6 +159,55 @@ final class InstalledPackages
         }
 
         return hash_final($context);
+    }
+
+    /**
+     * The PHP files under $dir, through directory links too: PHP autoloads a
+     * class from `src -> ../shared/src` like from any other directory, and an
+     * iterator that does not follow links left such a class out of the
+     * fingerprint (review, project-graph#45). A directory is entered once, by
+     * its real path, so a link back to a parent ends there. A link is followed
+     * wherever it points, outside the package too: a link to /usr is walked,
+     * and one to / stops at the first system directory it cannot search.
+     *
+     * @param array<string, true> $visited real paths of the directories entered
+     * @param array<string, bool> $files path => whether it is a link to a file that is not there
+     *
+     * @throws \RuntimeException when a directory cannot be listed or searched, or a link leads behind one that cannot
+     */
+    private static function phpFilesIn(string $package, string $dir, array &$visited, array &$files): void
+    {
+        $entries = @scandir($dir);
+        // Listed and not searchable (r--): every entry would look absent.
+        if ($entries === false || @stat($dir . '/.') === false) {
+            throw new \RuntimeException("Cannot read the path repository {$package} ({$dir} cannot be listed or searched), so the installed packages cannot be told apart; the graph would be taken for current.");
+        }
+        foreach ($entries as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+            $path = $dir . '/' . $entry;
+            if (is_dir($path)) {
+                $real = in_array($entry, FileScanner::EXCLUDED_DIRS, true) ? false : realpath($path);
+                if ($real !== false && !isset($visited[$real])) {
+                    $visited[$real] = true;
+                    self::phpFilesIn($package, $path, $visited, $files);
+                }
+                continue;
+            }
+            $dangling = is_link($path) && !file_exists($path);
+            if ($dangling) {
+                // file_exists() is false as well for a target behind a directory
+                // that cannot be searched: that one is there, not dangling.
+                $hiding = self::hidingDirectory($path . '/.');
+                if ($hiding !== null) {
+                    throw new \RuntimeException("Cannot search {$hiding} for what {$path} links to, so the installed packages cannot be told apart; the graph would be taken for current.");
+                }
+            }
+            if (str_ends_with($entry, '.php')) {
+                $files[$path] = $dangling;
+            }
+        }
     }
 
     /**
