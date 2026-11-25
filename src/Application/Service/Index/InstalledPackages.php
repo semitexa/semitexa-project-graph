@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\ProjectGraph\Application\Service\Index;
 
 use Semitexa\ProjectGraph\Application\Service\Scanner\FileScanner;
+use Semitexa\ProjectGraph\Application\Service\Scanner\IgnorePatternLoader;
 
 /**
  * Which packages the project has installed, as one hash stored in the graph
@@ -31,16 +32,25 @@ use Semitexa\ProjectGraph\Application\Service\Scanner\FileScanner;
  * package stays the scan's, or every workspace edit would be a full build
  * (review, project-graph#45, tk-graph-refresh-misses-edits-behind-a-linked-dir).
  *
+ * A link the scan would not look at (under a directory it skips or
+ * .graphignore names) is not followed. What is behind a link and cannot be
+ * read, or lies past the first {@see self::LINKED_ENTRIES} entries of that
+ * link, is left out and said: {@see self::read()} names the link, and the
+ * engine stores it with what the scan left out (coverage_exclusions).
+ *
  * Known limits: a path repository under the root that .graphignore keeps out
  * of the scan; a directory link out of the scan that is in the project's own
  * source, not in a path repository; one that leads to a directory the project
- * root is under (a link to /), which is not followed; what lies past the first
- * {@see self::LINKED_DIRECTORIES} directories behind such links;
+ * root is under (a link to /), which is not followed; an absolute link target
+ * that is there on the host and not in the container (or the other way), which
+ * gives the two different fingerprints, so each rebuilds the other's graph;
  * a constant another file sets with define(), read in an
  * attribute argument (none of the workspace's 18006 attributes reads one,
  * measured 2026-11-25); and a process that loaded an attribute class before
  * its edit, which reads the loaded one whatever is refreshed. Each needs a
  * full build in a new process.
+ *
+ * @phpstan-type LinkWalk array{root: string, left: int, truncated: bool, unreadable: array<string, true>}
  */
 final class InstalledPackages
 {
@@ -50,12 +60,20 @@ final class InstalledPackages
     private const SOURCES = ['/vendor/composer/installed.json', '/composer.lock'];
 
     /**
-     * How many directories one fingerprint enters behind the directory links
-     * of scanned path repositories, all of them together. It is read on every
-     * refresh, and a link may lead to a tree of any size. scandir() lists by
-     * name, so the directories left out are the same ones each time.
+     * How many directory entries (files of any kind and directories) the
+     * fingerprint looks at behind ONE directory link of a scanned path
+     * repository. It is read on every refresh, and a link may lead to a tree
+     * of any size; each link has its own count, so a large tree behind one
+     * takes nothing from another. scandir() lists by name, so the entries
+     * left out are the same ones each time. Measured 2026-11-25 in the dev
+     * container: a link with 3000 PHP files behind it costs one call about
+     * 40 ms at 2 KB a file and 52 ms at 20 KB.
      */
-    public const LINKED_DIRECTORIES = 5000;
+    public const LINKED_ENTRIES = 3000;
+
+    /** Rule prefixes of what {@see self::read()} left out behind a link, as coverage_exclusions has them. */
+    public const TRUNCATED = 'link:truncated:';
+    public const UNREADABLE = 'link:unreadable:';
 
     /**
      * The next source stands in only for one that is absent. One that is there
@@ -68,6 +86,24 @@ final class InstalledPackages
      * @throws \RuntimeException when a source that exists, or may, cannot be read
      */
     public static function fingerprint(string $projectRoot): string
+    {
+        return self::read($projectRoot)[0];
+    }
+
+    /**
+     * The fingerprint, and what it could not cover behind the directory links
+     * of scanned path repositories: "link:truncated:<package><link>" => 1 for
+     * a link with more than {@see self::LINKED_ENTRIES} entries behind it,
+     * "link:unreadable:<package><link>" => how many files and directories
+     * behind it could not be read. Neither is a failure, as a file the scan
+     * cannot read is none: the tree is partly watched, and a reader of the
+     * graph is told so.
+     *
+     * @return array{string, array<string, int>}
+     *
+     * @throws \RuntimeException as {@see self::fingerprint()}
+     */
+    public static function read(string $projectRoot): array
     {
         $root = rtrim($projectRoot, '/');
         foreach (self::SOURCES as $source) {
@@ -85,7 +121,7 @@ final class InstalledPackages
             }
             [$unscanned, $linked] = $source === self::SOURCES[0] ? self::unscannedPathPackages($root, $path) : [[], []];
             if ($unscanned === [] && $linked === []) {
-                return $hash;
+                return [$hash, []];
             }
             $context = hash_init('xxh3');
             hash_update($context, $hash);
@@ -93,24 +129,37 @@ final class InstalledPackages
                 $own = [$dir => true];
                 hash_update($context, "\0" . $name . "\0" . self::contentOf($dir, $own));
             }
-            // One set of entered directories for every link: a directory two
-            // links lead to is read once, and the limit is on all of them.
-            $entered = [];
+            $unread = [];
+            $targets = [];
             $realRoot = (string) realpath($root);
             foreach ($linked as $label => $link) {
                 $real = realpath($link);
                 $content = '';
-                if ($real !== false && !isset($entered[$real]) && count($entered) < self::LINKED_DIRECTORIES) {
-                    $entered[$real] = true;
-                    $content = self::contentOf($link, $entered, self::LINKED_DIRECTORIES, $realRoot);
+                // A directory two links lead to is read once, under the first name.
+                if ($real !== false && !isset($targets[$real])) {
+                    $targets[$real] = true;
+                    $visited = [$real => true];
+                    $walk = ['root' => $realRoot, 'left' => self::LINKED_ENTRIES, 'truncated' => false, 'unreadable' => []];
+                    $content = self::contentOf($link, $visited, $walk);
+                    $shown = str_replace("\0", '', $label);
+                    ksort($walk['unreadable']);
+                    foreach ($walk['unreadable'] as $relative => $_) {
+                        $content .= "\0unreadable:" . $relative;
+                        $unread[self::UNREADABLE . $shown] = ($unread[self::UNREADABLE . $shown] ?? 0) + 1;
+                    }
+                    if ($walk['truncated']) {
+                        $content .= "\0truncated:" . $label;
+                        $unread[self::TRUNCATED . $shown] = 1;
+                    }
                 }
                 hash_update($context, "\0link\0" . $label . "\0" . $content);
             }
+            ksort($unread);
 
-            return hash_final($context);
+            return [hash_final($context), $unread];
         }
 
-        return '';
+        return ['', []];
     }
 
     /**
@@ -130,6 +179,7 @@ final class InstalledPackages
         $realRoot = realpath($root);
         $found = [];
         $linked = [];
+        $patterns = null;
         foreach (is_array($packages) ? $packages : [] as $package) {
             if (!is_array($package) || !is_array($package['dist'] ?? null) || ($package['dist']['type'] ?? null) !== 'path') {
                 continue;
@@ -158,7 +208,8 @@ final class InstalledPackages
                 continue;
             }
             $links = [];
-            self::directoryLinksIn($dir, $links);
+            $patterns ??= (new IgnorePatternLoader())->load($root);
+            self::directoryLinksIn($dir, strlen($realRoot) + 1, $patterns, $links);
             foreach ($links as $link) {
                 $real = realpath($link);
                 if ($real !== false && self::isOutOfScan($real, $realRoot)) {
@@ -192,23 +243,28 @@ final class InstalledPackages
 
     /**
      * The directory links under $dir, as the scan meets them: it enters no
-     * linked directory, none of {@see FileScanner::EXCLUDED_DIRS}, and none it
-     * cannot list, so no link is looked for behind those.
+     * linked directory, none of {@see FileScanner::EXCLUDED_DIRS}, none an
+     * ignore pattern prunes (the default tests/fixtures/, a .graphignore
+     * line) and none it cannot list, so no link is looked for behind those,
+     * and a link such a pattern names is none either.
      *
+     * @param int $rootLength where the path from the project root starts in $dir
+     * @param list<string> $patterns the scan's ignore patterns
      * @param list<string> $links
      */
-    private static function directoryLinksIn(string $dir, array &$links): void
+    private static function directoryLinksIn(string $dir, int $rootLength, array $patterns, array &$links): void
     {
         $entries = @scandir($dir);
         foreach ($entries === false ? [] : $entries as $entry) {
             $path = $dir . '/' . $entry;
-            if ($entry === '.' || $entry === '..' || in_array($entry, FileScanner::EXCLUDED_DIRS, true) || !is_dir($path)) {
+            if ($entry === '.' || $entry === '..' || in_array($entry, FileScanner::EXCLUDED_DIRS, true) || !is_dir($path)
+                || FileScanner::prunedBy($patterns, substr($path, $rootLength) . '/') !== null) {
                 continue;
             }
             if (is_link($path)) {
                 $links[] = $path;
             } else {
-                self::directoryLinksIn($path, $links);
+                self::directoryLinksIn($path, $rootLength, $patterns, $links);
             }
         }
     }
@@ -223,24 +279,32 @@ final class InstalledPackages
      * hides nothing, PHP can load no class from it, and it is hashed by where
      * it points: one dangling link must not stop every graph command.
      *
-     * @param array<string, true> $visited real paths of the directories entered so far, $dir among them
-     * @param int $limit how many directories $visited may come to hold; the ones past it are not entered
-     * @param string|null $scannedRoot the real project root, when $dir is behind a link of a scanned package: a link from there
-     *                                 back into what the scan reads, or to a directory the root is under, is not followed
+     * Behind a directory link of a scanned package ($walk) nothing is a
+     * failure: the scan leaves out and counts what it cannot read, and a
+     * project that links to a tree with one closed directory in it must not
+     * lose every graph command. What cannot be read is named in $walk.
      *
-     * @throws \RuntimeException when a file or a directory of it cannot be read
+     * @param array<string, true> $visited real paths of the directories entered so far, $dir among them
+     * @param LinkWalk|null $walk
+     * @param-out ($walk is null ? null : LinkWalk) $walk
+     *
+     * @throws \RuntimeException when a file or a directory of it cannot be read, and $walk is null
      */
-    private static function contentOf(string $dir, array &$visited, int $limit = PHP_INT_MAX, ?string $scannedRoot = null): string
+    private static function contentOf(string $dir, array &$visited, ?array &$walk = null): string
     {
         if ($dir === '') {
             return '';
         }
         $files = [];
-        self::phpFilesIn($dir, $dir, $visited, $files, $limit, $scannedRoot);
+        self::phpFilesIn($dir, $dir, $visited, $files, $walk);
         ksort($files);
         $context = hash_init('xxh3');
         foreach ($files as $file => $dangling) {
             $hash = $dangling ? 'link:' . (string) @readlink($file) : @hash_file('xxh3', $file);
+            if (!is_string($hash) && $walk !== null) {
+                $walk['unreadable'][substr($file, strlen($dir))] = true;
+                continue;
+            }
             if (!is_string($hash)) {
                 throw new \RuntimeException("Cannot read {$file}, so the installed packages cannot be told apart; the graph would be taken for current.");
             }
@@ -258,31 +322,50 @@ final class InstalledPackages
      * its real path, so a link back to a parent ends there. A link is followed
      * wherever it points, outside the package too: a link to /usr is walked,
      * and one to / stops at the first system directory it cannot search.
-     * Past $limit entered directories no further one is entered, and with
-     * $scannedRoot none the scan of that root reads, or that the root is under.
+     *
+     * With $walk (behind a directory link of a scanned package): no directory
+     * the scan of $walk['root'] reads, or that the root is under, is entered;
+     * each entry looked at takes one from $walk['left'], and at none left the
+     * walk ends and says so; a directory that cannot be read is named in
+     * $walk and left out.
      *
      * @param array<string, true> $visited real paths of the directories entered
      * @param array<string, bool> $files path => whether it is a link to a file that is not there
+     * @param LinkWalk|null $walk
+     * @param-out ($walk is null ? null : LinkWalk) $walk
      *
-     * @throws \RuntimeException when a directory cannot be listed or searched, or a link leads behind one that cannot
+     * @throws \RuntimeException when a directory cannot be listed or searched, or a link leads behind one that cannot, and $walk is null
      */
-    private static function phpFilesIn(string $package, string $dir, array &$visited, array &$files, int $limit = PHP_INT_MAX, ?string $scannedRoot = null): void
+    private static function phpFilesIn(string $package, string $dir, array &$visited, array &$files, ?array &$walk = null): void
     {
         $entries = @scandir($dir);
         // Listed and not searchable (r--): every entry would look absent.
         if ($entries === false || @stat($dir . '/.') === false) {
+            if ($walk !== null) {
+                $walk['unreadable'][substr($dir, strlen($package))] = true;
+
+                return;
+            }
             throw new \RuntimeException("Cannot read the path repository {$package} ({$dir} cannot be listed or searched), so the installed packages cannot be told apart; the graph would be taken for current.");
         }
         foreach ($entries as $entry) {
             if ($entry === '.' || $entry === '..') {
                 continue;
             }
+            if ($walk !== null) {
+                if ($walk['left'] <= 0) {
+                    $walk['truncated'] = true;
+
+                    return;
+                }
+                $walk['left']--;
+            }
             $path = $dir . '/' . $entry;
             if (is_dir($path)) {
                 $real = in_array($entry, FileScanner::EXCLUDED_DIRS, true) ? false : realpath($path);
-                if ($real !== false && !isset($visited[$real]) && count($visited) < $limit && ($scannedRoot === null || self::isOutOfScan($real, $scannedRoot))) {
+                if ($real !== false && !isset($visited[$real]) && ($walk === null || self::isOutOfScan($real, $walk['root']))) {
                     $visited[$real] = true;
-                    self::phpFilesIn($package, $path, $visited, $files, $limit, $scannedRoot);
+                    self::phpFilesIn($package, $path, $visited, $files, $walk);
                 }
                 continue;
             }
@@ -291,6 +374,10 @@ final class InstalledPackages
                 // file_exists() is false as well for a target behind a directory
                 // that cannot be searched: that one is there, not dangling.
                 $hiding = self::hidingDirectory($path . '/.');
+                if ($hiding !== null && $walk !== null) {
+                    $walk['unreadable'][substr($path, strlen($package))] = true;
+                    continue;
+                }
                 if ($hiding !== null) {
                     throw new \RuntimeException("Cannot search {$hiding} for what {$path} links to, so the installed packages cannot be told apart; the graph would be taken for current.");
                 }

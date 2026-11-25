@@ -376,37 +376,103 @@ final class LoadedAttributeClassRefreshTest extends TestCase
 
     /**
      * The fingerprint is read on every refresh, and a link may lead to a tree
-     * of any size: past {@see InstalledPackages::LINKED_DIRECTORIES}
-     * directories it enters no more. scandir() lists by name, so "a" is
-     * entered before the many and "z" after them.
+     * of any size: past {@see InstalledPackages::LINKED_ENTRIES} entries
+     * behind one link it reads no more, and says so where the scan says what
+     * it left out. scandir() lists by name, so "a" is read before the many
+     * and "z" is not reached.
+     *
+     * Each link has its own count (review of 61ad6d6): with one count for all,
+     * the large tree behind `assets`, read first, left `src` unread and the
+     * edit of the attribute class there unseen.
      */
     #[Test]
-    public function the_directories_read_behind_links_are_bounded(): void
+    public function a_tree_too_large_behind_one_link_is_partly_read_and_said_so_and_takes_nothing_from_another_link(): void
     {
         $fixture = self::project();
-        $shared = sys_get_temp_dir() . '/semitexa-graph-shared-src-' . bin2hex(random_bytes(4));
-        $this->outside[] = $shared;
-        mkdir($shared . '/a', 0o755, true);
-        mkdir($shared . '/z', 0o755, true);
-        for ($i = 0; $i < InstalledPackages::LINKED_DIRECTORIES; $i++) {
-            mkdir($shared . '/m/' . $i, 0o755, true);
+        $large = sys_get_temp_dir() . '/semitexa-graph-shared-assets-' . bin2hex(random_bytes(4));
+        $small = sys_get_temp_dir() . '/semitexa-graph-shared-src-' . bin2hex(random_bytes(4));
+        array_push($this->outside, $large, $small);
+        mkdir($large . '/a', 0o755, true);
+        mkdir($large . '/z', 0o755, true);
+        for ($i = 0; $i < InstalledPackages::LINKED_ENTRIES; $i++) {
+            mkdir($large . '/m/' . $i, 0o755, true);
         }
-        file_put_contents($shared . '/a/First.php', "<?php\n");
-        file_put_contents($shared . '/z/Last.php', "<?php\n");
+        file_put_contents($large . '/a/First.php', "<?php\n");
+        file_put_contents($large . '/z/Last.php', "<?php\n");
+        mkdir($small, 0o755, true);
+        file_put_contents($small . '/PackageAttribute.php', self::attributeSource('read'));
         $fixture->write('packages/acme-screens/Plain.php', "<?php\n");
-        symlink($shared, $fixture->path('packages/acme-screens/src'));
+        symlink($large, $fixture->path('packages/acme-screens/assets'));
+        symlink($small, $fixture->path('packages/acme-screens/src'));
         self::installFromPath($fixture, $fixture->path('packages/acme-screens'));
-        $built = InstalledPackages::fingerprint($fixture->root);
-        self::assertNotSame('', $built);
+        $truncated = [InstalledPackages::TRUNCATED . 'acme/screens/assets' => 1];
 
-        file_put_contents($shared . '/z/Last.php', "<?php\n// changed\n");
+        [$built, $unread] = InstalledPackages::read($fixture->root);
+        self::assertNotSame('', $built);
+        self::assertSame($truncated, $unread, 'the large tree is named as partly read; the small one is whole');
+        $engine = self::engine($fixture);
+        $engine->fullBuild($fixture->root);
+        self::assertSame(['permission:catalog.read'], self::needs($fixture));
+        $stored = json_decode((string) $fixture->storage->getMeta('coverage_exclusions'), true);
+        self::assertIsArray($stored);
+        self::assertSame($truncated, array_intersect_key($stored, $truncated), 'the graph says what it did not read, beside what the scan left out');
+
+        file_put_contents($large . '/z/Last.php', "<?php\n// changed\n");
         clearstatcache();
-        self::assertSame($built, InstalledPackages::fingerprint($fixture->root), 'past the limit: not read');
-        file_put_contents($shared . '/a/First.php', "<?php\n// changed\n");
+        self::assertSame($built, InstalledPackages::fingerprint($fixture->root), 'past the limit: not read, which is what the graph says');
+        file_put_contents($large . '/a/First.php', "<?php\n// changed\n");
         clearstatcache();
         $first = InstalledPackages::fingerprint($fixture->root);
         self::assertNotSame('', $first);
         self::assertNotSame($built, $first, 'within the limit: read');
+
+        // The class behind the other link: its own count, so still seen.
+        $engine->fullBuild($fixture->root);
+        file_put_contents($small . '/PackageAttribute.php', self::attributeSource('view'));
+        PackageAttribute::$release = 2;
+        clearstatcache();
+        self::assertFalse($engine->isCurrentBuild($fixture->root), 'the large tree took nothing from the small one');
+        $engine->update($fixture->root);
+        self::assertSame(['permission:catalog.view'], self::needs($fixture));
+
+        // Whole again: nothing is said, and the fingerprint is another one.
+        exec('rm -rf ' . escapeshellarg($large . '/m'));
+        clearstatcache();
+        [$whole, $unread] = InstalledPackages::read($fixture->root);
+        self::assertSame([], $unread);
+        self::assertNotSame('', $whole);
+        self::assertNotSame($first, $whole);
+    }
+
+    /**
+     * Review of 61ad6d6: the links were looked for where the scan does not
+     * look. A link under the default-ignored tests/fixtures/, or under a
+     * directory .graphignore names, was followed and hashed.
+     */
+    #[Test]
+    public function a_link_the_scan_is_told_to_ignore_is_not_followed(): void
+    {
+        $fixture = self::project();
+        $shared = sys_get_temp_dir() . '/semitexa-graph-shared-src-' . bin2hex(random_bytes(4));
+        $this->outside[] = $shared;
+        mkdir($shared, 0o755, true);
+        file_put_contents($shared . '/One.php', "<?php\n");
+        $fixture->write('.graphignore', "Generated/\n/packages/acme-screens/legacy/\n");
+        $fixture->write('packages/acme-screens/Plain.php', "<?php\n");
+        $fixture->write('packages/acme-screens/tests/fixtures/Stub.php', "<?php\n");
+        $fixture->write('packages/acme-screens/Generated/Stub.php', "<?php\n");
+        self::installFromPath($fixture, $fixture->path('packages/acme-screens'));
+        $plain = hash_file('xxh3', $fixture->path(self::INSTALLED));
+
+        symlink($shared, $fixture->path('packages/acme-screens/tests/fixtures/data'));
+        symlink($shared, $fixture->path('packages/acme-screens/Generated/data'));
+        symlink($shared, $fixture->path('packages/acme-screens/legacy'));
+        self::assertSame([$plain, []], InstalledPackages::read($fixture->root), 'under an ignored directory, or ignored itself: installed.json alone');
+
+        symlink($shared, $fixture->path('packages/acme-screens/src'));
+        $linked = InstalledPackages::fingerprint($fixture->root);
+        self::assertNotSame('', $linked);
+        self::assertNotSame($plain, $linked, 'the same directory through a link the scan is not told to ignore');
     }
 
     private static function project(): GraphFixture

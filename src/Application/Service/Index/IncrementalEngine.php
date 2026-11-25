@@ -221,7 +221,7 @@ final class IncrementalEngine
         // while the scan runs then no longer match it, and the next refresh
         // rebuilds instead of keeping facts from the old set (review,
         // project-graph#40).
-        $installed = InstalledPackages::fingerprint($projectRoot);
+        [$installed, $unreadBehindLinks] = InstalledPackages::read($projectRoot);
         $indexedFiles = $this->storage->fileIndex->getAll();
         // A graph the current extractors did not build is re-derived whole: a
         // refresh re-reads only changed files, so a fix to an extractor (or a
@@ -235,7 +235,12 @@ final class IncrementalEngine
         // Findings judge "is this test code" relative to it (see TestCode).
         $this->storage->setMeta('project_root', rtrim($projectRoot, '/'));
         $changes = $this->scanner->scan($projectRoot, $indexedFiles);
-        $this->storage->setMeta('coverage_exclusions', (string) json_encode($this->scanner->lastExclusions()));
+        // With what the fingerprint could not read behind a directory link of
+        // a scanned package: that tree is watched in part, and the coverage
+        // report is where a reader learns what the graph did not read.
+        $exclusions = $this->scanner->lastExclusions() + $unreadBehindLinks;
+        ksort($exclusions);
+        $this->storage->setMeta('coverage_exclusions', (string) json_encode($exclusions));
 
         if (empty($changes)) {
             // A scan that found nothing to change still proves the graph current

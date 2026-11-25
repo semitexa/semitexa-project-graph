@@ -191,6 +191,53 @@ final class InstalledPackagesRefreshTest extends TestCase
         }
         self::assertInstanceOf(\RuntimeException::class, $thrown, 'a path repository linked out of reach read as one that is gone');
         self::assertStringStartsWith("Cannot search {$outside}/private for the path repository " . dirname($installed) . '/../acme/screens (acme/screens), ', $thrown->getMessage());
+
+        // Behind a directory link of a path repository the scan reads, what
+        // cannot be read is no failure (review of 61ad6d6): it threw, so every
+        // graph command failed in a project where the scan, which leaves such
+        // a directory out and counts it, had worked. Left out and counted, in
+        // LoadedAttributeClassRefreshTest's words for the rest of such links.
+        $shared = sys_get_temp_dir() . '/semitexa-graph-shared-src-' . bin2hex(random_bytes(4));
+        mkdir($shared . '/Closed', 0o755, true);
+        file_put_contents($shared . '/Closed/Hidden.php', "<?php\n");
+        file_put_contents($shared . '/Closed.php', "<?php\n");
+        file_put_contents($shared . '/Open.php', "<?php\n");
+        $fixture->write('packages/acme-linked/Plain.php', "<?php\n");
+        symlink($shared, $fixture->path('packages/acme-linked/src'));
+        $fixture->write(self::INSTALLED, (string) json_encode(['packages' => [[
+            'name' => 'acme/linked',
+            'dist' => ['type' => 'path', 'url' => 'packages/acme-linked', 'reference' => str_repeat('a', 40)],
+            'install-path' => '../../packages/acme-linked',
+        ]]]));
+        clearstatcache();
+        [$open, $unread] = InstalledPackages::read($fixture->root);
+        self::assertNotSame('', $open);
+        self::assertNotSame(hash_file('xxh3', $installed), $open, 'what the link leads to is in the fingerprint');
+        self::assertSame([], $unread);
+        $thrown = null;
+        $closed = ['', []];
+        $edited = '';
+        try {
+            chmod($shared . '/Closed', 0000);
+            chmod($shared . '/Closed.php', 0000);
+            clearstatcache();
+            $closed = InstalledPackages::read($fixture->root);
+            file_put_contents($shared . '/Open.php', "<?php\n// changed\n");
+            clearstatcache();
+            $edited = InstalledPackages::fingerprint($fixture->root);
+        } catch (\RuntimeException $e) {
+            $thrown = $e;
+        } finally {
+            chmod($shared . '/Closed', 0o755);
+            chmod($shared . '/Closed.php', 0o644);
+            exec('rm -rf ' . escapeshellarg($shared));
+        }
+        self::assertNull($thrown, 'a closed directory behind a link stopped the fingerprint: ' . $thrown?->getMessage());
+        self::assertSame([InstalledPackages::UNREADABLE . 'acme/linked/src' => 2], $closed[1], 'the directory and the file, counted under the link');
+        self::assertNotSame('', $closed[0]);
+        self::assertNotSame($open, $closed[0], 'not the fingerprint of the tree that was read whole');
+        self::assertNotSame('', $edited);
+        self::assertNotSame($closed[0], $edited, 'what can be read beside it is still read');
     }
 
     /** A vendor that is a dangling link is no install, as no vendor is: the lock file stands in (review, project-graph#43). */
