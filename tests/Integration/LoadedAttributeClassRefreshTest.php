@@ -496,7 +496,9 @@ final class LoadedAttributeClassRefreshTest extends TestCase
 
         $fixture->write('tests/fixtures/shared/One.php', "<?php\n// edited\n");
         clearstatcache();
-        self::assertNotSame($first, InstalledPackages::fingerprint($fixture->root), 'an edit there is seen');
+        $edited = InstalledPackages::fingerprint($fixture->root);
+        self::assertNotSame('', $edited);
+        self::assertNotSame($first, $edited, 'an edit there is seen');
     }
 
     private static function project(): GraphFixture
