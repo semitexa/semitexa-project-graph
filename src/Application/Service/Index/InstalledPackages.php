@@ -25,10 +25,17 @@ use Semitexa\ProjectGraph\Application\Service\Scanner\FileScanner;
  * fingerprint by the content of its PHP files: an edit of any of them, a test
  * of the package included, makes the next refresh a full build.
  *
+ * A scan enters no linked directory, so a path repository under the root
+ * with `src -> /shared/src` has files the scan never reads. Those subtrees,
+ * and only those, are part of the fingerprint by content: the rest of the
+ * package stays the scan's, or every workspace edit would be a full build
+ * (review, project-graph#45, tk-graph-refresh-misses-edits-behind-a-linked-dir).
+ *
  * Known limits: a path repository under the root that .graphignore keeps out
- * of the scan; a directory link inside a path repository under the root that
- * points out of the scan (src -> /shared/src), whose files neither the scan nor
- * this fingerprint reads (review, project-graph#45, tk-graph-refresh-misses-edits-behind-a-linked-dir);
+ * of the scan; a directory link out of the scan that is in the project's own
+ * source, not in a path repository; one that leads to a directory the project
+ * root is under (a link to /), which is not followed; what lies past the first
+ * {@see self::LINKED_DIRECTORIES} directories behind such links;
  * a constant another file sets with define(), read in an
  * attribute argument (none of the workspace's 18006 attributes reads one,
  * measured 2026-11-25); and a process that loaded an attribute class before
@@ -41,6 +48,14 @@ final class InstalledPackages
 
     /** installed.json is what is on disk; composer.lock stands in before an install. Empty when the project has neither. */
     private const SOURCES = ['/vendor/composer/installed.json', '/composer.lock'];
+
+    /**
+     * How many directories one fingerprint enters behind the directory links
+     * of scanned path repositories, all of them together. It is read on every
+     * refresh, and a link may lead to a tree of any size. scandir() lists by
+     * name, so the directories left out are the same ones each time.
+     */
+    public const LINKED_DIRECTORIES = 5000;
 
     /**
      * The next source stands in only for one that is absent. One that is there
@@ -68,14 +83,28 @@ final class InstalledPackages
             if (!is_string($hash)) {
                 throw new \RuntimeException("Cannot read {$path}, so the installed packages cannot be told apart; the graph would be taken for current.");
             }
-            $unscanned = $source === self::SOURCES[0] ? self::unscannedPathPackages($root, $path) : [];
-            if ($unscanned === []) {
+            [$unscanned, $linked] = $source === self::SOURCES[0] ? self::unscannedPathPackages($root, $path) : [[], []];
+            if ($unscanned === [] && $linked === []) {
                 return $hash;
             }
             $context = hash_init('xxh3');
             hash_update($context, $hash);
             foreach ($unscanned as $name => $dir) {
-                hash_update($context, "\0" . $name . "\0" . self::contentOf($dir));
+                $own = [$dir => true];
+                hash_update($context, "\0" . $name . "\0" . self::contentOf($dir, $own));
+            }
+            // One set of entered directories for every link: a directory two
+            // links lead to is read once, and the limit is on all of them.
+            $entered = [];
+            $realRoot = (string) realpath($root);
+            foreach ($linked as $label => $link) {
+                $real = realpath($link);
+                $content = '';
+                if ($real !== false && !isset($entered[$real]) && count($entered) < self::LINKED_DIRECTORIES) {
+                    $entered[$real] = true;
+                    $content = self::contentOf($link, $entered, self::LINKED_DIRECTORIES, $realRoot);
+                }
+                hash_update($context, "\0link\0" . $label . "\0" . $content);
             }
 
             return hash_final($context);
@@ -88,9 +117,11 @@ final class InstalledPackages
      * The path-repository packages whose files the scan never reads: installed
      * outside the project root, or as a copy under a directory every scan skips
      * (vendor). installed.json names where each one is; it does not change when
-     * a file of theirs does.
+     * a file of theirs does. And, for the ones the scan does read, the
+     * directory links in them that lead out of what it reads.
      *
-     * @return array<string, string> package name => its directory ('' when it is not there), by name
+     * @return array{array<string, string>, array<string, string>} package name => its directory ('' when it is not there), by name;
+     *                                                             then "name\0path in the package" => the directory link, by that key
      */
     private static function unscannedPathPackages(string $root, string $installedJson): array
     {
@@ -98,6 +129,7 @@ final class InstalledPackages
         $packages = is_array($installed) ? ($installed['packages'] ?? $installed) : [];
         $realRoot = realpath($root);
         $found = [];
+        $linked = [];
         foreach (is_array($packages) ? $packages : [] as $package) {
             if (!is_array($package) || !is_array($package['dist'] ?? null) || ($package['dist']['type'] ?? null) !== 'path') {
                 continue;
@@ -121,14 +153,64 @@ final class InstalledPackages
                 $found[$name] = '';
                 continue;
             }
-            $inside = $realRoot !== false && str_starts_with($dir . '/', $realRoot . '/') ? substr($dir, strlen($realRoot)) : null;
-            if ($inside === null || array_intersect(explode('/', $inside), FileScanner::EXCLUDED_DIRS) !== []) {
+            if ($realRoot === false || !self::scanReads($dir, $realRoot)) {
                 $found[$name] = $dir;
+                continue;
+            }
+            $links = [];
+            self::directoryLinksIn($dir, $links);
+            foreach ($links as $link) {
+                $real = realpath($link);
+                if ($real !== false && self::isOutOfScan($real, $realRoot)) {
+                    $linked[$name . "\0" . substr($link, strlen($dir))] = $link;
+                }
             }
         }
         ksort($found);
+        ksort($linked);
 
-        return $found;
+        return [$found, $linked];
+    }
+
+    /** Whether a scan of $realRoot reads the files of the directory $real: under the root, and under no directory a scan skips. */
+    private static function scanReads(string $real, string $realRoot): bool
+    {
+        return str_starts_with($real . '/', $realRoot . '/')
+            && array_intersect(explode('/', substr($real, strlen($realRoot))), FileScanner::EXCLUDED_DIRS) === [];
+    }
+
+    /**
+     * Whether a directory link to $real leads to files the fingerprint has to
+     * read. Not one into what the scan reads: those files are read at their
+     * real path. Not one to a directory the root is under either (a link to
+     * /): it leads to the whole project again, and to everything beside it.
+     */
+    private static function isOutOfScan(string $real, string $realRoot): bool
+    {
+        return !self::scanReads($real, $realRoot) && !str_starts_with($realRoot . '/', rtrim($real, '/') . '/');
+    }
+
+    /**
+     * The directory links under $dir, as the scan meets them: it enters no
+     * linked directory, none of {@see FileScanner::EXCLUDED_DIRS}, and none it
+     * cannot list, so no link is looked for behind those.
+     *
+     * @param list<string> $links
+     */
+    private static function directoryLinksIn(string $dir, array &$links): void
+    {
+        $entries = @scandir($dir);
+        foreach ($entries === false ? [] : $entries as $entry) {
+            $path = $dir . '/' . $entry;
+            if ($entry === '.' || $entry === '..' || in_array($entry, FileScanner::EXCLUDED_DIRS, true) || !is_dir($path)) {
+                continue;
+            }
+            if (is_link($path)) {
+                $links[] = $path;
+            } else {
+                self::directoryLinksIn($path, $links);
+            }
+        }
     }
 
     /**
@@ -141,16 +223,20 @@ final class InstalledPackages
      * hides nothing, PHP can load no class from it, and it is hashed by where
      * it points: one dangling link must not stop every graph command.
      *
+     * @param array<string, true> $visited real paths of the directories entered so far, $dir among them
+     * @param int $limit how many directories $visited may come to hold; the ones past it are not entered
+     * @param string|null $scannedRoot the real project root, when $dir is behind a link of a scanned package: a link from there
+     *                                 back into what the scan reads, or to a directory the root is under, is not followed
+     *
      * @throws \RuntimeException when a file or a directory of it cannot be read
      */
-    private static function contentOf(string $dir): string
+    private static function contentOf(string $dir, array &$visited, int $limit = PHP_INT_MAX, ?string $scannedRoot = null): string
     {
         if ($dir === '') {
             return '';
         }
         $files = [];
-        $visited = [$dir => true];
-        self::phpFilesIn($dir, $dir, $visited, $files);
+        self::phpFilesIn($dir, $dir, $visited, $files, $limit, $scannedRoot);
         ksort($files);
         $context = hash_init('xxh3');
         foreach ($files as $file => $dangling) {
@@ -172,13 +258,15 @@ final class InstalledPackages
      * its real path, so a link back to a parent ends there. A link is followed
      * wherever it points, outside the package too: a link to /usr is walked,
      * and one to / stops at the first system directory it cannot search.
+     * Past $limit entered directories no further one is entered, and with
+     * $scannedRoot none the scan of that root reads, or that the root is under.
      *
      * @param array<string, true> $visited real paths of the directories entered
      * @param array<string, bool> $files path => whether it is a link to a file that is not there
      *
      * @throws \RuntimeException when a directory cannot be listed or searched, or a link leads behind one that cannot
      */
-    private static function phpFilesIn(string $package, string $dir, array &$visited, array &$files): void
+    private static function phpFilesIn(string $package, string $dir, array &$visited, array &$files, int $limit = PHP_INT_MAX, ?string $scannedRoot = null): void
     {
         $entries = @scandir($dir);
         // Listed and not searchable (r--): every entry would look absent.
@@ -192,9 +280,9 @@ final class InstalledPackages
             $path = $dir . '/' . $entry;
             if (is_dir($path)) {
                 $real = in_array($entry, FileScanner::EXCLUDED_DIRS, true) ? false : realpath($path);
-                if ($real !== false && !isset($visited[$real])) {
+                if ($real !== false && !isset($visited[$real]) && count($visited) < $limit && ($scannedRoot === null || self::isOutOfScan($real, $scannedRoot))) {
                     $visited[$real] = true;
-                    self::phpFilesIn($package, $path, $visited, $files);
+                    self::phpFilesIn($package, $path, $visited, $files, $limit, $scannedRoot);
                 }
                 continue;
             }
