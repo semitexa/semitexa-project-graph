@@ -298,7 +298,7 @@ final class IncrementalEngine
         // materialised every inbound edge for nothing — +26 MB, the build
         // peaking at 113 MB of a 128 MB limit (round 2).
         if (!$fresh) {
-            $this->reextractConstantDependents($projectRoot, array_keys($declaredInChanged), $processed, $totals, $errors, $keepEdgeLists);
+            $this->reextractDependents($projectRoot, array_keys($declaredInChanged), $processed, $totals, $errors, $keepEdgeLists);
         }
         $this->repairOrphanedDeclarations($projectRoot, $totals, $errors, $keepEdgeLists);
         $this->storage->nodes->reconcileResourceRoles();
@@ -449,6 +449,9 @@ final class IncrementalEngine
     }
 
     /**
+     * What a file's facts were read from besides the file itself, when that
+     * changes.
+     *
      * An attribute argument can be another class's constant —
      * `#[AsPublicPayload(path: Routes::ORDERS)]` — and its value is read at
      * extraction time. Change the constant and only Routes.php was re-read, so
@@ -456,18 +459,44 @@ final class IncrementalEngine
      * (measured 2026-10-02). Files whose classes read a constant of a class
      * declared in a changed file are re-read too.
      *
+     * So are the files that carry an attribute whose class, or a class it
+     * inherits from, is declared in a changed file: extractors ask the
+     * attribute OBJECT ({@see \Semitexa\ProjectGraph\Application\Service\Parser\ParsedAttribute::newInstance()}),
+     * so the attribute class is part of what its user means. Edit AsCrud in a
+     * path repository under the project root, or an attribute class of the
+     * project's own, and every screen kept the old permission slug until a full
+     * build (tk-graph-refresh-misses-loaded-class-changes). In every round,
+     * not only for the files that changed on disk: an attribute class whose
+     * constructor default is a constant of another class
+     * (AsCrud's paginationMode = CollectionPaginationPolicy::MODE_PAGE) is
+     * re-read as a reader of that constant, and what it gives its users has
+     * changed with it.
+     *
+     * Not reached: what an attribute class calls in another file that it
+     * neither inherits from nor reads a constant of; the class of an object an
+     * argument constructs (`#[Feed(paging: new FeedPaging())]`: the user has
+     * no annotated_with edge to FeedPaging, and its defaults are not read);
+     * and a process that loaded the class before the edit
+     * (ai:review-graph:watch) — PHP cannot load it again, so a full build there
+     * reads the old class as well.
+     *
      * @param list<string>        $changedClassIds
      * @param array<string, true> $processed files already re-read in this run
      * @param array{nodes: array<string, int>, edges: array<string, int>, addedEdges: array<string, \Semitexa\ProjectGraph\Domain\Model\Edge>, removedEdges: array<string, \Semitexa\ProjectGraph\Domain\Model\Edge>} $totals
      * @param list<array{file: string, message: string}> $errors
      */
-    private function reextractConstantDependents(string $projectRoot, array $changedClassIds, array $processed, array &$totals, array &$errors, bool $keepEdgeLists): void
+    private function reextractDependents(string $projectRoot, array $changedClassIds, array $processed, array &$totals, array &$errors, bool $keepEdgeLists): void
     {
         // To a fixed point: Holder::K = Routes::ORDERS is two hops, and the
-        // payload reading Holder::K changes when Routes does (round 2).
+        // payload reading Holder::K changes when Routes does (round 2). So is an
+        // attribute class that reads Routes::ORDERS, and then its users.
         for ($round = 0; $round < 10 && $changedClassIds !== []; $round++) {
             $files = [];
-            foreach ($this->storage->edges->sourceFilesReadingConstantsOf($changedClassIds) as $file) {
+            $dependents = [
+                ...$this->storage->edges->sourceFilesReadingConstantsOf($changedClassIds),
+                ...$this->storage->edges->sourceFilesAnnotatedWith($changedClassIds),
+            ];
+            foreach ($dependents as $file) {
                 if (!isset($processed[$file]) && is_file($file)) {
                     $files[$file] = true;
                 }
@@ -476,19 +505,23 @@ final class IncrementalEngine
                 return;
             }
 
-            $batch = [];
-            $indexUpdates = [];
             $changedClassIds = [];
-            foreach (array_keys($files) as $path) {
-                $processed[$path] = true;
-                $batch[$path] = $this->extractFile($projectRoot, $path, $errors);
-                $hash = hash_file('xxh3', $path);
-                $indexUpdates[$path] = $hash === false ? null : $hash;
-                foreach ($batch[$path]->declaredClasses as $fqcn) {
-                    $changedClassIds[] = NodeId::forClass($fqcn);
+            // In batches: the users of one framework attribute (AsPayloadHandler)
+            // are hundreds of files on the workspace.
+            foreach (array_chunk(array_keys($files), self::BATCH_SIZE) as $paths) {
+                $batch = [];
+                $indexUpdates = [];
+                foreach ($paths as $path) {
+                    $processed[$path] = true;
+                    $batch[$path] = $this->extractFile($projectRoot, $path, $errors);
+                    $hash = hash_file('xxh3', $path);
+                    $indexUpdates[$path] = $hash === false ? null : $hash;
+                    foreach ($batch[$path]->declaredClasses as $fqcn) {
+                        $changedClassIds[] = NodeId::forClass($fqcn);
+                    }
                 }
+                $this->applyBatch($batch, $indexUpdates, $totals, $errors, $keepEdgeLists);
             }
-            $this->applyBatch($batch, $indexUpdates, $totals, $errors, $keepEdgeLists);
         }
     }
 

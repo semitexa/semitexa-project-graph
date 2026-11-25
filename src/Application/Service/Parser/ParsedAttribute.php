@@ -77,7 +77,7 @@ final readonly class ParsedAttribute
         $arguments = $this->getArguments();
 
         try {
-            // verify:accept-cross-file-read dynamic-new InstalledPackagesRefreshTest::a_refresh_after_the_installed_packages_change_leaves_what_a_full_build_would runs the attribute class: one of an installed package changes with installed.json, which makes the next refresh a full build. Not covered: an attribute class in a path repository or in the project (tk-graph-refresh-misses-loaded-class-changes)
+            // verify:accept-cross-file-read dynamic-new LoadedAttributeClassRefreshTest::a_refresh_after_an_attribute_class_changes_leaves_what_a_full_build_would runs the attribute class: when the file declaring it, or a class it inherits from, changes, the engine reads the files annotated with it again; a class of an installed package changes with installed.json, and a path repository the scan skips is in the fingerprint by content (InstalledPackages)
             return new $class(...$arguments);
         } catch (\TypeError $e) {
             if (!self::carriesAstReading($arguments)) {

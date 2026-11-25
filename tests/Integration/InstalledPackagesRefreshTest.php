@@ -135,6 +135,62 @@ final class InstalledPackagesRefreshTest extends TestCase
         }
         self::assertInstanceOf(\RuntimeException::class, $thrown, 'a vendor linked out of reach gave a fingerprint (composer.lock\'s)');
         self::assertStringStartsWith("Cannot search {$outside}/private for {$installed}, ", $thrown->getMessage());
+
+        // A path repository the scan does not read is in the fingerprint by
+        // content (tk-graph-refresh-misses-loaded-class-changes): a file or a
+        // directory of it that cannot be read may hold anything.
+        $package = $fixture->path('vendor/acme/screens');
+        mkdir($package . '/src', 0o755, true);
+        file_put_contents($package . '/src/Screen.php', "<?php\n");
+        $fixture->write(self::INSTALLED, (string) json_encode(['packages' => [[
+            'name' => 'acme/screens',
+            'dist' => ['type' => 'path', 'url' => $package, 'reference' => str_repeat('a', 40)],
+            'install-path' => '../acme/screens',
+        ]]]));
+        $readable = InstalledPackages::fingerprint($fixture->root);
+        self::assertNotSame('', $readable);
+        self::assertNotSame(hash_file('xxh3', $installed), $readable);
+        // A link to a file, and the package itself, behind a directory that
+        // cannot be searched: there, not dangling and not gone (review, project-graph#45).
+        mkdir($outside . '/private', 0o755, true);
+        file_put_contents($outside . '/private/Hidden.php', "<?php\n");
+        symlink($outside . '/private/Hidden.php', $package . '/src/Linked.php');
+        $linked = InstalledPackages::fingerprint($fixture->root);
+        self::assertNotSame('', $linked);
+        self::assertNotSame($readable, $linked, 'a link to a file that can be read is the file');
+        foreach ([
+            $package . '/src/Screen.php' => "Cannot read {$package}/src/Screen.php, ",
+            $package . '/src' => "Cannot read the path repository {$package} (",
+            $outside . '/private' => "Cannot search {$outside}/private for what {$package}/src/Linked.php links to, ",
+        ] as $closed => $message) {
+            $mode = fileperms($closed) & 0o777;
+            chmod($closed, 0000);
+            $thrown = null;
+            try {
+                InstalledPackages::fingerprint($fixture->root);
+            } catch (\RuntimeException $e) {
+                $thrown = $e;
+            } finally {
+                chmod($closed, $mode);
+            }
+            self::assertInstanceOf(\RuntimeException::class, $thrown, "{$closed} at 0000 gave a fingerprint");
+            self::assertStringStartsWith($message, $thrown->getMessage());
+        }
+        unlink($package . '/src/Linked.php');
+        rename($package, $outside . '/private/screens');
+        symlink($outside . '/private/screens', $package);
+        $thrown = null;
+        try {
+            chmod($outside . '/private', 0000);
+            InstalledPackages::fingerprint($fixture->root);
+        } catch (\RuntimeException $e) {
+            $thrown = $e;
+        } finally {
+            chmod($outside . '/private', 0o755);
+            exec('rm -rf ' . escapeshellarg($outside));
+        }
+        self::assertInstanceOf(\RuntimeException::class, $thrown, 'a path repository linked out of reach read as one that is gone');
+        self::assertStringStartsWith("Cannot search {$outside}/private for the path repository " . dirname($installed) . '/../acme/screens (acme/screens), ', $thrown->getMessage());
     }
 
     /** A vendor that is a dangling link is no install, as no vendor is: the lock file stands in (review, project-graph#43). */

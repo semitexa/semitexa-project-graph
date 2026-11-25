@@ -130,7 +130,7 @@ final class AttributeArgumentEvaluator
             // and constant() on a name without "::" never autoload a class.
             $name = $expr->name->toString();
             if (defined($name)) {
-                // verify:accept-cross-file-read class-probe IncrementalRefreshIntegrityTest::a_refresh_after_touching_every_file_one_by_one_equals_a_full_build a global constant by its plain name, which never autoloads; PHP defines nearly all of them. Not covered: one the project sets with define() in another file (tk-graph-refresh-misses-loaded-class-changes)
+                // verify:accept-cross-file-read class-probe IncrementalRefreshIntegrityTest::a_refresh_after_touching_every_file_one_by_one_equals_a_full_build a global constant by its plain name, which never autoloads; PHP defines nearly all of them. Not covered, a known limit (InstalledPackages): one the project sets with define() in another file keeps its old value in unchanged files until a full build
                 return constant($name);
             }
         }
