@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\ProjectGraph\Tests\Integration;
 
+use PHPUnit\Framework\AssertionFailedError;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -100,32 +101,93 @@ final class RootIndependenceTest extends TestCase
     /**
      * Every findings and impact report of the package, as the commands ask for it.
      *
-     * @return array<string, \Closure(GraphFixture): mixed>
+     * Beside each: what it must say about this fixture before two runs are
+     * worth comparing. Two empty reports are equal at any root. `holds` names
+     * the places (keys joined by a dot) that must be a list or map with
+     * something in it, a count above zero or a text that is not empty; `is`
+     * names the places that must be exactly a value.
+     *
+     * @return array<string, array{report: \Closure(GraphFixture): mixed, holds: list<string>, is?: array<int|string, mixed>}>
      */
     private static function reports(): array
     {
+        $coverage = ['coverage.gaps', 'coverage.relevant', 'coverage.relevant_total', 'text.1'];
+        $impact = ['changed', 'impacted', 'total', 'by_depth', 'context', 'coverage.coverage.relevant'];
+
         return [
             // ai:review-graph:findings --kind=all, down to the low confidence
-            'findings: unused and cycles' => static fn (GraphFixture $f): array => (new FindingsReport())->collect($f->storage, 'all', UnusedClassFinder::LOW),
-            'findings: one module' => static fn (GraphFixture $f): array => (new FindingsReport())->collect($f->storage, 'all', UnusedClassFinder::LOW, 'Shop'),
+            'findings: unused and cycles' => [
+                'report' => static fn (GraphFixture $f): array => (new FindingsReport())->collect($f->storage, 'all', UnusedClassFinder::LOW),
+                'holds' => ['unused', 'cycles', 'coverage.gaps'],
+            ],
+            'findings: one module' => [
+                'report' => static fn (GraphFixture $f): array => (new FindingsReport())->collect($f->storage, 'all', UnusedClassFinder::LOW, 'Shop'),
+                // The shop has no loop: the one of the fixture is Cycle\Ping and Pong, in no module.
+                'holds' => ['unused', 'coverage.gaps'],
+            ],
             // ai:review-graph:findings --kind=flows
-            'findings: flow gaps' => static fn (GraphFixture $f): array => (new FlowGapReport())->collect(new GraphQueryService($f->storage), null, TestCode::of($f->storage)),
-            'findings: flow gaps, test code counted in' => static fn (GraphFixture $f): array => (new FlowGapReport())->collect(new GraphQueryService($f->storage)),
+            'findings: flow gaps' => [
+                'report' => static fn (GraphFixture $f): array => (new FlowGapReport())->collect(new GraphQueryService($f->storage), null, TestCode::of($f->storage)),
+                'holds' => ['findings', 'flows.total', 'flows.incomplete', 'flows.by_gap', 'flows.test_flows_skipped'],
+            ],
+            'findings: flow gaps, test code counted in' => [
+                'report' => static fn (GraphFixture $f): array => (new FlowGapReport())->collect(new GraphQueryService($f->storage)),
+                'holds' => ['findings', 'flows.total', 'flows.incomplete', 'flows.by_gap'],
+            ],
             // ai:review-graph:findings --kind=ui
-            'findings: ui flow gaps' => static fn (GraphFixture $f): array => (new UiFlowGapReport())->collect($f->storage, null, TestCode::of($f->storage)),
-            'findings: ui flow gaps, test code counted in' => static fn (GraphFixture $f): array => (new UiFlowGapReport())->collect($f->storage),
+            'findings: ui flow gaps' => [
+                'report' => static fn (GraphFixture $f): array => (new UiFlowGapReport())->collect($f->storage, null, TestCode::of($f->storage)),
+                'holds' => ['findings', 'accepted', 'summary.pages', 'summary.ways', 'summary.post_payloads', 'summary.by_rule', 'summary.test_code_skipped'],
+            ],
+            'findings: ui flow gaps, test code counted in' => [
+                'report' => static fn (GraphFixture $f): array => (new UiFlowGapReport())->collect($f->storage),
+                'holds' => ['findings', 'accepted', 'summary.pages', 'summary.ways', 'summary.post_payloads', 'summary.by_rule'],
+            ],
             // the coverage line every answer carries, as data and as the text the commands print
-            'coverage: summary' => static fn (GraphFixture $f): array => (new CoverageReport($f->storage))->summary(),
-            'coverage: for a class' => static fn (GraphFixture $f): array => self::coverageOf($f, [GraphFixture::classId('Orphan\\NobodyUsesMe')]),
-            'coverage: for a template file' => static fn (GraphFixture $f): array => self::coverageOf($f, [UiFlowProject::template($f, 'layout.html.twig')]),
+            'coverage: summary' => [
+                'report' => static fn (GraphFixture $f): array => (new CoverageReport($f->storage))->summary(),
+                'holds' => ['gaps', 'gaps.parse_error', 'gaps.dynamic_reference'],
+            ],
+            'coverage: for a class' => [
+                'report' => static fn (GraphFixture $f): array => self::coverageOf($f, [GraphFixture::classId('Orphan\\NobodyUsesMe')]),
+                'holds' => $coverage,
+            ],
+            'coverage: for a template file' => [
+                'report' => static fn (GraphFixture $f): array => self::coverageOf($f, [UiFlowProject::template($f, 'layout.html.twig')]),
+                'holds' => $coverage,
+            ],
             // ai:review-graph:impact <class>, <file> and --context
-            'impact: a class' => static fn (GraphFixture $f): array => self::impactOf($f, GraphFixture::classId('Orders\\OrderRepository')),
-            'impact: a payload of the shop' => static fn (GraphFixture $f): array => self::impactOf($f, UiFlowProject::payload('OrdersResource')),
-            'impact: a template file' => static fn (GraphFixture $f): array => self::impactOf($f, UiFlowProject::template($f, 'layout.html.twig')),
-            // ai:review-graph:ui-flow, the reading side of the ui findings
-            'ui flow: overview' => static fn (GraphFixture $f): array => ReviewGraphUiFlowCommand::answer($f->storage, null, null),
-            'ui flow: one module' => static fn (GraphFixture $f): array => ReviewGraphUiFlowCommand::answer($f->storage, null, 'Shop'),
-            'ui flow: one screen' => static fn (GraphFixture $f): array => ReviewGraphUiFlowCommand::answer($f->storage, '/orders', null),
+            'impact: a class' => [
+                'report' => static fn (GraphFixture $f): array => self::impactOf($f, GraphFixture::classId('Orders\\OrderRepository')),
+                'holds' => $impact,
+            ],
+            'impact: a class of the shop' => [
+                'report' => static fn (GraphFixture $f): array => self::impactOf($f, UiFlowProject::payload('OrdersResource')),
+                'holds' => [...$impact, 'modules.Shop'],
+            ],
+            'impact: a template file' => [
+                'report' => static fn (GraphFixture $f): array => self::impactOf($f, UiFlowProject::template($f, 'layout.html.twig')),
+                // No edge of the graph points at a file node, so nothing is affected: what
+                // this answer holds is the id made of an absolute path, and its coverage.
+                'holds' => ['changed', 'context', 'coverage.coverage.relevant'],
+                'is' => ['total' => 0],
+            ],
+            // ai:review-graph:ui-flow, the reading side of the ui findings; [exit code, body]
+            'ui flow: overview' => [
+                'report' => static fn (GraphFixture $f): array => ReviewGraphUiFlowCommand::answer($f->storage, null, null),
+                'holds' => ['1.modules', '1.totals.screens', '1.totals.ways'],
+                'is' => ['0' => 0, '1.kind' => 'ui_flow', '1.view' => 'overview', '1.status' => 'ok'],
+            ],
+            'ui flow: one module' => [
+                'report' => static fn (GraphFixture $f): array => ReviewGraphUiFlowCommand::answer($f->storage, null, 'Shop'),
+                'holds' => ['1.screens', '1.wires', '1.endpoints'],
+                'is' => ['0' => 0, '1.kind' => 'ui_flow', '1.view' => 'module', '1.status' => 'ok', '1.module' => 'Shop'],
+            ],
+            'ui flow: one screen' => [
+                'report' => static fn (GraphFixture $f): array => ReviewGraphUiFlowCommand::answer($f->storage, '/orders', null),
+                'holds' => ['1.templates', '1.elements', '1.out', '1.in'],
+                'is' => ['0' => 0, '1.kind' => 'ui_flow', '1.view' => 'screen', '1.status' => 'ok', '1.screen.path' => '/orders'],
+            ],
         ];
     }
 
@@ -141,14 +203,41 @@ final class RootIndependenceTest extends TestCase
     #[DataProvider('reportNames')]
     public function a_report_is_the_same_bytes_at_either_root(string $name): void
     {
-        $report = self::reports()[$name];
+        $case = self::reports()[$name];
         [$short, $long] = self::$fixtures;
 
-        $atShort = self::rootFree($report($short), $short->root);
-        $atLong = self::rootFree($report($long), $long->root);
+        $said = $case['report']($short);
+        self::assertSaysSomething($name, $said, $case['holds'], $case['is'] ?? []);
 
-        self::assertGreaterThan(40, strlen($atShort), 'the report says something about the fixture, so there is something to compare');
-        self::assertSame($atShort, $atLong, $name . ' differs with the project root: an id, a hash, a count or an order is made from an absolute path');
+        self::assertSame(
+            self::rootFree($said, $short->root),
+            self::rootFree($case['report']($long), $long->root),
+            $name . ' differs with the project root: an id, a hash, a count or an order is made from an absolute path',
+        );
+    }
+
+    /**
+     * The proof that an empty report cannot pass by being equal to another
+     * empty one: each real report with every list emptied, every count
+     * zeroed and every text blanked, keys kept, is refused before any
+     * comparison. A flow report of no flows is still a map of zero counts, the same
+     * at both roots.
+     */
+    #[Test]
+    #[DataProvider('reportNames')]
+    public function a_report_that_says_nothing_is_refused(string $name): void
+    {
+        $case = self::reports()[$name];
+        $emptied = self::emptied($case['report'](self::$fixtures[0]));
+
+        try {
+            self::assertSaysSomething($name, $emptied, $case['holds'], $case['is'] ?? []);
+        } catch (AssertionFailedError) {
+            $this->addToAssertionCount(1);
+
+            return;
+        }
+        self::fail($name . ' with nothing in it was taken for a report worth comparing');
     }
 
     #[Test]
@@ -165,8 +254,8 @@ final class RootIndependenceTest extends TestCase
     public function the_reports_do_carry_paths_so_the_placeholder_has_work_to_do(): void
     {
         $withRoot = 0;
-        foreach (self::reports() as $report) {
-            $withRoot += str_contains(self::canonical($report(self::$fixtures[0])), self::$fixtures[0]->root) ? 1 : 0;
+        foreach (self::reports() as $case) {
+            $withRoot += str_contains(self::canonical($case['report'](self::$fixtures[0])), self::$fixtures[0]->root) ? 1 : 0;
         }
 
         self::assertGreaterThanOrEqual(5, $withRoot, 'reports that print a path of the project');
@@ -239,6 +328,59 @@ final class RootIndependenceTest extends TestCase
             'coverage' => self::coverageOf($fixture, [$nodeId]),
             'context' => (new ContextPacker(new RelevanceScorer(), new SourceSnippetLoader()))->pack($impact)->toMarkdown(),
         ];
+    }
+
+    /**
+     * @param list<string> $holds
+     * @param array<int|string, mixed> $is a place made of digits alone arrives as an int key
+     */
+    private static function assertSaysSomething(string $name, mixed $report, array $holds, array $is): void
+    {
+        self::assertNotSame([], $holds, $name . ' names what it must hold');
+        foreach ($holds as $place) {
+            $value = self::at($report, $place);
+            self::assertTrue(
+                (is_array($value) && $value !== []) || (is_int($value) && $value > 0) || (is_string($value) && $value !== ''),
+                sprintf('%s: "%s" holds nothing (%s), so two roots would agree on an empty report', $name, $place, json_encode($value, JSON_UNESCAPED_SLASHES | JSON_PARTIAL_OUTPUT_ON_ERROR)),
+            );
+        }
+        foreach ($is as $place => $expected) {
+            self::assertSame($expected, self::at($report, (string) $place), sprintf('%s: "%s"', $name, $place));
+        }
+    }
+
+    /** The value at keys joined by a dot, null where the report has no such place. */
+    private static function at(mixed $report, string $place): mixed
+    {
+        foreach (explode('.', $place) as $key) {
+            if (!is_array($report) || !array_key_exists($key, $report)) {
+                return null;
+            }
+            $report = $report[$key];
+        }
+
+        return $report;
+    }
+
+    /** The same shape with nothing in it: lists emptied, counts zeroed, texts blanked. */
+    private static function emptied(mixed $value): mixed
+    {
+        return match (true) {
+            is_array($value) => array_is_list($value) && !self::isAnswer($value) ? [] : array_map(self::emptied(...), $value),
+            is_int($value) => 0,
+            is_string($value) => '',
+            default => $value,
+        };
+    }
+
+    /**
+     * The [exit code, body] pair of a command's answer: a list whose shape is kept.
+     *
+     * @param array<mixed> $value
+     */
+    private static function isAnswer(array $value): bool
+    {
+        return count($value) === 2 && is_int($value[0] ?? null) && is_array($value[1] ?? null);
     }
 
     /** The report with this run's own root replaced: what must not differ between two roots. */
