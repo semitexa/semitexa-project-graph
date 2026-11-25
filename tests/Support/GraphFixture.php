@@ -38,9 +38,9 @@ final class GraphFixture
     private readonly GraphTestStore $store;
     private readonly IncrementalEngine $engine;
 
-    private function __construct(bool $withBrokenFile)
+    private function __construct(bool $withBrokenFile, ?string $root = null)
     {
-        $this->root = sys_get_temp_dir() . '/semitexa-graph-fixture-' . bin2hex(random_bytes(6));
+        $this->root = $root ?? sys_get_temp_dir() . '/semitexa-graph-fixture-' . bin2hex(random_bytes(6));
         self::copyTree(self::SOURCE, $this->root);
 
         if ($withBrokenFile) {
@@ -62,6 +62,17 @@ final class GraphFixture
     public static function create(bool $withBrokenFile = false): self
     {
         return new self($withBrokenFile);
+    }
+
+    /**
+     * A fresh copy at a root the test chooses, not yet scanned: for what must
+     * not depend on where the project sits (RootIndependenceTest). The
+     * directory must not exist; only it is removed afterwards, a parent the
+     * test made is the test's to remove.
+     */
+    public static function at(string $root, bool $withBrokenFile = false): self
+    {
+        return new self($withBrokenFile, rtrim($root, '/'));
     }
 
     /** Copy and scan in one step. */
@@ -142,9 +153,7 @@ final class GraphFixture
      */
     public function edgeLines(): array
     {
-        $rows = $this->store->adapter
-            ->execute('SELECT type, source_id, target_id FROM graph_edges')
-            ->fetchAll();
+        $rows = $this->rows('SELECT type, source_id, target_id FROM graph_edges');
 
         $lines = array_map(
             static fn (array $row): string => $row['type'] . ' ' . $row['source_id'] . ' -> ' . $row['target_id'],
@@ -163,9 +172,7 @@ final class GraphFixture
      */
     public function nodeLines(): array
     {
-        $rows = $this->store->adapter
-            ->execute('SELECT id, type, file, is_placeholder FROM graph_nodes')
-            ->fetchAll();
+        $rows = $this->rows('SELECT id, type, file, is_placeholder FROM graph_nodes');
 
         $lines = array_map(
             fn (array $row): string => $row['id'] . ' ' . $row['type'] . ' '
@@ -176,6 +183,15 @@ final class GraphFixture
         sort($lines);
 
         return $lines;
+    }
+
+    /** @return list<array<string, string|int|null>> */
+    private function rows(string $sql): array
+    {
+        /** @var list<array<string, string|int|null>> $rows */
+        $rows = $this->store->adapter->execute($sql)->fetchAll();
+
+        return $rows;
     }
 
     public function hasEdge(EdgeType $type, string $sourceId, string $targetId): bool
